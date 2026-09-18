@@ -51,3 +51,10 @@ Submit a replication package that allows someone to reproduce and verify your da
 
 **Default Evaluation**: If a team member does not submit their peer evaluation, the system will automatically assign equal points (100 points per member) for that evaluation.
 
+
+## Section for Team notes on Delivery 1 assignment:
+ * ...
+ * ...
+ * ...
+ * 
+
