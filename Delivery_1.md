@@ -1,8 +1,11 @@
 # Delivery 1 - Research Design and Data Preparation
 
 Due: Oct 7 by 11:59pm
+
 Points: 100
+
 Submitting a file upload
+
 Available Sep 14 at 1pm - Oct 9 at 11:59pm
 
 Each team selected has a project, which has a research question. For this delivery, your goal is to **define exactly how you will answer the RQ and prepare the Zephyr data needed for the analysis**.
