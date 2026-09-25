@@ -8,6 +8,9 @@ Submitting a file upload
 
 Available Sep 14 at 1pm - Oct 9 at 11:59pm
 
+## Group Google doc 
+https://docs.google.com/document/d/1gF5zaJzfOTa782Pdd4lW5srPecdmV06PBWzUMufsVDQ/edit?usp=sharing 
+
 ## Deliverables
 ### 1. Research Design Notes 
  * ...
