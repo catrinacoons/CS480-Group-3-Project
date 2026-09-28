@@ -1,4 +1,5 @@
 import pandas as pd 
+import statistics
 
 from pydriller import Repository 
 from datetime import datetime, timezone
@@ -8,15 +9,66 @@ zephyr_path = "../zephyr" # make sure that you clone this repo and the zephyr re
 startdate = datetime(2022, 9, 21, tzinfo=timezone.utc)
 enddate = datetime(2026, 9, 21, tzinfo=timezone.utc)
 
-commits = {}
+# below is code copied from assignment 1 -- if some of this does not work with our assignment, feel free to take it out!
+commits = []
+all_authors = [] 
+files_changed_values = [] 
+additions_values = [] 
+deletions_values = []
 
-for commit in Repository(zephyr_path, since=startdate, to=enddate):
+for commit in Repository(zephyr_path, since=startdate, to=enddate).traverse_commits():
+
+	if commit.merge:
+		continue
+
+	if commit.committer_date < startdate or commit.committer_date > enddate:
+		continue
+
+	files_changed = len(commit.modified_files)
+	
+	additions = 0
+	deletions = 0
+
+	for i in commit.modified_files:
+		if i.added_lines is not None:
+			additions += i.added_lines
+		if i.deleted_lines is not None:
+			deletions += i.deleted_lines
+	
 	commit_data = {
-		"author": commit.author.name,
-		"hash": commit.hash,
-		"email": commit.author.email,
-		"date": commit.committer_date,
-		"message": commit.msg
+		"sha": commit.hash,
+		"author_name": commit.author.name,
+		"committer_date": commit.committer_date.isoformat(),
+		"files_changed": files_changed,
+		"additions": additions,
+		"deletions": deletions,
 	}
 
 	commits.append(commit_data)
+
+for row in commits:
+	all_authors.append(row["author_name"])
+	files_changed_values.append(row["files_changed"])
+	additions_values.append(row["additions"])
+	deletions_values.append(row["deletions"])
+
+num_commits = len(commit_data)
+num_authors = len(set(all_authors))
+median_files_changed = statistics.median(files_changed_values)
+total_additions = sum(additions_values)
+total_deletions = sum(deletions_values)
+
+pydriller_summary = {
+	"num_commits": num_commits,
+    "num_authors": num_authors,
+    "median_files_changed": median_files_changed,
+    "total_additions": total_additions,
+    "total_deletions": total_deletions,
+}
+
+provenance = {
+	"repository": "zephyrproject-rtos/zephyr",
+    "start_utc": startdate.isoformat().replace("+00:00", "Z"),
+    "end_utc": enddate.isoformat().replace("+00:00", "Z"),
+    "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+}
