@@ -65,10 +65,3 @@ pydriller_summary = {
     "total_additions": total_additions,
     "total_deletions": total_deletions,
 }
-
-provenance = {
-	"repository": "zephyrproject-rtos/zephyr",
-    "start_utc": startdate.isoformat().replace("+00:00", "Z"),
-    "end_utc": enddate.isoformat().replace("+00:00", "Z"),
-    "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-}
