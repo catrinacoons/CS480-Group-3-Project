@@ -34,7 +34,8 @@ for commit in Repository(zephyr_path, since=startdate, to=enddate).traverse_comm
 			additions += i.added_lines
 		if i.deleted_lines is not None:
 			deletions += i.deleted_lines
-	
+
+	# review this and ensure it has all necessary info/no additional info
 	commit_data = {
 		"sha": commit.hash,
 		"author_name": commit.author.name,
@@ -42,10 +43,13 @@ for commit in Repository(zephyr_path, since=startdate, to=enddate).traverse_comm
 		"files_changed": files_changed,
 		"additions": additions,
 		"deletions": deletions,
+		"message": commit.msg,
+		"modifications": commit.modifications,
 	}
 
 	commits.append(commit_data)
 
+# update according to commit_data 
 for row in commits:
 	all_authors.append(row["author_name"])
 	files_changed_values.append(row["files_changed"])
