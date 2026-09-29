@@ -73,7 +73,7 @@ code to filter and clean the data in Python;
 code to construct derived variables and the final dataset in Python;
 raw data (CSV);
 the final analysis-ready dataset (CSV);
-a README explaining exactly how to run the pipeline (TXT.
+a README explaining exactly how to run the pipeline (TXT).
 The README should also report important checkpoints, for example: 
 
 Artifacts retrieved: N
