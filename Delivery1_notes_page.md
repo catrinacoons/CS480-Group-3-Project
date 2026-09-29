@@ -26,7 +26,7 @@ https://docs.google.com/document/d/1gF5zaJzfOTa782Pdd4lW5srPecdmV06PBWzUMufsVDQ/
 ### b. PyGithub Notes:
 * Started by AG; reviewed by JW - 10.28
 
-### b. Rough Meeting Notes:
+### c. Rough Meeting Notes:
 
 #### Mon 10.28 7pm meeting - Delivery 1 todos:
 - [ ] get data
