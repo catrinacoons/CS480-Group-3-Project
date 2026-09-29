@@ -1,4 +1,4 @@
-TOOD - 
+TODO - 
 [ ] write this README.txt file explaining exactly how to run the pipeline
 
 Notes: 
