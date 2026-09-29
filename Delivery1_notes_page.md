@@ -19,3 +19,5 @@ https://docs.google.com/document/d/1gF5zaJzfOTa782Pdd4lW5srPecdmV06PBWzUMufsVDQ/
 ### 2. Replication Package
  * ... 
     
+#### Pydriller notes -
+* See MSTeams General page for TA posting "Lab scripts: PyDriller, REST API and Exercise 1", includes pydriller01.py, exercise_rest.py, prlab.py, and rest_lab.py examples.
