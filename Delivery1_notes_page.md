@@ -20,15 +20,17 @@ https://docs.google.com/document/d/1gF5zaJzfOTa782Pdd4lW5srPecdmV06PBWzUMufsVDQ/
  * ... 
     
 ### a. Pydriller Notes:
-* See MSTeams General page for TA posting "Lab scripts: PyDriller, REST API and Exercise 1", includes pydriller01.py, exercise_rest.py, prlab.py, and rest_lab.py examples -JW 10.28
-* Started by AG; reviewed by CC - 10.28
+* See MSTeams General page for TA posting "Lab scripts: PyDriller, REST API and Exercise 1", includes pydriller01.py, exercise_rest.py, prlab.py, and rest_lab.py examples -JW 09.28
+* Started by AG; reviewed by CC - 09.28
 
 ### b. PyGithub Notes:
-* Started by AG; reviewed by JW - 10.28
+* Started by AG; reviewed by JW - 09.28
+* API and PyGithub completed by AF - 09.28
+* Rabbit implementations started by AF - 09.28
 
 ### c. Rough Meeting Notes:
 
-#### Mon 10.28 7pm meeting - Delivery 1 todos:
+#### Mon 09.28 7pm meeting - Delivery 1 todos:
 - [ ] get data
 - [ ] filter & clean data
 - [ ] construct derived variables dataset
