@@ -4,7 +4,9 @@ import statistics
 from pydriller import Repository 
 from datetime import datetime, timezone
 
-zephyr_path = "../zephyr" # make sure that you clone this repo and the zephyr repo under the same directory
+# make sure that you clone this repo and the zephyr repo under the same directory
+zephyr_path = "cd../zephyr"
+# then <git pull> and <git status> when in it to ensure you're up to date. 
 
 startdate = datetime(2022, 9, 21, tzinfo=timezone.utc)
 enddate = datetime(2026, 9, 21, tzinfo=timezone.utc)
@@ -36,6 +38,7 @@ for commit in Repository(zephyr_path, since=startdate, to=enddate).traverse_comm
 			deletions += i.deleted_lines
 
 	# review this and ensure it has all necessary info/no additional info
+	# edit: PyDriller (v2) uses commit.modified_files, not commit.modifications (v1), so "modifications" was removed.
 	commit_data = {
 		"sha": commit.hash,
 		"author_name": commit.author.name,
@@ -43,8 +46,7 @@ for commit in Repository(zephyr_path, since=startdate, to=enddate).traverse_comm
 		"files_changed": files_changed,
 		"additions": additions,
 		"deletions": deletions,
-		"message": commit.msg,
-		"modifications": commit.modifications,
+		"message": commit.msg 
 	}
 
 	commits.append(commit_data)
@@ -56,7 +58,8 @@ for row in commits:
 	additions_values.append(row["additions"])
 	deletions_values.append(row["deletions"])
 
-num_commits = len(commit_data)
+# edit: commits is the list, not commit_data
+num_commits = len(commits)
 num_authors = len(set(all_authors))
 median_files_changed = statistics.median(files_changed_values)
 total_additions = sum(additions_values)
