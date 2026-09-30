@@ -3,6 +3,7 @@ import statistics
 
 from pydriller import Repository 
 from datetime import datetime, timezone
+from genai_signals import detect_genai
 
 # make sure that you clone this repo and the zephyr repo under the same directory
 zephyr_path = "../zephyr"
@@ -24,16 +25,10 @@ def mine_commits():
 		if commit.committer_date < startdate or commit.committer_date > enddate:
 			continue
 
-		files_changed = len(commit.modified_files)
-		
-		additions = 0
-		deletions = 0
-
-		for i in commit.modified_files:
-			if i.added_lines is not None:
-				additions += i.added_lines
-			if i.deleted_lines is not None:
-				deletions += i.deleted_lines
+		# edit: this uses git's own stats instead of computing differences per file, this should be faster
+		files_changed = commit.files
+		additions = commit.insertions
+		deletions = commit.deletions
 
 		# review this and ensure it has all necessary info/no additional info
 		# edit: PyDriller (v2) uses commit.modified_files, not commit.modifications (v1), so "modifications" was removed.
@@ -47,6 +42,7 @@ def mine_commits():
 			"message": commit.msg 
 		}
 
+		commit_data.update(detect_genai(commit.msg))
 		commits.append(commit_data)
 	return commits
 
