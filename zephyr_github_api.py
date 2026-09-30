@@ -110,6 +110,12 @@ def commits_csv(rows, path="commits.csv", columns=CSV_COLUMNS):
         writer.writerows(rows)
 
 #TODO: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
+def rabbit_results_csv(rows, path="rabbit.csv"):
+    # named rabbit_results_csv as zephyr_mining.py has rabbit_csv reader already
+    # import rabbit 
+    # create users 
+    # open 
+    # return users
 
 # calculates the summary numbers for results.json
 def calculate_results(rows):
