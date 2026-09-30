@@ -4,18 +4,12 @@ import csv
 import json
 
 # this will use both pydriller and PyGithub files to create our results
+# zephyr_pydriller: commits + stats -> commits.csv
+# zephyr_github_api: issues/prs/comments -> threads.csv, comments.csv
+# unique thread/comment authors -> rabbit_users.csv (RABBIT input)
+# TODO: provenance.json to get settings and checkpoint counts
+# TODO - run RABBIT and save rabbit.csv
 
-# TODO - set up json result file(s) (???)
-#        - UPDATE: commit.csv exists in github_api and pydriller - rename or find a way to combine? 
-#          - (RABBIT requires contributor usernames, initalization began in github_api)
-#      - runs everything and writes to the following output files:
-#        - commits.csv -- done in github_api AND pydriller (TODO: review above)
-#        - results.json -- done in github_api
-#        - provenance.json -- done in github_api
-# TODO - define pydriller & rabbit execution; implement main
-
-
-# TODO: define pydriller execution
 
 
 def github_api():
@@ -37,7 +31,7 @@ def github_api():
     return rows
 
 # Reads commits.csv for rabbits_csv to prevent redundant remining
-def rabbit_csv(rows, path="commits.csv"):
+def rabbit_csv(rows, path="rabbit_users.csv"):
 # "r" = read    "w" = write     "a" = append
 # use "r" to read the commits file to prevent redundant information
 # then write to its own csv file
@@ -57,9 +51,29 @@ def pydriller_step():
     print(f"Commits found by PyDriller: {len(commits)}")
     return commits
 
+def github_api_conversations():
+    repo = zephyr_github_api.authenticate_token()
+    threads = zephyr_github_api.thread_data(repo)
+    comments = zephyr_github_api.comment_data(repo)
+    zephyr_github_api.commits_csv(threads, "threads.csv", zephyr_github_api.THREAD_COLUMNS)
+    zephyr_github_api.commits_csv(comments, "comments.csv", zephyr_github_api.COMMENT_COLUMNS)
+    print(f"Threads: {len(threads)}, comments: {len(comments)}")
+    return threads, comments
+
 # TODO: Edit main to execute each of the functions above
 def main():
     commits = pydriller_step()
+    threads, comments = github_api_conversations()
+    logins = sorted({r["author_login"] for r in threads + comments})
+    zephyr_github_api.commits_csv([{"contributor_username": u} for u in logins],
+                                  "rabbit_users.csv", ["contributor_username"])
+    print(f"Unique authors for RABBIT: {len(logins)}")
+    # TODO: run RABBIT on logins and save to rabbit.csv (using RABBIT_COLUMNS)
+    
+    #TODO: reuse existing provenance function, just add checkpoint counts
+
+
+
 # ensure that main runs automatically
 if __name__ == "__main__":
     main()
