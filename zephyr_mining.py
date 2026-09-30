@@ -45,14 +45,21 @@ def rabbit_csv(rows, path="commits.csv"):
     with open(path, "r", newline="", encoding="utf-8") as csv_file:
 # DictWriter changes each row to dictionary to ensure that it matches the columns required
 # fieldname makes sure the columns are in the correct order
-        return list(csv.DictWriter(csv_file))
+        return list(csv.DictReader(csv_file))
 
 
 # TODO: define rabbit execution (or call it if defined in github_api)
 
 
+def pydriller_step():
+    commits = zephyr_pydriller.mine_commits()
+    zephyr_github_api.commits_csv(commits, "commits.csv", zephyr_pydriller.PYDRILLER_COLUMNS)
+    print(f"Commits found by PyDriller: {len(commits)}")
+    return commits
+
 # TODO: Edit main to execute each of the functions above
 def main():
+    commits = pydriller_step()
 # ensure that main runs automatically
 if __name__ == "__main__":
     main()
