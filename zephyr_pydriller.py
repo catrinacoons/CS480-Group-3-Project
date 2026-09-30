@@ -10,10 +10,12 @@ zephyr_path = "../zephyr"
 # then <git pull> and <git status> when in it to ensure you're up to date. 
 
 startdate = datetime(2022, 9, 21, tzinfo=timezone.utc)
-enddate = datetime(2026, 9, 21, tzinfo=timezone.utc)
+enddate = datetime(2022, 9, 23, tzinfo=timezone.utc)
 
-# below is code copied from assignment 1 -- if some of this does not work with our assignment, feel free to take it out!
+# mines commits from local Zephyr clone and adds genai signal columns
 def mine_commits():
+	# print check for reassurance
+	print("Starting PyDriller traversal (this may take a while) ...")
 	commits = []
 
 
@@ -35,6 +37,7 @@ def mine_commits():
 		commit_data = {
 			"sha": commit.hash,
 			"author_name": commit.author.name,
+			"author_email": commit.author.email,
 			"committer_date": commit.committer_date.isoformat(),
 			"files_changed": files_changed,
 			"additions": additions,
@@ -44,6 +47,11 @@ def mine_commits():
 
 		commit_data.update(detect_genai(commit.msg))
 		commits.append(commit_data)
+
+		# print checkpoint for reassurance
+		if len(commits) % 500 == 0:
+			print(f"  ...{len(commits)} commits processed (latest: {commit.committer_date.date()})")
+
 	return commits
 
 
