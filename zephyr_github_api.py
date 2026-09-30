@@ -31,7 +31,7 @@ END = datetime(2026, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
 CSV_COLUMNS = [
     "sha",
     "author_name",
-    "contributor_user" #TODO: define this in commit_data
+    "contributor_user", #TODO: define this in commit_data
     "committer_date",
     "files_changed",
     "additions",
@@ -96,14 +96,14 @@ def commit_data(mined_data):
 
 
 # saves the commit list to commits.csv
-def commits_csv(rows, path="commits.csv"):
+def commits_csv(rows, path="commits.csv", columns=CSV_COLUMNS):
 # "r" = read    "w" = write     "a" = append
 # use "w" to overwrite the file upon each run to ensure that it's updated each time
 # encoding="utf-8" makes sure that the author names with weird characters are correct
     with open(path, "w", newline="", encoding="utf-8") as csv_file:
 # DictWriter changes each row to dictionary to ensure that it matches the columns required
 # fieldname makes sure the columns are in the correct order
-        writer = csv.DictWriter(csv_file, fieldnames=CSV_COLUMNS)
+        writer = csv.DictWriter(csv_file, fieldnames=columns)
 # writes the header rows (column names) as the first line
 # then writes the dictionary in one line rows per commit 
         writer.writeheader()
