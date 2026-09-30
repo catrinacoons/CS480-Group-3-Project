@@ -13,6 +13,9 @@ from datetime import datetime, timezone, timedelta
 # For setup, look at README.txt
 from github import Github, Auth
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # TODO: May have to update function names in this if errors occur in mining.py (due to duplicate function names)
 # TODO: AI tag search (for tag in zephyr repo)
 # TODO: See above and other # TODOs below - thank you! :)
