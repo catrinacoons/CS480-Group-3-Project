@@ -5,7 +5,7 @@ PATTERNS = {
     "ai_coauthor": re.compile(
         r"^\s*co-authored-by\s*:.*\b(claude|copilot|chatgpt|gemini|cursor|codex)\b.*$",
         re.I | re.M),
-    "ai.keyword": re.compile(
+    "ai_keyword": re.compile(
         r"\b(chatgpt|copilot|claude|gemini|llm|gpt-?\d\w*"
         r"|generated (?:by|with|using) (?:ai|an? llm))\b", re.I),
 }
