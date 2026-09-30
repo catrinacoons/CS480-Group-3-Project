@@ -9,15 +9,18 @@ import os
 import platform
 import statistics
 import argparse
+import time
 from datetime import datetime, timezone, timedelta
 # For setup, look at README.txt
 from github import Github, Auth
 
 from dotenv import load_dotenv
+from genai_signals import detect_genai
 load_dotenv()
 
 # TODO: May have to update function names in this if errors occur in mining.py (due to duplicate function names)
-# TODO: AI tag search (for tag in zephyr repo)
+
+# DONE: AI tag search lives in negai_signals (detect_genai)
 # TODO: See above and other # TODOs below - thank you! :)
 
 # parameters for mining
@@ -27,10 +30,11 @@ START_UTC_STR = "2022-09-21T00:00:00Z"
 END_UTC_STR = "2026-09-21T00:00:00Z"
 # timezone = tz
 START = datetime(2022, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
-END = datetime(2026, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
+END = datetime(2022, 9, 23, 0, 0, 0, tzinfo=timezone.utc)
 
 
 # parameters for csv - RABBIT needs the contributor's username
+# legacy commit columns (commits are mined by zephyr_pydriller.py )
 CSV_COLUMNS = [
     "sha",
     "author_name",
@@ -97,6 +101,78 @@ def commit_data(mined_data):
         })
     return rows
 
+THREAD_COLUMNS = [
+    "number", "kind", "title", "author_login", "author_type", "created_at",
+    "state", "labels", "comment_count", "body",
+    "genai_candidate", "signal_types", "matched_text",
+]
+COMMENT_COLUMNS = [
+    "thread_number", "comment_id", "comment_type", "author_login", "author_type",
+    "created_at", "body", "genai_candidate", "signal_types", "matched_text",
+]
+
+# deleted accounts come back as None, this is to handle that
+def user_info(user):
+    if user is None:
+        return "ghost", "Deleted"
+    return user.login, user.type
+
+# building the issue/PR data (the issues endpoint returns both)
+# TODO: needs extra work to ensure time window is collected correctly without stalling, need to review
+def thread_data(mined_data):
+    rows = []
+    data_found = mined_data.get_issues(state="all", since=START, sort="created", direction="asc")
+    for issue in data_found:
+        if issue.created_at > END:
+            break
+        if not time_parameters(issue.created_at):
+            continue
+        login, account_type = user_info(issue.user)
+        row = {
+            "number": issue.number,
+            "kind": "pull_request" if issue.pull_request else "issue",
+            "title": issue.title,
+            "author_login": login,
+            "author_type": account_type,
+            "created_at": issue.created_at.isoformat(),
+            "state": issue.state,
+            "labels": ";".join(label.name for label in issue.labels),
+            "comment_count": issue.comments,
+            "body": issue.body or "",
+        }
+        row.update(detect_genai(f"{issue.title}\n{issue.body or ''}"))
+        rows.append(row)
+    return rows
+
+# build one row per comment
+def comment_row(comment, thread_number, comment_type):
+    login, account_type = user_info(comment.user)
+    row = {
+        "thread_number": thread_number,
+        "comment_id": comment.id,
+        "comment_type": comment_type,
+        "author_login": login,
+        "author_type": account_type,
+        "created_at": comment.created_at.isoformat(),
+        "body": comment.body or "",
+    }
+    row.update(detect_genai(comment.body))
+    return row
+
+# pull all issue/PR comments and inline review comments across the repo 
+def comment_data(mined_data):
+    rows = []
+    for c in mined_data.get_issues_comments(sort="created", direction="asc", since=START):
+        if c.created_at > END:
+            break
+        if time_parameters(c.created_at):
+            rows.append(comment_row(c, int(c.issue_url.rsplit("/", 1)[1]), "issue_comment"))
+    for c in mined_data.get_pulls_comments(sort="created", direction="asc", since=START):
+        if c.created_at > END:
+            break
+        if time_parameters(c.created_at):
+            rows.append(comment_row(c, int(c.pull_request_url.rsplit("/", 1)[1]), "review_comment"))
+    return rows
 
 # saves the commit list to commits.csv
 def commits_csv(rows, path="commits.csv", columns=CSV_COLUMNS):
@@ -139,12 +215,10 @@ def provenance_json():
     }
 
 
+def authenticate_client():
+    token = os.environ["GITHUB_TOKEN"]
+    return Github(auth=Auth.Token(token), per_page=100)
+
 # authenticates using Github's REST API and pulls the Zephyr repo
 def authenticate_token():
-# reads the token from the hidden environment (so it's not hardcoded)
-# recommended by GTA
-    token = os.environ["GITHUB_TOKEN"]
-# authenticate from GitHub
-    authenticate = Auth.Token(token)
-    ensure_authentication = Github(auth=authenticate)
-    return ensure_authentication.get_repo(REPOSITORY)
+    return authenticate_client().get_repo(REPOSITORY)
