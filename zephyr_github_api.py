@@ -189,7 +189,13 @@ def commits_csv(rows, path="commits.csv", columns=CSV_COLUMNS):
         writer.writerows(rows)
 
 #TODO: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
-
+def rabbit_results_csv(rows, path="rabbit.csv"):
+    # import
+    # define users
+    # open as csv
+    # writer
+    # return users
+    
 # calculates the summary numbers for results.json
 def calculate_results(rows):
 # return the correct camel-case for each json
