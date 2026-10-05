@@ -30,7 +30,7 @@ START_UTC_STR = "2022-09-21T00:00:00Z"
 END_UTC_STR = "2026-09-21T00:00:00Z"
 # timezone = tz
 START = datetime(2022, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
-END = datetime(2022, 9, 23, 0, 0, 0, tzinfo=timezone.utc)
+END = datetime(2026, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
 
 
 # parameters for csv - RABBIT needs the contributor's username
@@ -118,30 +118,37 @@ def user_info(user):
     return user.login, user.type
 
 # building the issue/PR data (the issues endpoint returns both)
-# TODO: needs extra work to ensure time window is collected correctly without stalling, need to review
-def thread_data(mined_data):
+# reworked time window collection for thread data
+def thread_data(client):
     rows = []
-    data_found = mined_data.get_issues(state="all", since=START, sort="created", direction="asc")
-    for issue in data_found:
-        if issue.created_at > END:
-            break
-        if not time_parameters(issue.created_at):
-            continue
-        login, account_type = user_info(issue.user)
-        row = {
-            "number": issue.number,
-            "kind": "pull_request" if issue.pull_request else "issue",
-            "title": issue.title,
-            "author_login": login,
-            "author_type": account_type,
-            "created_at": issue.created_at.isoformat(),
-            "state": issue.state,
-            "labels": ";".join(label.name for label in issue.labels),
-            "comment_count": issue.comments,
-            "body": issue.body or "",
-        }
-        row.update(detect_genai(f"{issue.title}\n{issue.body or ''}"))
-        rows.append(row)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    window_start= START
+    while window_start < END:
+        window_end = min(window_start + timedelta(days=7). END)
+        query_end = window_end = timedelta(seconds=1)
+        query = f"repo:{REPOSITORY} created:{window_start.strftime(fmt)}..{query_end.strftime(fmt)}"
+        results = client.search_issues(query, sort="created", order="asc")
+        if results.totalCount >= 1000:
+            print(f"WARNING: {window_start.date()} window was {results.totalCount} results, search caps at 1000")
+        for issue in results:
+            login, account_type = user_info(issue.user)
+            row = {
+                "number": issue.number,
+                "kind": "pull_request" if issue.pull_request else "issue",
+                "title": issue.title,
+                "author_login": login,
+                "author_type": account_type,
+                "created_at": issue.created_at.isoformat(),
+                "state": issue.state,
+                "labels": ";".join(label.name for label in issue.labels),
+                "comment_count": issue.comments,
+                "body": issue.body or "",
+            }
+            row.update(detect_genai(f"{issue.title}\n{issue.body or ''}"))
+            rows.append(row)
+        print(f"... threads through {window_end.date()}: {len(rows)} so far")
+        window_start = window_end
+        time.sleep(2.5)
     return rows
 
 # build one row per comment
@@ -195,6 +202,7 @@ def rabbit_results_csv(rows, path="rabbit.csv"):
     # open as csv
     # writer
     # return users
+    pass
     
 # calculates the summary numbers for results.json
 def calculate_results(rows):

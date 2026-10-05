@@ -9,8 +9,7 @@ from genai_signals import detect_genai
 zephyr_path = "../zephyr"
 # then <git pull> and <git status> when in it to ensure you're up to date. 
 
-startdate = datetime(2022, 9, 21, tzinfo=timezone.utc)
-enddate = datetime(2022, 9, 23, tzinfo=timezone.utc)
+from zephyr_github_api import START as startdate, END as enddate
 
 # mines commits from local Zephyr clone and adds genai signal columns
 def mine_commits():
