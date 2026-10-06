@@ -1,6 +1,6 @@
 import zephyr_pydriller
 import zephyr_github_api
-import zephyr_build_dataset
+# import zephyr_build_dataset
 import csv
 import json
 import sys
@@ -63,7 +63,7 @@ def main():
         pydriller_step()
 
     if stage in ("threads", "all"):
-        client = zephyr_github_api.authenticate_client()
+        client = zephyr_github_api.authenticate_client()      
         threads = zephyr_github_api.thread_data(client)
         zephyr_github_api.commits_csv(threads, "threads.csv", zephyr_github_api.THREAD_COLUMNS)
         print(f"Threads saved: {len(threads)}")
@@ -82,8 +82,8 @@ def main():
         zephyr_github_api.commits_csv(links, "commit_pr_links.csv", ["sha", "pr_number"])
         print(f"Flagged commits: {len(flagged)}, links: {len(links)}")
 
-    if stage in ("build", "all"):
-        zephyr_build_dataset.build()
+    # if stage in ("build", "all"):
+    #    zephyr_build_dataset.build()
 
 
 

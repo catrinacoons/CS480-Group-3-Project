@@ -29,9 +29,9 @@ TAG = "main"
 
 # timezone = tz
 START = datetime(2022, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
-END = datetime(2026, 9, 22, 0, 0, 0, tzinfo=timezone.utc)
-START.strftime("%Y-%m-%dT%H:%M:%SZ")
-END.strftime("%Y-%m-%dT%H:%M:%SZ")
+END = datetime(2026, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
+START_UTC_STR = START.strftime("%Y-%m-%dT%H:%M:%SZ")
+END_UTC_STR = END.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # parameters for csv - RABBIT needs the contributor's username
 # legacy commit columns (commits are mined by zephyr_pydriller.py )
@@ -122,14 +122,14 @@ def user_info(user):
 def thread_data(client):
     rows = []
     fmt = "%Y-%m-%dT%H:%M:%SZ"
-    window_start= START
+    window_start = START
     while window_start < END:
-        window_end = min(window_start + timedelta(days=7). END)
-        query_end = window_end = timedelta(seconds=1)
+        window_end = min(window_start + timedelta(days=7), END)
+        query_end = window_end - timedelta(seconds=1)
         query = f"repo:{REPOSITORY} created:{window_start.strftime(fmt)}..{query_end.strftime(fmt)}"
         results = client.search_issues(query, sort="created", order="asc")
         if results.totalCount >= 1000:
-            print(f"WARNING: {window_start.date()} window was {results.totalCount} results, search caps at 1000")
+            print(f"  WARNING: {window_start.date()} window has {results.totalCount} results, search caps at 1000")
         for issue in results:
             login, account_type = user_info(issue.user)
             row = {
@@ -174,13 +174,13 @@ def comment_data(mined_data):
             break
         if time_parameters(c.created_at):
             rows.append(comment_row(c, int(c.issue_url.rsplit("/", 1)[1]), "issue_comment"))
-        if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
+            if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
     for c in mined_data.get_pulls_comments(sort="created", direction="asc", since=START):
         if c.created_at > END:
             break
         if time_parameters(c.created_at):
             rows.append(comment_row(c, int(c.pull_request_url.rsplit("/", 1)[1]), "review_comment"))
-        if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
+            if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
     return rows
 
 # saves the commit list to commits.csv
@@ -234,8 +234,8 @@ def provenance_json():
     return {
         "repository": REPOSITORY,
         "tag": TAG,
-        "start_utc": START,
-        "end_utc": END,
+        "start_utc": START.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end_utc": END.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "GitHub REST API with PyGithub",
     }
