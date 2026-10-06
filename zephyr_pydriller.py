@@ -3,16 +3,18 @@ import statistics
 
 from pydriller import Repository 
 from datetime import datetime, timezone
+from genai_signals import detect_genai
 
 # make sure that you clone this repo and the zephyr repo under the same directory
 zephyr_path = "../zephyr"
 # then <git pull> and <git status> when in it to ensure you're up to date. 
 
-startdate = datetime(2022, 9, 21, tzinfo=timezone.utc)
-enddate = datetime(2026, 9, 21, tzinfo=timezone.utc)
+from zephyr_github_api import START as startdate, END as enddate
 
-# below is code copied from assignment 1 -- if some of this does not work with our assignment, feel free to take it out!
+# mines commits from local Zephyr clone and adds genai signal columns
 def mine_commits():
+	# print check for reassurance
+	print("Starting PyDriller traversal (this may take a while) ...")
 	commits = []
 
 
@@ -24,22 +26,17 @@ def mine_commits():
 		if commit.committer_date < startdate or commit.committer_date > enddate:
 			continue
 
-		files_changed = len(commit.modified_files)
-		
-		additions = 0
-		deletions = 0
-
-		for i in commit.modified_files:
-			if i.added_lines is not None:
-				additions += i.added_lines
-			if i.deleted_lines is not None:
-				deletions += i.deleted_lines
+		# edit: this uses git's own stats instead of computing differences per file, this should be faster
+		files_changed = commit.files
+		additions = commit.insertions
+		deletions = commit.deletions
 
 		# review this and ensure it has all necessary info/no additional info
 		# edit: PyDriller (v2) uses commit.modified_files, not commit.modifications (v1), so "modifications" was removed.
 		commit_data = {
 			"sha": commit.hash,
 			"author_name": commit.author.name,
+			"author_email": commit.author.email,
 			"committer_date": commit.committer_date.isoformat(),
 			"files_changed": files_changed,
 			"additions": additions,
@@ -47,7 +44,13 @@ def mine_commits():
 			"message": commit.msg 
 		}
 
+		commit_data.update(detect_genai(commit.msg))
 		commits.append(commit_data)
+
+		# print checkpoint for reassurance
+		if len(commits) % 500 == 0:
+			print(f"  ...{len(commits)} commits processed (latest: {commit.committer_date.date()})")
+
 	return commits
 
 
