@@ -174,11 +174,13 @@ def comment_data(mined_data):
             break
         if time_parameters(c.created_at):
             rows.append(comment_row(c, int(c.issue_url.rsplit("/", 1)[1]), "issue_comment"))
+        if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
     for c in mined_data.get_pulls_comments(sort="created", direction="asc", since=START):
         if c.created_at > END:
             break
         if time_parameters(c.created_at):
             rows.append(comment_row(c, int(c.pull_request_url.rsplit("/", 1)[1]), "review_comment"))
+        if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
     return rows
 
 # saves the commit list to commits.csv
@@ -232,8 +234,8 @@ def provenance_json():
     return {
         "repository": REPOSITORY,
         "tag": TAG,
-        "start_utc": START_UTC_STR,
-        "end_utc": END_UTC_STR,
+        "start_utc": START,
+        "end_utc": END,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "GitHub REST API with PyGithub",
     }
