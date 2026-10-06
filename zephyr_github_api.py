@@ -26,12 +26,12 @@ load_dotenv()
 # parameters for mining
 REPOSITORY = "zephyrproject-rtos/zephyr"
 TAG = "main" 
-START_UTC_STR = "2022-09-21T00:00:00Z"
-END_UTC_STR = "2026-09-21T00:00:00Z"
+
 # timezone = tz
 START = datetime(2022, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
-END = datetime(2026, 9, 21, 0, 0, 0, tzinfo=timezone.utc)
-
+END = datetime(2026, 9, 22, 0, 0, 0, tzinfo=timezone.utc)
+START.strftime("%Y-%m-%dT%H:%M:%SZ")
+END.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # parameters for csv - RABBIT needs the contributor's username
 # legacy commit columns (commits are mined by zephyr_pydriller.py )
@@ -194,6 +194,16 @@ def commits_csv(rows, path="commits.csv", columns=CSV_COLUMNS):
 # then writes the dictionary in one line rows per commit 
         writer.writeheader()
         writer.writerows(rows)
+
+def find_prs_for_commits(mined_data, shas):
+    links = []
+    for sha in shas:
+        try:
+            for pr in mined_data.get_commit(sha).get_pulls():
+                links.append({"sha": sha, "pr_number": pr.number})
+        except Exception as e:
+            print(f"  could not look up PR for {sha[:8]}: {e}")
+    return links
 
 #TODO: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
 def rabbit_results_csv(rows, path="rabbit.csv"):
