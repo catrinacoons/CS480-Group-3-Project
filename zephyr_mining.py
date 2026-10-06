@@ -1,7 +1,9 @@
 import zephyr_pydriller
 import zephyr_github_api
+import zephyr_build_dataset
 import csv
 import json
+import sys
 
 # this will use both pydriller and PyGithub files to create our results
 # zephyr_pydriller: commits + stats -> commits.csv
@@ -51,27 +53,37 @@ def pydriller_step():
     print(f"Commits found by PyDriller: {len(commits)}")
     return commits
 
-def github_api_conversations():
-    repo = zephyr_github_api.authenticate_token()
-    threads = zephyr_github_api.thread_data(repo)
-    comments = zephyr_github_api.comment_data(repo)
-    zephyr_github_api.commits_csv(threads, "threads.csv", zephyr_github_api.THREAD_COLUMNS)
-    zephyr_github_api.commits_csv(comments, "comments.csv", zephyr_github_api.COMMENT_COLUMNS)
-    print(f"Threads: {len(threads)}, comments: {len(comments)}")
-    return threads, comments
+
 
 # TODO: Edit main to execute each of the functions above
 def main():
-    #github_api
-    commits = pydriller_step()
-    threads, comments = github_api_conversations()
-    logins = sorted({r["author_login"] for r in threads + comments})
-    zephyr_github_api.commits_csv([{"contributor_username": u} for u in logins],
-                                  "rabbit_users.csv", ["contributor_username"])
-    print(f"Unique authors for RABBIT: {len(logins)}")
-    # TODO: run RABBIT on logins and save to rabbit.csv (using RABBIT_COLUMNS)
-    
-    #TODO: reuse existing provenance function, just add checkpoint counts
+    stage = sys.argv[1] if len(sys.argv) > 1 else "all"
+
+    if stage in ("commits", "all"):
+        pydriller_step()
+
+    if stage in ("threads", "all"):
+        client = zephyr_github_api.authenticate_client()
+        threads = zephyr_github_api.thread_data(client)
+        zephyr_github_api.commits_csv(threads, "threads.csv", zephyr_github_api.THREAD_COLUMNS)
+        print(f"Threads saved: {len(threads)}")
+
+    if stage in ("comments", "all"):
+        repo = zephyr_github_api.authenticate_token()
+        comments = zephyr_github_api.comment_data(repo)
+        zephyr_github_api.commits_csv(comments, "comments.csv", zephyr_github_api.COMMENT_COLUMNS)
+        print(f"Comments saved: {len(comments)}")
+
+    if stage in ("links", "all"):
+        repo = zephyr_github_api.authenticate_token()
+        with open("commits.csv", newline="", encoding="utf-8") as f:
+            flagged = [r["sha"] for r in csv.DictReader(f) if r["genai_candidate"] == "True"]
+        links = zephyr_github_api.find_prs_for_commits(repo, flagged)
+        zephyr_github_api.commits_csv(links, "commit_pr_links.csv", ["sha", "pr_number"])
+        print(f"Flagged commits: {len(flagged)}, links: {len(links)}")
+
+    if stage in ("build", "all"):
+        zephyr_build_dataset.build()
 
 
 
