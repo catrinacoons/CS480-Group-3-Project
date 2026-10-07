@@ -208,7 +208,7 @@ def find_prs_for_commits(mined_data, shas):
             print(f"  could not look up PR for {sha[:8]}: {e}")
     return links
 
-#TODO: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
+#DONE: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
 def rabbit_results_csv(rows, path="rabbit.csv"):
     from rabbit_ng import run_rabbit
     users = sorted({row["author_login"] for row in rows
