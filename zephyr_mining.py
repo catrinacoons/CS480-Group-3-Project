@@ -12,8 +12,6 @@ import sys
 # TODO: provenance.json to get settings and checkpoint counts
 # TODO - run RABBIT and save rabbit.csv
 
-
-
 def github_api():
 # connect to GitHub and pull the repo needed
     initalize_repository = zephyr_github_api.authenticate_token()
@@ -43,9 +41,22 @@ def rabbit_csv(rows, path="rabbit_users.csv"):
 # fieldname makes sure the columns are in the correct order
         return list(csv.DictReader(csv_file))
 
-
-# TODO: define rabbit execution (or call it if defined in github_api)
-
+# RABBIT execution which gathers everyone who authored a thread / comment and passes it
+# into rabbit_results_csv() in zephyr_github_api, which saves to rabbit.csv for the results
+def rabbit_gathering(): 
+    rows = []
+        # zephyr_github_api: issues/prs/comments -> threads.csv, comments.csv
+    for path in ("threads.csv", "comments.csv"):
+        try:
+            with open(path, "r", newline="", encoding="utf-8") as csv_file:
+                rows += list(csv.DictReader(csv_file))
+        # error out if threads.csv and comments.csv aren't working
+        except FileNotFoundError:
+            print(f"RABBIT: {path} not found, create threads.csv and comments.csv first")
+        # users will run RABBIT and save the results to rabbit.csv
+    users = zephyr_github_api.rabbit_results_csv(rows, "rabbit.csv")
+    print("RABBIT has finished running and results have been saved to rabbit.csv")
+    return users
 
 def pydriller_step():
     commits = zephyr_pydriller.mine_commits()
