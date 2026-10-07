@@ -19,7 +19,6 @@ from genai_signals import detect_genai
 load_dotenv()
 
 # TODO: May have to update function names in this if errors occur in mining.py (due to duplicate function names)
-
 # DONE: AI tag search lives in negai_signals (detect_genai)
 # TODO: See above and other # TODOs below - thank you! :)
 
@@ -38,7 +37,7 @@ END_UTC_STR = END.strftime("%Y-%m-%dT%H:%M:%SZ")
 CSV_COLUMNS = [
     "sha",
     "author_name",
-    "contributor_user", #TODO: define this in commit_data
+    "contributor_user",
     "committer_date",
     "files_changed",
     "additions",
@@ -48,7 +47,8 @@ CSV_COLUMNS = [
 #TODO: Add more columns as needed for RABBIT's data
 RABBIT_COLUMNS = [
     "contributor_username", 
-    "confidence"
+    "contributor_type",
+    "confidence",
 ]
 
 # return true if a commit's timezone is within the tz parameters set
@@ -93,7 +93,7 @@ def commit_data(mined_data):
         rows.append({
             "sha": commit.sha,
             "author_name" : commit.commit.author.name,
-# TODO: define "contributor_user" so RABBIT pulls a list of usernames
+            "contributor_user" : commit.author.login if commit.author else "",
             "committer_date" : commit_datetime.isoformat(),
             "files_changed" : file_edits,
             "additions" : additions,
@@ -106,6 +106,7 @@ THREAD_COLUMNS = [
     "state", "labels", "comment_count", "body",
     "genai_candidate", "signal_types", "matched_text",
 ]
+
 COMMENT_COLUMNS = [
     "thread_number", "comment_id", "comment_type", "author_login", "author_type",
     "created_at", "body", "genai_candidate", "signal_types", "matched_text",
