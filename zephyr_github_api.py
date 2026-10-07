@@ -230,7 +230,7 @@ def calculate_results(rows):
 
 
 # builds the metadata for provenance.json 
-def provenance_json():
+def provenance_json(counts=None):
 # return the correct camel-case for each json
     return {
         "repository": REPOSITORY,
@@ -239,6 +239,7 @@ def provenance_json():
         "end_utc": END.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "GitHub REST API with PyGithub",
+        "checkpoints": counts or {},
     }
 
 

@@ -69,21 +69,25 @@ def pydriller_step():
 # TODO: Edit main to execute each of the functions above
 def main():
     stage = sys.argv[1] if len(sys.argv) > 1 else "all"
+    counts = {}
 
     if stage in ("commits", "all"):
-        pydriller_step()
+        commits = pydriller_step()
+        counts["commits"] = len(commits)
 
     if stage in ("threads", "all"):
         client = zephyr_github_api.authenticate_client()      
         threads = zephyr_github_api.thread_data(client)
         zephyr_github_api.commits_csv(threads, "threads.csv", zephyr_github_api.THREAD_COLUMNS)
         print(f"Threads saved: {len(threads)}")
+        counts["threads"] = len(threads)
 
     if stage in ("comments", "all"):
         repo = zephyr_github_api.authenticate_token()
         comments = zephyr_github_api.comment_data(repo)
         zephyr_github_api.commits_csv(comments, "comments.csv", zephyr_github_api.COMMENT_COLUMNS)
         print(f"Comments saved: {len(comments)}")
+        counts["comments"] = len(comments)
 
     if stage in ("links", "all"):
         repo = zephyr_github_api.authenticate_token()
@@ -92,11 +96,11 @@ def main():
         links = zephyr_github_api.find_prs_for_commits(repo, flagged)
         zephyr_github_api.commits_csv(links, "commit_pr_links.csv", ["sha", "pr_number"])
         print(f"Flagged commits: {len(flagged)}, links: {len(links)}")
-
-    # if stage in ("build", "all"):
-    #    zephyr_build_dataset.build()
-
-
+        counts["links"] = len(links)
+	
+    build = zephyr_github_api.provenance_json(counts)
+    with open("provenance.json", "w", encoding="utf-8") as provenance:
+        json.dump(build, provenance)
 
 # ensure that main runs automatically
 if __name__ == "__main__":
