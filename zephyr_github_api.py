@@ -210,12 +210,17 @@ def find_prs_for_commits(mined_data, shas):
 
 #TODO: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
 def rabbit_results_csv(rows, path="rabbit.csv"):
-    # import
-    # define users
-    # open as csv
-    # writer
-    # return users
-    pass
+    from rabbit_ng import run_rabbit
+    users = sorted({row["author_login"] for row in rows
+                    if row.get("author_login") and row["author_login"] != "ghost"})
+    with open(path, "w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=RABBIT_COLUMNS)
+        writer.writeheader()
+        for result in run_rabbit(contributors = users, api_key=os.environ["GITHUB_TOKEN"]):
+            writer.writerow({"contributor_username": result.contributor,
+                             "contributor_type": result.user_type,
+                             "confidence": result.confidence})
+    return users
     
 # calculates the summary numbers for results.json
 def calculate_results(rows):
