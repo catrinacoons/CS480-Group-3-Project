@@ -10,7 +10,7 @@ import sys
 # zephyr_github_api: issues/prs/comments -> threads.csv, comments.csv
 # unique thread/comment authors -> rabbit_users.csv (RABBIT input)
 # TODO: provenance.json to get settings and checkpoint counts
-# TODO - run RABBIT and save rabbit.csv
+# DONE - run RABBIT and save rabbit.csv
 
 def github_api():
 # connect to GitHub and pull the repo needed
@@ -89,6 +89,11 @@ def main():
         print(f"Comments saved: {len(comments)}")
         counts["comments"] = len(comments)
 
+	if stage in ("rabbit", "all"):
+		users = rabbit_gathering()
+		print(f"Unique usernames checked by RABBIT: {len(users)}")
+		counts["rabbit_users"] = len(users)
+		
     if stage in ("links", "all"):
         repo = zephyr_github_api.authenticate_token()
         with open("commits.csv", newline="", encoding="utf-8") as f:
