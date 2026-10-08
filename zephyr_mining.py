@@ -85,7 +85,9 @@ def main():
     if stage in ("comments", "all"):
         zephyr_github_api.comment_data(zephyr_github_api.authenticate_client)
         with open("comments.csv", newline="", encoding="utf-8") as f:
-            print(f"Comments saved: {sum(1 for _ in csv.DictReader(f))}")
+            n = sum(1 for _ in csv.DictReader(f))
+        print(f"Comments saved: {n}")
+        counts["comments"] = n
 
     if stage in ("links", "all"):
         repo = zephyr_github_api.authenticate_token()
@@ -95,7 +97,7 @@ def main():
         zephyr_github_api.commits_csv(links, "commit_pr_links.csv", ["sha", "pr_number"])
         print(f"Flagged commits: {len(flagged)}, links: {len(links)}")
         counts["links"] = len(links)
-	
+    
     build = zephyr_github_api.provenance_json(counts)
     with open("provenance.json", "w", encoding="utf-8") as provenance:
         json.dump(build, provenance)

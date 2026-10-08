@@ -163,6 +163,7 @@ def thread_data(client):
 # build one row per comment
 def comment_row(comment, thread_number, comment_type):
     login, account_type = user_info(comment.user)
+    raw = comment._rawData
     row = {
         "thread_number": thread_number,
         "comment_id": comment.id,
@@ -171,10 +172,10 @@ def comment_row(comment, thread_number, comment_type):
         "author_type": account_type,
         "created_at": comment.created_at.isoformat(),
         "body": comment.body or "",
-        "html_url": comment.html_url,
-        "author_association": comment.author_association,
-        "in_reply_to_id": getattr(comment, "in_reply_to_id", "") or "",
-        "path": getattr(comment, "path", "") or "",
+        "html_url": raw.get("html_url", ""),
+        "author_association": raw.get("author_association", ""),
+        "in_reply_to_id": raw.get("in_reply_to_id", ""),
+        "path": raw.get("path", ""),
     }
     row.update(detect_genai(comment.body))
     return row
