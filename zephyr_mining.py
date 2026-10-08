@@ -102,6 +102,10 @@ def main():
         zephyr_github_api.commits_csv(links, "commit_pr_links.csv", ["sha", "pr_number"])
         print(f"Flagged commits: {len(flagged)}, links: {len(links)}")
         counts["links"] = len(links)
+
+    if stage in ("rabbit", "all"):
+        users = rabbit_gathering()
+        counts["rabbit_users"] = len(users) if users else 0
 	
     build = zephyr_github_api.provenance_json(counts)
     with open("provenance.json", "w", encoding="utf-8") as provenance:
