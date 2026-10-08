@@ -48,9 +48,13 @@ CSV_COLUMNS = [
 
 #TODO: Add more columns as needed for RABBIT's data
 RABBIT_COLUMNS = [
-    "contributor_username", 
+    "contributor_username",
     "contributor_type",
     "confidence",
+    "thread_count",
+    "comment_count",
+    "commit_count",
+    "is_bot", 
 ]
 
 # return true if a commit's timezone is within the tz parameters set
@@ -275,7 +279,7 @@ def find_prs_for_commits(mined_data, shas):
             print(f"  could not look up PR for {sha[:8]}: {e}")
     return links
 
-#TODO: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
+#DONE: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
 def rabbit_results_csv(rows, path="rabbit.csv"):
     from rabbit_ng import run_rabbit
     users = sorted({row["author_login"] for row in rows
@@ -287,6 +291,7 @@ def rabbit_results_csv(rows, path="rabbit.csv"):
             writer.writerow({"contributor_username": result.contributor,
                              "contributor_type": result.user_type,
                              "confidence": result.confidence})
+                            #TODO: ensure that rest of RABBIT columns are listed.
     return users
     
 # calculates the summary numbers for results.json
