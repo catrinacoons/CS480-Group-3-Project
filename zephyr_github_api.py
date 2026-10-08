@@ -21,7 +21,6 @@ load_dotenv()
 csv.field_size_limit(2**31 - 1)
 
 # TODO: May have to update function names in this if errors occur in mining.py (due to duplicate function names)
-
 # DONE: AI tag search lives in negai_signals (detect_genai)
 # TODO: See above and other # TODOs below - thank you! :)
 
@@ -40,7 +39,7 @@ END_UTC_STR = END.strftime("%Y-%m-%dT%H:%M:%SZ")
 CSV_COLUMNS = [
     "sha",
     "author_name",
-    "contributor_user", #TODO: define this in commit_data
+    "contributor_user",
     "committer_date",
     "files_changed",
     "additions",
@@ -50,7 +49,8 @@ CSV_COLUMNS = [
 #TODO: Add more columns as needed for RABBIT's data
 RABBIT_COLUMNS = [
     "contributor_username", 
-    "confidence"
+    "contributor_type",
+    "confidence",
 ]
 
 # return true if a commit's timezone is within the tz parameters set
@@ -95,7 +95,7 @@ def commit_data(mined_data):
         rows.append({
             "sha": commit.sha,
             "author_name" : commit.commit.author.name,
-# TODO: define "contributor_user" so RABBIT pulls a list of usernames
+            "contributor_user" : commit.author.login if commit.author else "",
             "committer_date" : commit_datetime.isoformat(),
             "files_changed" : file_edits,
             "additions" : additions,
@@ -109,6 +109,7 @@ THREAD_COLUMNS = [
     "genai_candidate", "signal_types", "matched_text", "html_url", "closed_at", 
     "merged_at", "author_association",
 ]
+
 COMMENT_COLUMNS = [
     "thread_number", "comment_id", "comment_type", "author_login", "author_type",
     "created_at", "body", "genai_candidate", "signal_types", "matched_text",
@@ -275,12 +276,17 @@ def find_prs_for_commits(mined_data, shas):
 
 #TODO: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
 def rabbit_results_csv(rows, path="rabbit.csv"):
-    # import
-    # define users
-    # open as csv
-    # writer
-    # return users
-    pass
+    from rabbit_ng import run_rabbit
+    users = sorted({row["author_login"] for row in rows
+                    if row.get("author_login") and row["author_login"] != "ghost"})
+    with open(path, "w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=RABBIT_COLUMNS)
+        writer.writeheader()
+        for result in run_rabbit(contributors = users, api_key=os.environ["GITHUB_TOKEN"]):
+            writer.writerow({"contributor_username": result.contributor,
+                             "contributor_type": result.user_type,
+                             "confidence": result.confidence})
+    return users
     
 # calculates the summary numbers for results.json
 def calculate_results(rows):
@@ -295,7 +301,7 @@ def calculate_results(rows):
 
 
 # builds the metadata for provenance.json 
-def provenance_json():
+def provenance_json(counts=None):
 # return the correct camel-case for each json
     return {
         "repository": REPOSITORY,
@@ -304,6 +310,7 @@ def provenance_json():
         "end_utc": END.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "GitHub REST API with PyGithub",
+        "checkpoints": counts or {},
     }
 
 
@@ -312,5 +319,5 @@ def authenticate_client(per_page=100):
     return Github(auth=Auth.Token(token), per_page=per_page)
 
 # authenticates using Github's REST API and pulls the Zephyr repo
-def authenticate_token(per_page=100):
-    return authenticate_client(per_page).get_repo(REPOSITORY)
+def authenticate_token():
+    return authenticate_client().get_repo(REPOSITORY)

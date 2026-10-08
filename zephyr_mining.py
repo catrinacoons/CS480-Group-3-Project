@@ -10,9 +10,7 @@ import sys
 # zephyr_github_api: issues/prs/comments -> threads.csv, comments.csv
 # unique thread/comment authors -> rabbit_users.csv (RABBIT input)
 # TODO: provenance.json to get settings and checkpoint counts
-# TODO - run RABBIT and save rabbit.csv
-
-
+# DONE - run RABBIT and save rabbit.csv
 
 def github_api():
 # connect to GitHub and pull the repo needed
@@ -43,9 +41,22 @@ def rabbit_csv(rows, path="rabbit_users.csv"):
 # fieldname makes sure the columns are in the correct order
         return list(csv.DictReader(csv_file))
 
-
-# TODO: define rabbit execution (or call it if defined in github_api)
-
+# RABBIT execution which gathers everyone who authored a thread / comment and passes it
+# into rabbit_results_csv() in zephyr_github_api, which saves to rabbit.csv for the results
+def rabbit_gathering(): 
+    rows = []
+        # zephyr_github_api: issues/prs/comments -> threads.csv, comments.csv
+    for path in ("threads.csv", "comments.csv"):
+        try:
+            with open(path, "r", newline="", encoding="utf-8") as csv_file:
+                rows += list(csv.DictReader(csv_file))
+        # error out if threads.csv and comments.csv aren't working
+        except FileNotFoundError:
+            print(f"RABBIT: {path} not found, create threads.csv and comments.csv first")
+        # users will run RABBIT and save the results to rabbit.csv
+    users = zephyr_github_api.rabbit_results_csv(rows, "rabbit.csv")
+    print("RABBIT has finished running and results have been saved to rabbit.csv")
+    return users
 
 def pydriller_step():
     commits = zephyr_pydriller.mine_commits()
@@ -58,15 +69,18 @@ def pydriller_step():
 # TODO: Edit main to execute each of the functions above
 def main():
     stage = sys.argv[1] if len(sys.argv) > 1 else "all"
+    counts = {}
 
     if stage in ("commits", "all"):
-        pydriller_step()
+        commits = pydriller_step()
+        counts["commits"] = len(commits)
 
     if stage in ("threads", "all"):
         client = zephyr_github_api.authenticate_client()      
         threads = zephyr_github_api.thread_data(client)
         zephyr_github_api.commits_csv(threads, "threads.csv", zephyr_github_api.THREAD_COLUMNS)
         print(f"Threads saved: {len(threads)}")
+        counts["threads"] = len(threads)
 
     if stage in ("comments", "all"):
         zephyr_github_api.comment_data(zephyr_github_api.authenticate_client)
@@ -80,11 +94,11 @@ def main():
         links = zephyr_github_api.find_prs_for_commits(repo, flagged)
         zephyr_github_api.commits_csv(links, "commit_pr_links.csv", ["sha", "pr_number"])
         print(f"Flagged commits: {len(flagged)}, links: {len(links)}")
-
-    # if stage in ("build", "all"):
-    #    zephyr_build_dataset.build()
-
-
+        counts["links"] = len(links)
+	
+    build = zephyr_github_api.provenance_json(counts)
+    with open("provenance.json", "w", encoding="utf-8") as provenance:
+        json.dump(build, provenance)
 
 # ensure that main runs automatically
 if __name__ == "__main__":
