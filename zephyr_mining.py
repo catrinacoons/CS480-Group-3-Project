@@ -69,10 +69,9 @@ def main():
         print(f"Threads saved: {len(threads)}")
 
     if stage in ("comments", "all"):
-        repo = zephyr_github_api.authenticate_token()
-        comments = zephyr_github_api.comment_data(repo)
-        zephyr_github_api.commits_csv(comments, "comments.csv", zephyr_github_api.COMMENT_COLUMNS)
-        print(f"Comments saved: {len(comments)}")
+        zephyr_github_api.comment_data(zephyr_github_api.authenticate_client)
+        with open("comments.csv", newline="", encoding="utf-8") as f:
+            print(f"Comments saved: {sum(1 for _ in csv.DictReader(f))}")
 
     if stage in ("links", "all"):
         repo = zephyr_github_api.authenticate_token()

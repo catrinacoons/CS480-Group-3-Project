@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 from genai_signals import detect_genai
 load_dotenv()
 
+csv.field_size_limit(2**31 - 1)
+
 # TODO: May have to update function names in this if errors occur in mining.py (due to duplicate function names)
 
 # DONE: AI tag search lives in negai_signals (detect_genai)
@@ -104,11 +106,13 @@ def commit_data(mined_data):
 THREAD_COLUMNS = [
     "number", "kind", "title", "author_login", "author_type", "created_at",
     "state", "labels", "comment_count", "body",
-    "genai_candidate", "signal_types", "matched_text",
+    "genai_candidate", "signal_types", "matched_text", "html_url", "closed_at", 
+    "merged_at", "author_association",
 ]
 COMMENT_COLUMNS = [
     "thread_number", "comment_id", "comment_type", "author_login", "author_type",
     "created_at", "body", "genai_candidate", "signal_types", "matched_text",
+    "html_url", "author_association", "in_reply_to_id", "path",
 ]
 
 # deleted accounts come back as None, this is to handle that
@@ -143,6 +147,10 @@ def thread_data(client):
                 "labels": ";".join(label.name for label in issue.labels),
                 "comment_count": issue.comments,
                 "body": issue.body or "",
+                "html_url": issue.html_url,
+                "closed_at": issue.closed_at.isoformat() if issue.closed_at else "",
+                "merged_at": str(getattr(issue.pull_request, "merged_at", "") or "") if issue.pull_request else "",
+                "author_association": issue.author_association,
             }
             row.update(detect_genai(f"{issue.title}\n{issue.body or ''}"))
             rows.append(row)
@@ -162,26 +170,84 @@ def comment_row(comment, thread_number, comment_type):
         "author_type": account_type,
         "created_at": comment.created_at.isoformat(),
         "body": comment.body or "",
+        "html_url": comment.html_url,
+        "author_association": comment.author_association,
+        "in_reply_to_id": getattr(comment, "in_reply_to_id", "") or "",
+        "path": getattr(comment, "path", "") or "",
     }
     row.update(detect_genai(comment.body))
     return row
 
 # pull all issue/PR comments and inline review comments across the repo 
-def comment_data(mined_data):
-    rows = []
-    for c in mined_data.get_issues_comments(sort="created", direction="asc", since=START):
-        if c.created_at > END:
-            break
-        if time_parameters(c.created_at):
-            rows.append(comment_row(c, int(c.issue_url.rsplit("/", 1)[1]), "issue_comment"))
-            if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
-    for c in mined_data.get_pulls_comments(sort="created", direction="asc", since=START):
-        if c.created_at > END:
-            break
-        if time_parameters(c.created_at):
-            rows.append(comment_row(c, int(c.pull_request_url.rsplit("/", 1)[1]), "review_comment"))
-            if len(rows) % 500 == 0: print(f"  ...{len(rows)} comments")
-    return rows
+# edit: fetches one kind of comment, and if GitHub errors out mid-pagination it waits and
+# edit: finds what is already saved for this comment type so a rerun resumes instead of restarting
+def last_saved(path, comment_type):
+    latest, seen = START, set()
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if r["comment_type"] == comment_type:
+                    seen.add(r["comment_id"])
+                    t = datetime.fromisoformat(r["created_at"])
+                    if t > latest:
+                        latest = t
+    return latest, seen
+
+# edit: writes each comment to the CSV as it arrives; on repeated errors it waits, shrinks the
+# page size, and finally stops with all progress saved (just rerun the stage to continue)
+def fetch_comments(make_client, method_name, url_attr, comment_type, path):
+    since, seen = last_saved(path, comment_type)
+    if seen:
+        print(f"  resuming {comment_type}s from {since} ({len(seen)} already saved)")
+    new_file = not os.path.exists(path)
+    per_page, failures, saved = 100, 0, 0
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=COMMENT_COLUMNS)
+        if new_file:
+            writer.writeheader()
+        while True:
+            repo = make_client(per_page).get_repo(REPOSITORY)
+            try:
+                for c in getattr(repo, method_name)(sort="created", direction="asc", since=since):
+                    if c.created_at > END:
+                        return saved
+                    if str(c.id) in seen or not time_parameters(c.created_at):
+                        continue
+                    seen.add(str(c.id))
+                    writer.writerow(comment_row(c, int(getattr(c, url_attr).rsplit("/", 1)[1]), comment_type))
+                    saved += 1
+                    since = c.created_at
+                    failures = 0
+                    if saved % 100 == 0:      # one page: save to disk and pace the requests
+                        f.flush()
+                        time.sleep(1)
+                    if saved % 500 == 0:
+                        print(f"  ...{saved} new {comment_type}s (at {since.date()})")
+                return saved
+            except Exception as e:
+                f.flush()
+                failures += 1
+                if failures == 3:
+                    per_page = 20             # smaller pages are less likely to time out
+                    print("  switching to 20 per page")
+                if failures > 8:
+                    print(f"  giving up at {since}. Progress is saved; rerun this stage later to resume.")
+                    raise
+                wait = 30 * failures
+                print(f"  GitHub error ({type(e).__name__}); retry {failures}/8 in {wait}s, resuming from {since}")
+                time.sleep(wait)
+
+# pull all issue/PR comments and inline review comments, saving as it goes
+def comment_data(make_client, path="comments.csv"):
+    for method, url_attr, ctype in [
+        ("get_issues_comments", "issue_url", "issue_comment"),
+        ("get_pulls_comments", "pull_request_url", "review_comment"),
+    ]:
+        while True:
+            saved = fetch_comments(make_client, method, url_attr, ctype, path)
+            print(f"  {ctype}: pass saved {saved} new")
+            if saved == 0:
+                break
 
 # saves the commit list to commits.csv
 def commits_csv(rows, path="commits.csv", columns=CSV_COLUMNS):
@@ -241,10 +307,10 @@ def provenance_json():
     }
 
 
-def authenticate_client():
+def authenticate_client(per_page=100):
     token = os.environ["GITHUB_TOKEN"]
-    return Github(auth=Auth.Token(token), per_page=100)
+    return Github(auth=Auth.Token(token), per_page=per_page)
 
 # authenticates using Github's REST API and pulls the Zephyr repo
-def authenticate_token():
-    return authenticate_client().get_repo(REPOSITORY)
+def authenticate_token(per_page=100):
+    return authenticate_client(per_page).get_repo(REPOSITORY)
