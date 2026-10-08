@@ -46,9 +46,13 @@ CSV_COLUMNS = [
 
 #TODO: Add more columns as needed for RABBIT's data
 RABBIT_COLUMNS = [
-    "contributor_username", 
+    "contributor_username",
     "contributor_type",
     "confidence",
+    "thread_count",
+    "comment_count",
+    "commit_count",
+    "is_bot", 
 ]
 
 # return true if a commit's timezone is within the tz parameters set
