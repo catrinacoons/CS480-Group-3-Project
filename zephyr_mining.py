@@ -89,10 +89,10 @@ def main():
         print(f"Comments saved: {len(comments)}")
         counts["comments"] = len(comments)
 
-	if stage in ("rabbit", "all"):
-		users = rabbit_gathering()
-		print(f"Unique usernames checked by RABBIT: {len(users)}")
-		counts["rabbit_users"] = len(users)
+    if stage in ("rabbit", "all"):
+        users = rabbit_gathering()
+        print(f"Unique usernames checked by RABBIT: {len(users)}")
+        counts["rabbit_users"] = len(users)
 		
     if stage in ("links", "all"):
         repo = zephyr_github_api.authenticate_token()

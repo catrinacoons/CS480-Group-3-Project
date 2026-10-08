@@ -224,6 +224,7 @@ def rabbit_results_csv(rows, path="rabbit.csv"):
             writer.writerow({"contributor_username": result.contributor,
                              "contributor_type": result.user_type,
                              "confidence": result.confidence})
+                            #TODO: ensure that rest of RABBIT columns are listed.
     return users
     
 # calculates the summary numbers for results.json
