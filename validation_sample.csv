@@ -1,32 +1,32 @@
 number,kind,title,html_url,strongest_signal,body_signals,comment_signals,body_matched,stratum,is_true_genai,validator,notes
-113395,pull_request,babblesim bt audio samples tests: Build and run with twister,https://github.com/zephyrproject-rtos/zephyr/pull/113395,ai_bot,,ai_keyword,,ai_bot,,,
-117078,pull_request,bluetooth: audio: fix null pointer dereferences in media proxy callbacks,https://github.com/zephyrproject-rtos/zephyr/pull/117078,ai_bot,,ai_keyword,,ai_bot,,,
-116624,pull_request,tests: bluetooth: tester: BTP GATT notify multiple command fixes,https://github.com/zephyrproject-rtos/zephyr/pull/116624,ai_bot,,,,ai_bot,,,
-116182,pull_request,Bluetooth: Controller: use PDU size macros,https://github.com/zephyrproject-rtos/zephyr/pull/116182,ai_bot,,,,ai_bot,,,
-102547,pull_request,MAINTAINERS: Add area for QNX Hypervisor,https://github.com/zephyrproject-rtos/zephyr/pull/102547,ai_bot,,,,ai_bot,,,
-116774,pull_request,samples: drivers: adc: adc_dt: fix sample buffer masking and stack garbage,https://github.com/zephyrproject-rtos/zephyr/pull/116774,ai_bot,,,,ai_bot,,,
-95417,pull_request,Bluetooth: Controller: nrf54h20 cpurad support,https://github.com/zephyrproject-rtos/zephyr/pull/95417,ai_bot,,,,ai_bot,,,
-101878,pull_request,Bluetooth: Conn: Only recycle ACL connections,https://github.com/zephyrproject-rtos/zephyr/pull/101878,ai_bot,,,,ai_bot,,,
-100434,pull_request,tests: scripts: add west debug support in twister,https://github.com/zephyrproject-rtos/zephyr/pull/100434,ai_bot,,ai_keyword,,ai_bot,,,
-109854,pull_request,scripts: dts: Add min-len/max-len properties to edtlib spec.,https://github.com/zephyrproject-rtos/zephyr/pull/109854,ai_bot,,,,ai_bot,,,
-101756,pull_request,drivers: bluetooth: hci: nxp: enable calibration data by default,https://github.com/zephyrproject-rtos/zephyr/pull/101756,ai_bot,,,,ai_bot,,,
-114557,pull_request,driver: modem: add targeted script recovery framework,https://github.com/zephyrproject-rtos/zephyr/pull/114557,ai_bot,,,,ai_bot,,,
-114092,pull_request,soc: st: stm32: overhaul wake-up pins implementation,https://github.com/zephyrproject-rtos/zephyr/pull/114092,ai_bot,,,,ai_bot,,,
-117070,pull_request,drivers: entropy: stm32: Fix S2RAM sequence and ensure ISR pool filling,https://github.com/zephyrproject-rtos/zephyr/pull/117070,ai_bot,,,,ai_bot,,,
-113389,pull_request,Samples lvgl benchmark native sim fixes,https://github.com/zephyrproject-rtos/zephyr/pull/113389,ai_bot,,,,ai_bot,,,
-106556,pull_request,bluetooth: host: Improve `bt_keys` loading from settings,https://github.com/zephyrproject-rtos/zephyr/pull/106556,ai_bot,,,,ai_bot,,,
-99195,pull_request,drivers: pwm: Introduce PWM for BFLB,https://github.com/zephyrproject-rtos/zephyr/pull/99195,ai_bot,,,,ai_bot,,,
-111030,pull_request,Bluetooth: GMAP: Shell: Register cap specific for GMAP,https://github.com/zephyrproject-rtos/zephyr/pull/111030,ai_bot,,,,ai_bot,,,
-111332,pull_request, modem: cellular: recover when CMUX fails to connect,https://github.com/zephyrproject-rtos/zephyr/pull/111332,ai_bot,,,,ai_bot,,,
-86815,pull_request,LVGL: multi-display support,https://github.com/zephyrproject-rtos/zephyr/pull/86815,ai_bot,,,,ai_bot,,,
-110935,pull_request,drivers: crc: nxp_lpc: advertise CRC-16/ITU-T capability,https://github.com/zephyrproject-rtos/zephyr/pull/110935,ai_keyword,,ai_keyword,,ai_keyword,,,
-71026,pull_request,mgmt: hawkbit: optimize poll_sleep,https://github.com/zephyrproject-rtos/zephyr/pull/71026,ai_keyword,,ai_keyword,,ai_keyword,,,
-96213,pull_request,Add generated macro and DT macro to count the number of actual peripheral on bus,https://github.com/zephyrproject-rtos/zephyr/pull/96213,ai_keyword,ai_keyword,,chatgpt,ai_keyword,,,
-106308,pull_request,drivers: i3c: add Microchip XEC I3C driver,https://github.com/zephyrproject-rtos/zephyr/pull/106308,ai_keyword,,ai_keyword,,ai_keyword,,,
-53810,issue,TaskList for Supporting RaspberryPi Pico peripherals,https://github.com/zephyrproject-rtos/zephyr/issues/53810,ai_keyword,,ai_keyword,,ai_keyword,,,
-95341,pull_request,boards: efm32gg11: Enable Si7210 Hall-effect sensor,https://github.com/zephyrproject-rtos/zephyr/pull/95341,ai_keyword,,ai_keyword,,ai_keyword,,,
-118182,pull_request,sysbuild: forward Python variables to variant images,https://github.com/zephyrproject-rtos/zephyr/pull/118182,ai_keyword,ai_keyword,,Claude | claude | claude | claude,ai_keyword,,,
-105388,issue,"drivers: stepper: adi_tmc: add TMC52xx support, especially TMC5240",https://github.com/zephyrproject-rtos/zephyr/issues/105388,ai_keyword,,ai_keyword,,ai_keyword,,,
+113395,pull_request,babblesim bt audio samples tests: Build and run with twister,https://github.com/zephyrproject-rtos/zephyr/pull/113395,ai_bot,,ai_keyword,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+117078,pull_request,bluetooth: audio: fix null pointer dereferences in media proxy callbacks,https://github.com/zephyrproject-rtos/zephyr/pull/117078,ai_bot,,ai_keyword,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+116624,pull_request,tests: bluetooth: tester: BTP GATT notify multiple command fixes,https://github.com/zephyrproject-rtos/zephyr/pull/116624,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+116182,pull_request,Bluetooth: Controller: use PDU size macros,https://github.com/zephyrproject-rtos/zephyr/pull/116182,ai_bot,,,,ai_bot,yes,Catrina Coons,"pr reviewed by Copilot, github-actions Bot notes first-time contribution"
+102547,pull_request,MAINTAINERS: Add area for QNX Hypervisor,https://github.com/zephyrproject-rtos/zephyr/pull/102547,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+116774,pull_request,samples: drivers: adc: adc_dt: fix sample buffer masking and stack garbage,https://github.com/zephyrproject-rtos/zephyr/pull/116774,ai_bot,,,,ai_bot,yes,Catrina Coons,"pr reviewed by Copilot, github-actions Bot notes first-time contribution"
+95417,pull_request,Bluetooth: Controller: nrf54h20 cpurad support,https://github.com/zephyrproject-rtos/zephyr/pull/95417,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+101878,pull_request,Bluetooth: Conn: Only recycle ACL connections,https://github.com/zephyrproject-rtos/zephyr/pull/101878,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+100434,pull_request,tests: scripts: add west debug support in twister,https://github.com/zephyrproject-rtos/zephyr/pull/100434,ai_bot,,ai_keyword,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+109854,pull_request,scripts: dts: Add min-len/max-len properties to edtlib spec.,https://github.com/zephyrproject-rtos/zephyr/pull/109854,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+101756,pull_request,drivers: bluetooth: hci: nxp: enable calibration data by default,https://github.com/zephyrproject-rtos/zephyr/pull/101756,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+114557,pull_request,driver: modem: add targeted script recovery framework,https://github.com/zephyrproject-rtos/zephyr/pull/114557,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+114092,pull_request,soc: st: stm32: overhaul wake-up pins implementation,https://github.com/zephyrproject-rtos/zephyr/pull/114092,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+117070,pull_request,drivers: entropy: stm32: Fix S2RAM sequence and ensure ISR pool filling,https://github.com/zephyrproject-rtos/zephyr/pull/117070,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+113389,pull_request,Samples lvgl benchmark native sim fixes,https://github.com/zephyrproject-rtos/zephyr/pull/113389,ai_bot,,,,ai_bot,yes,Catrina Coons,"pr reviewed by Copilot, github-actions Bot notes first-time contribution"
+106556,pull_request,bluetooth: host: Improve `bt_keys` loading from settings,https://github.com/zephyrproject-rtos/zephyr/pull/106556,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+99195,pull_request,drivers: pwm: Introduce PWM for BFLB,https://github.com/zephyrproject-rtos/zephyr/pull/99195,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+111030,pull_request,Bluetooth: GMAP: Shell: Register cap specific for GMAP,https://github.com/zephyrproject-rtos/zephyr/pull/111030,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+111332,pull_request, modem: cellular: recover when CMUX fails to connect,https://github.com/zephyrproject-rtos/zephyr/pull/111332,ai_bot,,,,ai_bot,yes,Catrina Coons,pr reviewed by Copilot
+86815,pull_request,LVGL: multi-display support,https://github.com/zephyrproject-rtos/zephyr/pull/86815,ai_bot,,,,ai_bot,yes,Catrina Coons,"pr reviewed by Copilot, though its comment was marked as off-topic"
+110935,pull_request,drivers: crc: nxp_lpc: advertise CRC-16/ITU-T capability,https://github.com/zephyrproject-rtos/zephyr/pull/110935,ai_keyword,,ai_keyword,,ai_keyword,yes,Catrina Coons,reviewer suggested an LLM-generated test be added
+71026,pull_request,mgmt: hawkbit: optimize poll_sleep,https://github.com/zephyrproject-rtos/zephyr/pull/71026,ai_keyword,,ai_keyword,,ai_keyword,yes,Catrina Coons,reviewer suggested chatgpt-generated error handling be added
+96213,pull_request,Add generated macro and DT macro to count the number of actual peripheral on bus,https://github.com/zephyrproject-rtos/zephyr/pull/96213,ai_keyword,ai_keyword,,chatgpt,ai_keyword,no,Catrina Coons,possible false positive from reference to chat.zephyrproject.org in thread
+106308,pull_request,drivers: i3c: add Microchip XEC I3C driver,https://github.com/zephyrproject-rtos/zephyr/pull/106308,ai_keyword,,ai_keyword,,ai_keyword,yes,Catrina Coons,reviewer used Claude Opus to analyze pr
+53810,issue,TaskList for Supporting RaspberryPi Pico peripherals,https://github.com/zephyrproject-rtos/zephyr/issues/53810,ai_keyword,,ai_keyword,,ai_keyword,yes,Catrina Coons,contributor relates the current thread's discussion to outside work developed with Claude Code-generated output
+95341,pull_request,boards: efm32gg11: Enable Si7210 Hall-effect sensor,https://github.com/zephyrproject-rtos/zephyr/pull/95341,ai_keyword,,ai_keyword,,ai_keyword,no,Catrina Coons,possible false positive from a contributing organization's invalid signed-off-by 
+118182,pull_request,sysbuild: forward Python variables to variant images,https://github.com/zephyrproject-rtos/zephyr/pull/118182,ai_keyword,ai_keyword,,Claude | claude | claude | claude,ai_keyword,yes,Catrina Coons,"first-time contributor used Claude Code-generated output for the comment, reveiwer noted comment length was too long"
+105388,issue,"drivers: stepper: adi_tmc: add TMC52xx support, especially TMC5240",https://github.com/zephyrproject-rtos/zephyr/issues/105388,ai_keyword,,ai_keyword,,ai_keyword,yes,Catrina Coons,"one contributor used ChatGPT, another used Claude Opus, for code generation on a related issue. Issues with ChatGPT-generated output were noted. "
 111506,pull_request,manifest: hal_nxp: update revision for __aeabi_memcpy fix,https://github.com/zephyrproject-rtos/zephyr/pull/111506,ai_keyword,ai_keyword,,Claude | claude | claude,ai_keyword,,,
 89110,pull_request,serial: add an uart-bridge driver,https://github.com/zephyrproject-rtos/zephyr/pull/89110,ai_keyword,,ai_keyword,,ai_keyword,,,
 109879,pull_request,drivers: comparator: infineon: Add HPPASS CSG Comparator Driver for PSOC Control C3M5,https://github.com/zephyrproject-rtos/zephyr/pull/109879,ai_keyword,,ai_keyword,,ai_keyword,,,
