@@ -1,0 +1,16 @@
+{
+  "commits_retrieved": 81079,
+  "commits_flagged": 3148,
+  "threads_retrieved": 67036,
+  "comments_retrieved": 496268,
+  "threads_after_dedupe": 67036,
+  "comments_after_dedupe": 496268,
+  "threads_after_period_filter": 67036,
+  "comments_after_period_filter": 496268,
+  "threads_after_exclusions": 62408,
+  "comments_after_exclusions": 414584,
+  "prs_with_merged_at": 40574,
+  "final_threads": 3065,
+  "final_comments": 49833,
+  "unique_authors_for_rabbit": 922
+}

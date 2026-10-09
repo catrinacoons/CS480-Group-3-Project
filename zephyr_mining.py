@@ -1,15 +1,18 @@
 import zephyr_pydriller
 import zephyr_github_api
-# import zephyr_build_dataset
+import zephyr_build_dataset
 import csv
 import json
 import sys
+import os, subprocess
+from datetime import datetime, timezone
+from importlib.metadata import version
 
 # this will use both pydriller and PyGithub files to create our results
 # zephyr_pydriller: commits + stats -> commits.csv
 # zephyr_github_api: issues/prs/comments -> threads.csv, comments.csv
 # unique thread/comment authors -> rabbit_users.csv (RABBIT input)
-# TODO: provenance.json to get settings and checkpoint counts
+# DONE: provenance.json to get settings and checkpoint counts
 # DONE - run RABBIT and save rabbit.csv
 
 def github_api():
@@ -46,7 +49,7 @@ def rabbit_csv(rows, path="rabbit_users.csv"):
 def rabbit_gathering(): 
     rows = []
         # zephyr_github_api: issues/prs/comments -> threads.csv, comments.csv
-    for path in ("threads.csv", "comments.csv"):
+    for path in ("final_dataset.csv", "final_comments.csv"):
         try:
             with open(path, "r", newline="", encoding="utf-8") as csv_file:
                 rows += list(csv.DictReader(csv_file))
@@ -64,9 +67,34 @@ def pydriller_step():
     print(f"Commits found by PyDriller: {len(commits)}")
     return commits
 
+# edit: merges this stage into the existing provenance.json instead of overwriting it
+def record_provenance(stage, counts):
+    prov = {}
+    if os.path.exists("provenance.json"):
+        with open("provenance.json", encoding="utf-8") as f:
+            prov = json.load(f)
+    checkpoints = prov.get("checkpoints", {})
+    checkpoints.update(counts)
+    runs = prov.get("stage_runs", {})
+    runs[stage] = datetime.now(timezone.utc).isoformat()
+    prov.update(zephyr_github_api.provenance_json())
+    prov["checkpoints"], prov["stage_runs"] = checkpoints, runs
+    prov["python"] = sys.version.split()[0]
+    prov["packages"] = {}
+    for p in ("PyGithub", "pydriller", "pandas", "rabbit-ng"):
+        try:
+            prov["packages"][p] = version(p)
+        except Exception:
+            prov["packages"][p] = "unknown"
+    try:
+        prov["zephyr_clone_head"] = subprocess.check_output(
+            ["git", "-C", zephyr_pydriller.zephyr_path, "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        prov["zephyr_clone_head"] = "unavailable"
+    with open("provenance.json", "w", encoding="utf-8") as f:
+        json.dump(prov, f, indent=2)
 
-
-# TODO: Edit main to execute each of the functions above
+# DONE: Edit main to execute each of the functions above
 def main():
     stage = sys.argv[1] if len(sys.argv) > 1 else "all"
     counts = {}
@@ -83,33 +111,32 @@ def main():
         counts["threads"] = len(threads)
 
     if stage in ("comments", "all"):
-        repo = zephyr_github_api.authenticate_token()
-        comments = zephyr_github_api.comment_data(repo)
-        zephyr_github_api.commits_csv(comments, "comments.csv", zephyr_github_api.COMMENT_COLUMNS)
-        print(f"Comments saved: {len(comments)}")
-        counts["comments"] = len(comments)
+        zephyr_github_api.comment_data(zephyr_github_api.authenticate_client)
+        with open("comments.csv", newline="", encoding="utf-8") as f:
+            n = sum(1 for _ in csv.DictReader(f))
+        print(f"Comments saved: {n}")
+        counts["comments"] = n
 
-    if stage in ("rabbit", "all"):
-        users = rabbit_gathering()
-        print(f"Unique usernames checked by RABBIT: {len(users)}")
-        counts["rabbit_users"] = len(users)
-		
     if stage in ("links", "all"):
         repo = zephyr_github_api.authenticate_token()
         with open("commits.csv", newline="", encoding="utf-8") as f:
             flagged = [r["sha"] for r in csv.DictReader(f) if r["genai_candidate"] == "True"]
-        links = zephyr_github_api.find_prs_for_commits(repo, flagged)
-        zephyr_github_api.commits_csv(links, "commit_pr_links.csv", ["sha", "pr_number"])
-        print(f"Flagged commits: {len(flagged)}, links: {len(links)}")
-        counts["links"] = len(links)
+        zephyr_github_api.find_prs_for_commits(repo, flagged)
+        with open("commit_pr_links.csv", newline="", encoding="utf-8") as f:
+            n = sum(1 for r in csv.DictReader(f) if r["pr_number"])
+        print(f"Flagged commits: {len(flagged)}, links: {n}")
+        counts["links"] = n
 
     if stage in ("rabbit", "all"):
         users = rabbit_gathering()
         counts["rabbit_users"] = len(users) if users else 0
+
+    if stage in ("build", "all"):
+        zephyr_build_dataset.build()
+        with open("checkpoints.json", encoding="utf-8") as f:
+            counts.update(json.load(f))
 	
-    build = zephyr_github_api.provenance_json(counts)
-    with open("provenance.json", "w", encoding="utf-8") as provenance:
-        json.dump(build, provenance)
+    record_provenance(stage,counts)
 
 # ensure that main runs automatically
 if __name__ == "__main__":
