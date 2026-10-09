@@ -1,1 +1,46 @@
-{"repository": "zephyrproject-rtos/zephyr", "tag": "main", "start_utc": "2022-09-21T00:00:00Z", "end_utc": "2026-09-21T00:00:00Z", "generated_at_utc": "2026-10-08T19:44:16.046910+00:00", "source": "GitHub REST API with PyGithub", "checkpoints": {"comments": 496268}}
+{
+  "repository": "zephyrproject-rtos/zephyr",
+  "tag": "main",
+  "start_utc": "2022-09-21T00:00:00Z",
+  "end_utc": "2026-09-21T00:00:00Z",
+  "generated_at_utc": "2026-10-09T02:49:11.174709+00:00",
+  "source": "GitHub REST API with PyGithub",
+  "checkpoints": {
+    "commits": 81079,
+    "threads": 67036,
+    "comments": 496268,
+    "links": 3148,
+    "commits_retrieved": 81079,
+    "commits_flagged": 3148,
+    "threads_retrieved": 67036,
+    "comments_retrieved": 496268,
+    "threads_after_dedupe": 67036,
+    "comments_after_dedupe": 496268,
+    "threads_after_period_filter": 67036,
+    "comments_after_period_filter": 496268,
+    "threads_after_exclusions": 62408,
+    "comments_after_exclusions": 414584,
+    "prs_with_merged_at": 40574,
+    "final_threads": 3065,
+    "final_comments": 49833,
+    "unique_authors_for_rabbit": 922,
+    "rabbit_users": 993
+  },
+  "note": "commits, threads and comments were collected before provenance logging was added; their counts and dates were reconstructed from the output files",
+  "stage_runs": {
+    "commits": "2026-10-06T00:53:42.641062+00:00",
+    "threads": "2026-10-06T00:53:42.931233+00:00",
+    "comments": "2026-10-08T22:55:44.997303+00:00",
+    "links": "2026-10-09T01:31:13.777293+00:00",
+    "build": "2026-10-09T02:49:11.174622+00:00",
+    "rabbit": "2026-10-09T02:14:31.778950+00:00"
+  },
+  "python": "3.14.7",
+  "packages": {
+    "PyGithub": "2.10.0",
+    "pydriller": "2.12",
+    "pandas": "3.0.6",
+    "rabbit-ng": "3.0.0"
+  },
+  "zephyr_clone_head": "50f99e1f21a0dc306ebe10264a406048e72dcff0"
+}

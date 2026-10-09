@@ -20,7 +20,7 @@ load_dotenv()
 
 csv.field_size_limit(2**31 - 1)
 
-# TODO: May have to update function names in this if errors occur in mining.py (due to duplicate function names)
+# DONE: May have to update function names in this if errors occur in mining.py (due to duplicate function names)
 # DONE: AI tag search lives in negai_signals (detect_genai)
 # TODO: See above and other # TODOs below - thank you! :)
 
@@ -269,15 +269,42 @@ def commits_csv(rows, path="commits.csv", columns=CSV_COLUMNS):
         writer.writeheader()
         writer.writerows(rows)
 
-def find_prs_for_commits(mined_data, shas):
-    links = []
-    for sha in shas:
-        try:
-            for pr in mined_data.get_commit(sha).get_pulls():
-                links.append({"sha": sha, "pr_number": pr.number})
-        except Exception as e:
-            print(f"  could not look up PR for {sha[:8]}: {e}")
-    return links
+# edit: saves each result as it goes and skips commits already in the file, so a rerun resumes.
+# A commit with no PR gets a row with a blank pr_number so it isn't looked up again.
+def find_prs_for_commits(mined_data, shas, path="commit_pr_links.csv"):
+    done = set()
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as f:
+            done = {r["sha"] for r in csv.DictReader(f)}
+    todo = [s for s in shas if s not in done]
+    print(f"{len(done)} commits already saved, {len(todo)} left to check")
+    new_file = not os.path.exists(path)
+    errors, start = 0, time.time()
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["sha", "pr_number"])
+        if new_file:
+            writer.writeheader()
+        for i, sha in enumerate(todo, 1):
+            try:
+                numbers = [pr.number for pr in mined_data.get_commit(sha).get_pulls()]
+                for n in numbers or [""]:
+                    writer.writerow({"sha": sha, "pr_number": n})
+                errors = 0
+            except Exception as e:
+                f.flush()
+                errors += 1
+                print(f"  error on {sha[:8]} ({type(e).__name__}); waiting {60 * errors}s")
+                if errors > 5:
+                    print("  too many errors in a row. Progress is saved; rerun the links stage later.")
+                    return
+                time.sleep(60 * errors)
+                continue          # not saved, so a rerun will retry it
+            if i % 25 == 0 or i == len(todo):
+                f.flush()
+                left = (time.time() - start) / i * (len(todo) - i) / 60
+                print(f"  {i}/{len(todo)} checked, ~{left:.1f} min left")
+            time.sleep(0.5)
+    print("PR lookup finished.")
 
 #DONE: Define rabbit_csv to iterate through every unique GitHub username and save results to rabbit.csv
 def rabbit_results_csv(rows, path="rabbit.csv"):
@@ -287,10 +314,17 @@ def rabbit_results_csv(rows, path="rabbit.csv"):
     with open(path, "w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=RABBIT_COLUMNS)
         writer.writeheader()
-        for result in run_rabbit(contributors = users, api_key=os.environ["GITHUB_TOKEN"]):
-            writer.writerow({"contributor_username": result.contributor,
-                             "contributor_type": result.user_type,
-                             "confidence": result.confidence})
+                # edit: one user at a time so a RABBIT crash on one account doesn't stop the whole run
+        for user in users:
+            try:
+                for result in run_rabbit(contributors = [user], api_key=os.environ["GITHUB_TOKEN"]):
+                    writer.writerow({"contributor_username": result.contributor,
+                                     "contributor_type": result.user_type,
+                                     "confidence": result.confidence})
+            except Exception as e:
+                print(f"  RABBIT failed on {user}: {type(e).__name__}")
+                writer.writerow({"contributor_username": user, "contributor_type": "error"})
+            csv_file.flush()
                             #TODO: ensure that rest of RABBIT columns are listed.
     return users
     
