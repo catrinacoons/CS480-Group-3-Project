@@ -44,15 +44,25 @@
       python zephyr_mining.py rabbit     -> rabbit.csv
       python zephyr_mining.py build      # rebuild via rabbit.csv
 
-○ "all" will run rabbit prior to build
-○ can take hours to run stages, but they will save as the progress forward
+○ Note 1 - "all" will run rabbit prior to build.
+○ Note 2 - Can take hours to run stages, but they will save as the progress forward.
 
-*================* Step by Step Breakdown *================* 
-○
+*================* Step Breakdown *================* 
+○ Detection procedure -  regarding gen_signals.py; regex on the commit messages, the thread titles plus bodies, and comments for: assisted_by_tag, ai_coauthor, and ai_keyword.
 
+○ Flagged -> comments by any AI bot accounts, plus PRs that were linked to any flagged commits. 
+
+○ Our Filters -> zephyr_build_dataset.py - 
+      -> Removed duplicate threads or comments from restarted collection runs.
+      -> Observation period filter applied, dates given above.
+      -> Exclusions used for automation-bots, and AI assistant bots were marked and kept.
+      -> Threads with at least 1 GenAI signal, were also kept. 
+
+○ Derived variables per a thread -> n_comments, n_participants, n_ai_bot_comments, n_genai_comments, all_signals, strongest_signal, has_assisted_by_tag, linked_flagged_commit, is_merged, censored, days_open, days_to_first_genai_comment 
+
+○  Validation - validation_sample.csv used up to 20 candidates (at random) per the signal type; and 40 non-canidates. 
 
 *================* The Checkpoints *================* 
-
 |                                            |  Threads   |    Comments    |   Commits   | 
 ○ Artifacts retrieved ->                        67,036         496,268         81,079
 ○ After deduplication ->                        67,036         496,268
