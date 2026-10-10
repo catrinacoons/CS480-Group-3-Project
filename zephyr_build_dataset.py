@@ -138,6 +138,17 @@ def build():
     cp["final_threads"] = len(final)
     cp["final_comments"] = len(final_comments)
 
+    # edit: stratified random sample for qualitative coding (fixed seed, reproducible)
+    CODING_N = 300
+    share = CODING_N / len(final)
+    final["in_coding_sample"] = False
+    for _, g in final.groupby("strongest_signal"):
+        idx = g.sample(n=max(1, round(len(g) * share)), random_state=480).index
+        final.loc[idx, "in_coding_sample"] = True
+    cp["coding_sample_threads"] = int(final.in_coding_sample.sum())
+    final_comments = final_comments.merge(final[["number", "in_coding_sample"]],
+                                          left_on="thread_number", right_on="number", how="left").drop(columns="number")
+
     # 5. RABBIT input: only authors involved in candidate threads
     users = sorted(set(final.author_login) | set(final_comments.author_login))
     pd.DataFrame({"contributor_username": users}).to_csv("rabbit_users.csv", index=False)
@@ -175,6 +186,9 @@ def build():
         dict(zip(sample.number.astype(str), sample.is_true_genai))).fillna("")
     final.to_csv("final_dataset.csv", index=False, encoding="utf-8")
     final_comments.to_csv("final_comments.csv", index=False, encoding="utf-8")
+    final[final.in_coding_sample].to_csv("coding_sample.csv", index=False, encoding="utf-8")
+    final_comments[final_comments.thread_number.isin(final[final.in_coding_sample].number)] \
+        .to_csv("coding_sample_comments.csv", index=False, encoding="utf-8")
 
     with open("checkpoints.json", "w", encoding="utf-8") as f:
         json.dump(cp, f, indent=2)
