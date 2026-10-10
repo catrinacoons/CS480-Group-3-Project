@@ -1,4 +1,4 @@
- *---------------------------------* Group 3 Project  *---------------------------------*
+*-------------------------------------------------------------------* Group 3 Project *-------------------------------------------------------------------* 
 
 ○  Research Question Topic: How do Zephyr contributors evaluate and respond to Gen-AI-generated outputs in development conversations?
 
@@ -12,13 +12,13 @@
 
 ○  Goal: Understand how Zephyr contributors assess, verify, correct, or reject GenAI-generated suggestions during software development.
 
-*================* The Setup *================* 
+*========================================================* The Setup *========================================================* 
 ○ Repository:
       Create a 480 directory and then clone both repositories into it:
       >>    git clone --depth 1 https://github.com/zephyrproject-rtos/zephyr.git
       >>    git clone https://github.com/catrinacoons/CS480-Group-3-Project.com
 
-+====+ API Auth token and RABBIT Setup +====+ 
++====================================+ API Auth token and RABBIT Setup +====================================+ 
 ○  Allows Rabbit to run 5,000 queries/hr compared to 60/hr without a token (Source: RABBIT-ng repo description)
 
 ○  Rabbit requires Python version 3.11 or newer: check using <python --version> and update if necessary (current version = 3.14.7)
@@ -38,7 +38,7 @@
 ○  Install remaining packages: 
       <pip install requests python-dotenv>
 
-*================* How to Run the Pipeline *================* 
+*========================================================* How to Run the Pipeline *========================================================* 
 ○ Run the following stages in order
       python zephyr_mining.py commits    -> commits.csv
       python zephyr_mining.py threads    -> threads.cv
@@ -51,7 +51,7 @@
 ○ Note 1 - "all" will run rabbit prior to build.
 ○ Note 2 - Can take hours to run stages, but they will save as the progress forward.
 
-*================* Step Breakdown *================* 
+*========================================================* Step Breakdown *========================================================* 
 ○ Detection procedure -  regarding gen_signals.py; regex on the commit messages, the thread titles plus bodies, and comments for: assisted_by_tag, ai_coauthor, and ai_keyword.
 
 ○ Flagged -> comments by any AI bot accounts, plus PRs that were linked to any flagged commits. 
@@ -66,7 +66,7 @@
 
 ○  Validation - validation_sample.csv used up to 20 candidates (at random) per the signal type; and 40 non-canidates. 
 
-*================* The Checkpoints *================* 
+*========================================================* The Checkpoints *========================================================* 
 |                                            |  Threads   |    Comments    |   Commits   | 
 ○ Artifacts retrieved ->                        67,036         496,268         81,079
 ○ After deduplication ->                        67,036         496,268
@@ -77,7 +77,7 @@
 ○ Unique authors sent to RABBIT ->    922
 ○ The full counts -> checkpoints.json Run settings/versions: provenance.json
 
-*================* The Files *================* 
+*========================================================* The Files *========================================================* 
 ○ The Code - zephyr_mining.py [the runner], zephyr_pydriller.py, zephyr_github_api.py, genai_signals.py, zephyr_build_dataset.py, backfill_provenance.py
 
 ○ The Raw Data - commits.csv, threads.csv, comments.zip (aka comments.csv), commit_pr_links.csv, rabbit.csv
