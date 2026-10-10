@@ -49,7 +49,7 @@
       python zephyr_mining.py build      # rebuild via rabbit.csv
 
 ○ Note 1 - "all" will run rabbit prior to build.
-○ Note 2 - Can take hours to run stages, but they will save as the progress forward.
+○ Note 2 - Can take hours to run stages, but they will save as they progress forward.
 
 *========================================================* Step Breakdown *========================================================* 
 ○ Detection procedure -  regarding gen_signals.py; regex on the commit messages, the thread titles plus bodies, and comments for: assisted_by_tag, ai_coauthor, and ai_keyword.
