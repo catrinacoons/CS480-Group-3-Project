@@ -74,7 +74,7 @@
 ○ The full counts -> checkpoints.json Run settings/versions: provenance.json
 
 *================* The Files *================* 
-○ The Code - zephyr.mining (the runner), zephyr_pydriller.py, zephyr_github_api.py, genai_signals.py, zephyr_build_dataset.py, backfill_provenance.py
+○ The Code - zephyr_mining.py (the runner), zephyr_pydriller.py, zephyr_github_api.py, genai_signals.py, zephyr_build_dataset.py, backfill_provenance.py
 
 ○ The Raw Data - commits.csv, threads.csv, comments.zip (aka comments.csv), commit_pr_links.csv, rabbit.csv
 
