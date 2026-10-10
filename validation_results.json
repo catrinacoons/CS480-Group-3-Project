@@ -1,0 +1,27 @@
+{
+  "ai_bot": {
+    "yes": 20,
+    "n": 20,
+    "rate": 1.0
+  },
+  "ai_keyword": {
+    "yes": 18,
+    "n": 20,
+    "rate": 0.9
+  },
+  "assisted_by_tag": {
+    "yes": 17,
+    "n": 20,
+    "rate": 0.85
+  },
+  "linked_commit_only": {
+    "yes": 5,
+    "n": 20,
+    "rate": 0.25
+  },
+  "non_candidate": {
+    "yes": 1,
+    "n": 40,
+    "rate": 0.025
+  }
+}
