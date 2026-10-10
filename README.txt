@@ -44,21 +44,32 @@
       python zephyr_mining.py rabbit     -> rabbit.csv
       python zephyr_mining.py build      # rebuild via rabbit.csv
 
-
-... working on it -jw
+○ "all" will run rabbit prior to build
+○ can take hours to run stages, but they will save as the progress forward
 
 *================* Step by Step Breakdown *================* 
+○
 
-... working on it -jw
 
 *================* The Checkpoints *================* 
 
-... working on it -jw
+|                                            |  Threads   |    Comments    |   Commits   | 
+○ Artifacts retrieved ->                        67,036         496,268         81,079
+○ After deduplication ->                        67,036         496,268
+○ After observation period filter ->            67,036         496,268
+○ After exclusions [aka automation bots] ->     62,408         515,584
+○ Final Observations [the GenAI candidates] ->  3,065          49,833                
+○ Commits w. GenAi signals ->                                                  3,148
+○ Unique authors sent to RABBIT ->  922
+○ The full counts -> checkpoints.json Run settings/versions: provenance.json
 
 *================* The Files *================* 
+○ The Code - zephyr.mining (the runner), zephyr_pydriller.py, zephyr_github_api.py, genai_signals.py,               zephyr_build_dataset.py, backfill_provenance.py
 
-... working on it -jw
+○ The Raw Data - commits.csv, threads.csv, comments.zip (aka comments.csv), commit_pr_links.csv,                        rabbit.csv
 
+○ The Final Files - final_dataset.csv [with 1 row per candidate thread], final_comments.csv,                               threads_derived.csv [all the threads with derived variables], validation_sample.csv
+                        
 
 
 
