@@ -52,7 +52,7 @@
 ○ Note 2 - Can take hours to run stages, but they will save as they progress forward.
 
 *========================================================* Step Breakdown *========================================================* 
-○ Detection procedure -  regarding gen_signals.py; regex on the commit messages, the thread titles plus bodies, and comments for: assisted_by_tag, ai_coauthor, and ai_keyword.
+○ Detection procedure -> regarding gen_signals.py; regex on the commit messages, the thread titles plus bodies, and comments for: assisted_by_tag, ai_coauthor, and ai_keyword.
 
 ○ Flagged -> comments by any AI bot accounts, plus PRs that were linked to any flagged commits. 
 
@@ -64,7 +64,7 @@
 
 ○ Derived variables per a thread -> n_comments, n_participants, n_ai_bot_comments, n_genai_comments, all_signals, strongest_signal, has_assisted_by_tag, linked_flagged_commit, is_merged, censored, days_open, days_to_first_genai_comment 
 
-○  Validation - validation_sample.csv used up to 20 candidates (at random) per the signal type; and 40 non-canidates. 
+○  Validation -> validation_sample.csv used up to 20 candidates (at random) per the signal type; and 40 candidates. 
 
 *========================================================* The Checkpoints *========================================================* 
 |                                            |  Threads   |    Comments    |   Commits   | 
