@@ -41,7 +41,7 @@
 *========================================================* How to Run the Pipeline *========================================================* 
 ○ Run the following stages in order
       python zephyr_mining.py commits    -> commits.csv
-      python zephyr_mining.py threads    -> threads.cv
+      python zephyr_mining.py threads    -> threads.csv
       python zephyr_mining.py comments   -> comments.csv
       python zephyr_mining.py links      -> commit_pr_links.csv
       python zephyr_mining.py build      -> final_dataset.csv
