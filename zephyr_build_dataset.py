@@ -201,6 +201,7 @@ def validate_only(path="validation_sample.csv"):
 	labelled = sample[sample.is_true_genai.str.lower().isin(["yes", "no"])]
 	if not len(labelled):
 		print("No labelled rows found in validation_sample.csv")
+		return
 	res = {}
 	for stratum, g in labelled.groupby("stratum"):
 		yes = int((g.is_true_genai.str.lower() == "yes").sum())
