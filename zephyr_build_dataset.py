@@ -196,5 +196,18 @@ def build():
         print(f"{k}: {v}")
     return final
 
+def validate_only(path="validation_sample.csv"):
+	sample = pd.read_csv(path, dtype=str, keep_default_na=False)
+	labelled = sample[sample.is_true_genai.str.lower().isin(["yes", "no"])]
+	if not len(labelled):
+		print("No labelled rows found in validation_sample.csv")
+	res = {}
+	for stratum, g in labelled.groupby("stratum"):
+		yes = int((g.is_true_genai.str.lower() == "yes").sum())
+		res[stratum] = {"yes": yes, "n": len(g), "rate": round(yes / len(g), 3)}
+	with open("validation_results.json", "w", encoding="utf-8") as f:
+		json.dump(res, f, indent=2)
+	print("validation results: ", res)    
+
 if __name__ == "__main__":
     build()

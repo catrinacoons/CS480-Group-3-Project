@@ -135,8 +135,11 @@ def main():
         zephyr_build_dataset.build()
         with open("checkpoints.json", encoding="utf-8") as f:
             counts.update(json.load(f))
-	
+
     record_provenance(stage,counts)
+
+    if stage in ("validate",):
+        zephyr_build_dataset.validate_only()
 
 # ensure that main runs automatically
 if __name__ == "__main__":
