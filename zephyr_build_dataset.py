@@ -207,7 +207,6 @@ def validate_only(path="validation_sample.csv"):
 		res[stratum] = {"yes": yes, "n": len(g), "rate": round(yes / len(g), 3)}
 	with open("validation_results.json", "w", encoding="utf-8") as f:
 		json.dump(res, f, indent=2)
-	print("validation results: ", res)    
 
 if __name__ == "__main__":
     build()
