@@ -1,93 +1,87 @@
-# CS480-Group-3-Project
-We are data mining the last 4 years of the zephyr GitHub repository for the CS480 Class Project 4: How Are GenAI Outputs Evaluated in Zephyr Development? We are answering research question: How do Zephyr contributors evaluate and respond to GenAI-generated outputs in development conversations?
+*-------------------------------------------------------------------* Group 3 Project *-------------------------------------------------------------------* 
 
+○  Research Question Topic: How do Zephyr contributors evaluate and respond to Gen-AI-generated outputs in development conversations?
 
-## Project 4 Description
-Project 4: How Are GenAI Outputs Evaluated in Zephyr Development?
+○  Repository mined: zephyrproject-rtos/zephyr (branch: main)
 
-Goal: Understand how Zephyr contributors assess, verify, correct, or reject GenAI-generated
-suggestions during software development.
+○  Period of time: 2022-09-21 00:00 UTC to 2026-09-21 00:00 UTC
+      We are mining the last 4 years of the public zephyr Github repository, for project on How Are GenAI Outputs Evaluated in Zephyr Development. 
 
-Research question: How do Zephyr contributors evaluate and respond to GenAI-generated outputs in
-development conversations?
+○  Unit of Analysis: conversion thread, issue or pull request and its commits
+      Includes pull request, review comments, issues, and discussions containing observable signs of GenAI involvement.
 
-Data: You will mine the last 4 years of public Zephyr GitHub pull requests, review comments, issues,
-and discussions containing observable signs of GenAI involvement.
+○  Goal: Understand how Zephyr contributors assess, verify, correct, or reject GenAI-generated suggestions during software development.
 
-To identify potential signs of GenAI use, follow the approach described by this paper: https://arxiv.org/pdf/2608.03329
+*========================================================* The Setup *========================================================* 
+○ Repository:
+      Create a 480 directory and then clone both repositories into it:
+      >>    git clone --depth 1 https://github.com/zephyrproject-rtos/zephyr.git
+      >>    git clone https://github.com/catrinacoons/CS480-Group-3-Project.com
 
-Each candidate must be validated before inclusion. The goal is not to determine whether GenAI outputs are objectively better or worse than human-generated outputs. Instead, the project examines how contributors evaluate GenAI outputs once they become visible in development conversations.
++====================================+ API Auth token and RABBIT Setup +====================================+ 
+○  Allows Rabbit to run 5,000 queries/hr compared to 60/hr without a token (Source: RABBIT-ng repo description)
 
-The unit of analysis should generally be the conversation or review thread, so you can understand what GenAI produced, how contributors reacted, and what happened afterward.
+○  Rabbit requires Python version 3.11 or newer: check using <python --version> and update if necessary (current version = 3.14.7)
+      Ensure you have a venv folder then <pip install PyGithub>
+      Install Rabbit packages (must have pydriller installed first) <pip install pandas pydriller PyGithub rabbit-ng>
 
-You will need to explain your strategies to:
+○  Generate a token and link it to the project
+      Input <https://github.com/settings/tokens> -> Token (classic) tab -> Generate new token -> (classic)
+            -> Leave all boxes unchecked -> Name token -> Set expiration to class completion (or graduation)
+                  -> Copy token immediately (GitHub shows it once)
+                  -> Store that token in a safe place. 
 
-● Select which GitHub data to analyze and detect candidate GenAI signals
+○  Following command below changes a bit for Windows (it's correct for Mac/Linux):
+      Input <export GITHUB_TOKEN="input_token">
+            (Token only persists as long as terminal tab is open, redo as needed.)
 
-● Validate candidates and remove false positives
+○  Install remaining packages: 
+      <pip install requests python-dotenv>
 
-● Examine the surrounding conversation to identify how contributors evaluated the GenAI
-output
+*========================================================* How to Run the Pipeline *========================================================* 
+○ Run the following stages in order
+      python zephyr_mining.py commits    -> commits.csv
+      python zephyr_mining.py threads    -> threads.csv
+      python zephyr_mining.py comments   -> comments.csv
+      python zephyr_mining.py links      -> commit_pr_links.csv
+      python zephyr_mining.py build      -> final_dataset.csv
+      python zephyr_mining.py rabbit     -> rabbit.csv
+      python zephyr_mining.py build      # rebuild via rabbit.csv
 
-● Qualitatively derive response categories from the data and develop a codebook
+○ Note 1 - "all" will run rabbit prior to build.
+○ Note 2 - Can take hours to run stages, but they will save as they progress forward.
 
-● Scale the analysis when appropriate, with human validation of automated classification
+*========================================================* Step Breakdown *========================================================* 
+○ Detection procedure -> regarding gen_signals.py; regex on the commit messages, the thread titles plus bodies, and comments for: assisted_by_tag, ai_coauthor, and ai_keyword.
 
-Expected analysis:
-Develop a taxonomy of how GenAI outputs are evaluated and handled in Zephyr development conversations. Categories may include outputs being accepted, modified, corrected, questioned, or rejected, but the final taxonomy should come from the data.
+○ Flagged -> comments by any AI bot accounts, plus PRs that were linked to any flagged commits. 
 
-Report how frequently each response type appears and examine the reasons contributors give for their decisions. Prepare a dataset of validated conversations and a qualitative codebook with the identified response categories and representative examples.
-for their decisions.
-Prepare a dataset of validated conversations and a qualitative codebook with the identified
-response categories and representative examples.
+○ Our Filters -> zephyr_build_dataset.py - 
+      -> Removed duplicate threads or comments from restarted collection runs.
+      -> Observation period filter applied, dates given above.
+      -> Exclusions used for automation-bots, and AI assistant bots were marked and kept.
+      -> Threads with at least 1 GenAI signal, were also kept. 
 
-## Delivery 1 - Research Design and Data Preparation
-Each team selected has a project, which has a research question. For this delivery, your goal is to define exactly how you will answer the RQ and prepare the Zephyr data needed for the analysis.
+○ Derived variables per a thread -> n_comments, n_participants, n_ai_bot_comments, n_genai_comments, all_signals, strongest_signal, has_assisted_by_tag, linked_flagged_commit, is_merged, censored, days_open, days_to_first_genai_comment 
 
-Only one group member needs to submit the deliverable. Each group will receive a grade based on peer evaluations collected after submission.
+○  Validation -> validation_sample.csv used up to 20 candidates (at random) per the signal type; and 40 candidates. 
 
-Deliverables
-### 1. Research Design
+*========================================================* The Checkpoints *========================================================* 
+|                                            |  Threads   |    Comments    |   Commits   | 
+○ Artifacts retrieved ->                        67,036         496,268         81,079
+○ After deduplication ->                        67,036         496,268
+○ After observation period filter ->            67,036         496,268
+○ After exclusions [aka automation bots] ->     62,408         414,584
+○ Final Observations [the GenAI candidates] ->  3,065          49,833                
+○ Commits w. GenAi signals ->                                                  3,148
+○ Unique authors sent to RABBIT ->    922
+○ Coding sample threads ->    300
+○ Validation sample threads -> 120
+○ The full counts -> checkpoints.json Run settings/versions: provenance.json
 
-Use the provided Overleaf template and complete all sections that apply to your project.
+*========================================================* The Files *========================================================* 
+○ The Code - zephyr_mining.py [the runner], zephyr_pydriller.py, zephyr_github_api.py, genai_signals.py, zephyr_build_dataset.py, zephyr_thread_views.py, zephyr_split_coding_sample.py, backfill_provenance.py
 
-You do not need to run the final analysis yet.
+○ The Raw Data - commits.csv, threads.csv, comments.zip (aka comments.csv), commit_pr_links.csv, rabbit.csv, rabbit_users.csv
 
-By this deadline, you must have:
-
-mined the required Zephyr data;
-applied the study filters;
-cleaned the data;
-constructed the variables needed for your RQ;
-organized the dataset according to your unit of analysis.
-The final dataset should be ready for analysis.
-
-### 2. Replication Package
-
-Submit a replication package that allows someone to reproduce and verify your dataset.
-
-It must include:
-
-code to retrieve the data in Python;
-code to filter and clean the data in Python;
-code to construct derived variables and the final dataset in Python;
-raw data (CSV);
-the final analysis-ready dataset (CSV);
-a README explaining exactly how to run the pipeline (TXT).
-The README should also report important checkpoints, for example: 
-
-Artifacts retrieved: N
-
-After observation-period filter: N
-
-After exclusions: N
-
-Final observations: N
-
-Assignment 1 ends with a well-defined Research Design and a reproducible, analysis-ready dataset.
-
-Peer Evaluation Process: Each team member will complete a separate individual assignment. In this assignment, you will independently evaluate your own and your teammates' contributions by distributing 400 points across the group members. Points should reflect each person's actual participation in the deliverable.
-
-Individual Grade Calculation: Your final individual grade combines two components: The group's grade (based on this deliverable quality) and Your peer evaluation score (based on the average points you receive from all teammates). The instructor will use the peer evaluation average to adjust individual grades according to demonstrated participation.
-
-Default Evaluation: If a team member does not submit their peer evaluation, the system will automatically assign equal points (100 points per member) for that evaluation.
+○ The Final Files - final_dataset.csv [with 1 row per candidate thread], final_comments.csv, threads_derived.csv [all the threads with derived variables], validation_sample.csv, coding_sample.csv, coding_sample_comments.csv, validation_results.json, provenance.json
