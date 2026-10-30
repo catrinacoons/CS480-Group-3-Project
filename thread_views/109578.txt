@@ -1,0 +1,831 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109578
+TITLE: Bluetooth: HIDS: add HID Service
+
+*--- opening post by chengkai15 (2026-05-21 11:10:56+00:00)
+## Summary
+
+Adds the HID Service (HIDS), the GATT service the HID Device role of HOGP is built on, a `hids` Bluetooth shell command set, and a two device bsim test.
+
+Follows the Bluetooth WG decision in https://github.com/zephyrproject-rtos/zephyr/pull/109578#issuecomment-5526424590: HIDS lands as a standalone service under `services/hids/`, the HOGP Device wrapper that only forwarded to it is dropped, and `profiles/` is left to the HOGP Host role, which is a real profile rather than a stub. So there is no `profiles/` directory and no `bt_hogp_device_*` API here.
+
+Phase 1 of RFC #108582.
+
+## Commits
+
+1. `Bluetooth: HIDS: add HID Service` — the service and the `bt_hids_*` API
+2. `Bluetooth: HIDS: add HID Service shell commands` — `CONFIG_BT_HIDS_SHELL`
+3. `tests: Bluetooth: HIDS: add a two device bsim test`
+
+Each commit builds and passes its tests on its own.
+
+## Design notes
+
+* **The attribute table is static.** How many Report characteristics of each type exist is Kconfig; the application supplies one Report ID per characteristic at registration. Building it at runtime would mean either exposing Reports the application does not use, or putting a CCC on Output and Feature Reports, which HIDS does not define.
+* **The service holds each Report value** and answers a Host read from it, like the other GATT services in the tree. Every fragment of a long read comes from that one value rather than from a per-read copy that can go stale. The application uses `bt_hids_report_set()` and `bt_hids_report_get()`; a Host write to a writable Report replaces the value too.
+* This replaces an earlier `get_report` callback per read. ATT does not read a long attribute atomically, so a per-read callback cannot stay consistent without a cache whose lifetime ATT gives no way to bound. Two consequences: memory becomes one buffer per Report instead of per connection (336 to 1096 bytes of static data with 1/1/2 Reports at `MAX_REPORT_LEN=256`), and the application is no longer told that a Host did GET_REPORT.
+* **Protocol Mode and Suspend are per connection**, held in a slot from a pool of `MIN(CONFIG_BT_MAX_CONN, CONFIG_BT_MAX_PAIRED)` slots, claimed when a Host's link is encrypted or on its first Protocol Mode or HID Control Point access, and reset on every connection. A Host that finds the pool full when it encrypts is simply not tracked. CCC changes are reported with the connection they belong to.
+* **Writes are bounded.** Longer than `CONFIG_BT_HIDS_MAX_REPORT_LEN` gets Invalid Attribute Length, so that option bounds both directions; a non-zero offset gets Invalid Offset, because a Report is a whole report rather than a byte addressable blob.
+* **Checked at registration:** Report Map length, duplicate Report IDs within a Report Type, a Report ID of 0 when a type has several Reports, and HID Information flags the service cannot back.
+* **Protocol Mode is off by default** and selected by the two Boot Report options, because the characteristic is mandatory only for a Device that supports Boot Protocol Mode.
+* **Boot Reports** take their layout from the USB HID Specification rather than the Report Map, so they have no Report Reference descriptor, and only the two Boot Input Reports have a CCC. Keyboard and mouse get separate options because HIDS v1.1 Table 2.1 allows each only on that device type. Staying inside the selected Protocol Mode is the Host's requirement, so neither set is restricted; the application picks what to send from `bt_hids_get_protocol_mode()`.
+* **Not implemented:** multiple HID Service instances, the External Report Reference descriptor, HID ISO.
+
+## Test plan
+
+* **bsim, two devices** (`tests/bsim/bluetooth/services/hids`): the client encrypts the link, discovers the service, checks the Report Map, the HID Information and every Report Reference descriptor, subscribes, then exercises GET_REPORT, SET_REPORT, Protocol Mode and the HID Control Point. It reconnects and checks that Protocol Mode is back at its default and notifications resume, that unregistering does not disconnect the Host, and that registering again while that Host is connected tracks it.
+* Also in bsim: the three Boot Report characteristics (properties, which of them have a CCC, each fixed length, a Boot Keyboard Input notification, and a wrong length write refused before the application sees it); the registration checks; the bound `bt_hids_send_report()` enforces; a CCC write asking for indications refused while a Reserved bit is processed as zero; a Read Long, and a Read Blob at and past the end of the value.
+* **Build matrix**, warnings as errors: `BT_HIDS` alone, with the shell at 1/1/1, `PROTOCOL_MODE=y`, each Boot option alone and both together, 16/16/16 with the shell off at `MAX_REPORT_LEN=256`, and 1/0/0 with the shell off. All three counts at 0 fails a `BUILD_ASSERT`, as intended.
+* **Hardware, two USB dongles** over HCI User Channel, Zephyr on both sides (Realtek 5.4 as the Device, CSR 4.2 as the Host): the attribute table as designed; bonding, discovery, GET_REPORT, SET_REPORT, notifications, Protocol Mode and HID Control Point all reaching the application; a 100-byte Report over a 66-byte ATT MTU assembled from two Read Blobs, with one past the end answered Invalid Offset; a 20-byte and a queued 64-byte write against an 8-byte `MAX_REPORT_LEN` both refused with ATT `0x0d` without reaching the application, and a write within the limit delivered.
+* `checkpatch.pl` and `check_compliance.py` are clean on each commit.
+* CI does not run the bsim suite for this PR — `BabbleSim Test Results` reports no tests — so the bsim result above is local, on `nrf52_bsim/native`.
+* PTS has not been re-run since the restructuring; the 20/20 result posted earlier in this PR was obtained on the original single-commit version and no longer applies.
+
+## Follow-ups
+
+* `peripheral_hogp` sample, stacked on this branch: #118458. It also removes `samples/bluetooth/peripheral_hids`, whose Report Map is readable on an unencrypted link, which HOGP does not allow.
+* HOGP Host role, which is where `profiles/` gets introduced: #109579.
+
+*--- Thalley (2026-05-22 06:08:50+00:00)
+Where are these defined? i.e. which document defines these?
+
+*--- Thalley (2026-05-22 06:09:04+00:00)
+Consider using an enum and/or suffix with `U`
+
+*--- Thalley (2026-05-22 06:09:22+00:00)
+We should IMO not use the term "BLE", but rather Bluetooth LE
+
+*--- Thalley (2026-05-22 06:13:43+00:00)
+Overall something off with putting a `Profile` into the `services` directory. We may want to consider other options
+
+*--- Thalley (2026-05-22 06:14:22+00:00)
+Consider defining enums for the possible values
+
+*--- Thalley (2026-05-22 06:14:46+00:00)
+These do not seem related to HOGP but are just generic GAP callbacks?
+
+*--- Thalley (2026-05-22 06:17:04+00:00)
+Is this a service or profile API? 
+
+These just seem to forward whatever the service receives with basically no validation, thus leaving a lot of the actual implementation of the profile up to the implementation.
+
+*--- Thalley (2026-05-22 06:20:03+00:00)
+Consider defining these values in a header file somewhere. 
+
+They should also be suffixed with `U` as per the coding guidelines
+
+*--- Thalley (2026-05-22 06:20:33+00:00)
+Suggest to log the address and type as we do for other samples
+
+*--- Thalley (2026-05-22 06:20:45+00:00)
+Suggest to use 100 column width
+
+*--- Thalley (2026-05-22 06:21:07+00:00)
+Indentation seems to be off for many of these functions
+
+*--- Thalley (2026-05-22 06:23:07+00:00)
+```suggestion
+	if (len != sizeof(hid_svc.protocol_mode) || offset != 0) {
+```
+
+*--- Thalley (2026-05-22 06:23:20+00:00)
+```suggestion
+	if (callbacks != NULL && callbacks->set_protocol != NULL) {
+```
+
+Applies many places
+
+*--- Thalley (2026-05-22 06:26:10+00:00)
+You can move this to the for loop to stop the loop earlier if this happens
+
+*--- Thalley (2026-05-22 06:26:22+00:00)
+```suggestion
+	(void)memset(hid_svc.attrs, 0, count * sizeof(struct bt_gatt_attr));
+```
+
+*--- Thalley (2026-05-22 06:26:44+00:00)
+```suggestion
+	hid_svc.attrs[idx] = (struct bt_gatt_attr)
+		BT_GATT_ATTRIBUTE(&uuid_gatt_primary.uuid, BT_GATT_PERM_READ,
+				  bt_gatt_attr_read_service, NULL, &hids_uuid);
+	idx++;
+```
+
+Coding guidelines violation
+
+*--- Thalley (2026-05-22 06:28:35+00:00)
+Why this extra scope?
+
+*--- Thalley (2026-05-22 06:29:46+00:00)
+I don't think we need to guard definitions
+
+*--- Thalley (2026-05-22 06:29:59+00:00)
+Applies multiple places
+
+*--- Thalley (2026-05-22 06:30:23+00:00)
+```suggestion
+	if (err != 0U || callbacks == NULL) {
+```
+
+*--- Thalley (2026-05-22 06:30:59+00:00)
+Consider `BT_CONN_CB_DEFINE`
+
+*--- Copilot (2026-05-22 06:43:42+00:00)
+`hogp_host.c` is referenced when `CONFIG_BT_HOGP_HOST` is enabled, but there is no corresponding `hogp_host.c` file in `subsys/bluetooth/services/hogp/` (directory only contains `hogp_device.c`). This makes the build fail as soon as BT_HOGP_HOST is selected. Either add the host implementation file, or drop the host option/reference from this PR (Phase 1 device-only).
+
+*--- Copilot (2026-05-22 06:43:43+00:00)
+`BT_HOGP_HOST` is introduced here, but the PR does not add the corresponding public header (`include/zephyr/bluetooth/services/hogp_host.h`) or implementation (`hogp_host.c`). Enabling this Kconfig currently leads to compile/build failures (e.g., missing header included from `hogp_internal.h`, missing source referenced from `subsys/bluetooth/services/hogp/CMakeLists.txt`). Consider removing/guarding the host Kconfig until the host role is actually implemented.
+
+*--- Copilot (2026-05-22 06:43:43+00:00)
+This internal header conditionally includes `<zephyr/bluetooth/services/hogp_host.h>` when `CONFIG_BT_HOGP_HOST` is enabled, but the PR does not add that header. As-is, selecting BT_HOGP_HOST will fail to compile. Either add the missing public header/host implementation, or remove the host option from this phase.
+
+*--- Copilot (2026-05-22 06:43:43+00:00)
+`bt_hogp_device_register()` uses the `callbacks` pointer as the “registered” flag (`if (callbacks) ...`), but then assigns `callbacks = param->cb` without requiring it to be non-NULL. If `param->cb` is NULL, the service can be registered successfully while later APIs (e.g. `bt_hogp_device_send_report()`) will return -ESRCH and connection callbacks won’t run (`hogp_dev_connected` bails out on `!callbacks`). Use a separate registration state variable (or require `param->cb != NULL`) so registration and callback presence are not conflated.
+
+*--- Copilot (2026-05-22 06:43:44+00:00)
+`bt_hogp_device_unregister()` may double-unref `bt_conn` objects: it calls `bt_conn_disconnect()` (async) for each stored connection, then immediately iterates `connections[]` and `bt_conn_unref()`s any non-NULL entries. If the disconnect callback (`hogp_dev_disconnected`) runs after the manual unref loop, it will unref the same connection again. To avoid a potential refcount underflow/use-after-free, either unref+NULL the slots synchronously in `unregister()` (and make the disconnect cb ignore missing slots), or defer unref until the disconnect callback completes.
+
+*--- Copilot (2026-05-22 06:43:44+00:00)
+Input Report characteristics are being created with write capability (`BT_GATT_CHRC_WRITE`) and writable permissions (`HIDS_PERM_RW` + `write_report`). In Zephyr’s existing HIDS sample, the Input Report is `READ | NOTIFY` only (see `samples/bluetooth/peripheral_hids/src/hog.c:161-166`). Allowing writes to an Input Report is unexpected and may cause hosts to attempt unsupported operations. Consider making Input Reports read/notify-only (no write callback / no write permission), while keeping writes for Output/Feature reports.
+
+*--- Copilot (2026-05-22 06:43:44+00:00)
+The public callback `ccc_changed` includes a `struct bt_conn *conn` parameter, but the implementation always invokes it with `conn == NULL` (because `cfg_changed` doesn’t provide the connection). This makes the callback signature misleading and does not match the PR description’s “per-connection CCC tracking”. If per-connection reporting is required, use the managed CCC `cfg_write` hook (which *does* provide `conn`) to notify the application about changes for that specific connection, or adjust the callback signature/documentation to reflect that no conn is available.
+
+*--- Copilot (2026-05-22 06:43:44+00:00)
+`hid_svc.input_ntf_enabled` is a `uint8_t` bitmap, but `CONFIG_BT_HOGP_DEVICE_MAX_REPORTS` allows up to 16 reports, and this code uses `BIT(idx)` where `idx` may exceed 7 (truncation/overflow). Also, this bitmap is never read anywhere in the current implementation. Either remove it, or change it to a suitably-sized type (e.g. `uint16_t`/`uint32_t` or a `sys_bitarray`) and use it to gate notifications.
+
+*--- Copilot (2026-05-22 06:43:45+00:00)
+This script launches two simulated instances (`device_id` and `host_id`), but the test binary currently only installs the `hogp_device_basic` test ID (no `hogp_host_basic` is present), so the second instance will not find its test case. Either add the corresponding host-side test (and enable central role in `prj.conf`), or simplify the script to only run the device instance for now.
+
+*--- Copilot (2026-05-22 06:43:45+00:00)
+Only the device test installer is registered here (`test_hogp_device_install`). If the bsim scripts intend to start a separate "host" role instance (e.g. `-testid=hogp_host_basic`), then a host test installer/instance also needs to be added; otherwise the second simulated instance will fail to start its test case.
+
+*--- Copilot (2026-05-22 06:43:45+00:00)
+`write_boot_report()` does not validate `offset` (or `len`) for writes. With long/offset writes, this should return `BT_ATT_ERR_INVALID_OFFSET` when `offset != 0` (similar to `write_report()`). Adding basic offset/length validation avoids accepting malformed ATT writes on the Boot Output Report characteristic.
+
+*--- chengkai15 (2026-05-22 09:33:04+00:00)
+> Overall the structure of it seems OK, but I'm not sure if this is a service implementation and API, or a profile implementation or API.
+> 
+> Please have a good look at https://docs.zephyrproject.org/latest/contribute/coding_guidelines/index.html as the code has so many violations that I didn't even want to attempt to mention them all.
+> 
+> The sample seems to just log information, and not actually do anything. For such a sample, I'd except to be able to flash that to a mouse-like device and see it working (I think that's how the other HID sample works, right?)
+> 
+> I did not fully review this entire PR
+
+@Thalley  thanks for your review. This is my opinion, and welcome everyone's feedback about Service vs. Profile
+
+it is a Profile implementation. The full picture is clearer when considered together with the Host PR (#109579):
+
+ - The Host side implements a 20-state discovery machine that orchestrates three services (HIDS + DIS + BAS), reads PnP ID, subscribes to battery notifications, and handles multiple HID Service instances —  structurally identical to what bt_vcp_vol_ctlr does for VCS + VOCS + AICS.
+ - The Device side registers the core HIDS service — same pattern as bt_vcp_vol_rend_register() registering VCS. The companion services (DIS, BAS) are independent primary services configured via Kconfig in the sample, following the same convention as all existing profiles (no profile in-tree uses select BT_DIS).
+ 
+That said, the Device-side Kconfig is currently missing depends on BT_SMP which all profile implementations have (VCP, MICP, OTS). I'll fix that along with the missing log module template. These gaps contributed to the ambiguity — apologies for that.
+
+Does this framing make sense to you, or would you prefer a different  architectural approach (e.g., renaming to `bt_hids_*` as a pure service)?  Happy to discuss further.
+
+If you agree with the profile direction, I'll proceed with the fixes below. and fix coding  style issue and hogp board sample .
+
+thanks
+
+*--- chengkai15 (2026-05-25 08:20:59+00:00)
+These values are defined in the Bluetooth HID Service specification (HIDS_v1.0):
+   Report Type values (Section 2.2, Report Reference Descriptor):  0x01 = Input Report, 0x02 = Output Report, 0x03 = Feature Report
+   Protocol Mode values (Section 2.6, Protocol Mode Characteristic):  0 = Boot Protocol Mode, 1 = Report Protocol Mode
+
+  I'll add a Doxygen reference to the spec section in the comments.
+
+  BT_HID_REPORT_TYPE_OTHER (0) is not explicitly defined in the spec — I'll remove it, which was local old logic old
+
+*--- chengkai15 (2026-05-25 08:21:20+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 08:21:47+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 08:29:09+00:00)
+Agreed — this is a valid concern. Looking at the existing conventions:
+
+  - services/ contains only pure GATT services (HRS, BAS, DIS, IAS...)
+  - audio/ mixes profiles + their services (VCP, MICP, BAP...)
+  - host/classic/ has classic profiles (A2DP, HFP, AVRCP...)
+
+  HOGP doesn't belong in audio/ (not LE Audio), and `host/classic/` is
+  for BR/EDR. Two options I can see:
+
+  1. Move to subsys/bluetooth/hogp/ + include/zephyr/bluetooth/hogp.h
+     — standalone directory, similar in spirit to how classic profiles
+     have their own space.
+
+  2. Keep in services/hogp/ but rename the API to bt_hids_* to align
+     with the directory semantics (pure service naming).
+
+  I'm leaning toward option 1 — it keeps the HOGP profile identity and
+  avoids polluting the services directory. What's your preference?
+
+*--- chengkai15 (2026-05-25 08:33:23+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 08:41:27+00:00)
+You're right — connected/disconnected are generic GAP events and don't belong in the HOGP callback struct. No other profile/service in-tree (VCP, MICP, IAS, OTS) exposes these in their callbacks.
+
+  I'll remove them and let applications use BT_CONN_CB_DEFINE for connection state tracking, same as peripheral_hids does.
+
+*--- Thalley (2026-05-25 08:45:01+00:00)
+If these are defined by the service spec, consider renaming the file to `hids` and place it under `blutooth/services` similar to the other services
+
+*--- Thalley (2026-05-25 08:47:38+00:00)
+I would put everything related to the HIDS (the service) under `bluetooth/services/hids.h` and everything related to the profile (HOGP) under `bluetooth`, at least for the header files. 
+
+I think this may be the first non-Audio (non-Core) profile that is being added, so we are doing something new here. I don't know if we should have a `/profiles` directory
+
+*--- chengkai15 (2026-05-25 08:51:13+00:00)
+you are right. Currently the callbacks are a thin forwarding layer — the profile doesn't maintain internal state (report cache, suspend state)  and delegates all decisions to the application.
+
+For a proper profile-level API (like VCP), the profile should:
+  1. Cache report data and serve GET_REPORT reads internally
+  2. Manage suspend/exit-suspend state internally
+  3. Only notify the app of state changes (not raw GATT events)
+
+  This is a significant API redesign. I'd like to address it in a follow-up  revision — would you prefer I rework the API in this PR, or is it  acceptable to land the current structure with a TODO and iterate?
+
+ For context: the callbacks that do have profile-level value today are set_report (app needs to process output data) and ccc_changed (app may  want to know when notifications are enabled). The others (ctrl_point,  set_protocol) could be internalized.
+
+*--- chengkai15 (2026-05-25 08:55:04+00:00)
+Good suggestion. Zephyr already has HID report descriptor macros in <zephyr/usb/class/hid.h> (including HID_MOUSE_REPORT_DESC). I'll  refactor the sample to use those macros instead of raw hex bytes
+
+*--- chengkai15 (2026-05-25 08:58:31+00:00)
+updated
+
+*--- Thalley (2026-05-25 09:03:30+00:00)
+Maybe we should start by defining what we want this implementation and API to solve. 
+
+Right now it seems that it's basically just a HIDS implemenation (which would also be fine on its own), but the profile layer does not seem to add anything of value. 
+
+Do we want to provide an API to HIDS (if so, then we can do that without the profile), or do we want to provide a profile that handles all internal management (helping with discovery, provides an easier-to-use-API, validation of data (and potential transformation of data to C-like structs/values). 
+
+What do you think is the goal of this PR/implementation?
+
+*--- chengkai15 (2026-05-25 09:04:34+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:09:10+00:00)
+The indentation follows the standard Zephyr pattern: tabs for indent  level + spaces for alignment to the opening parenthesis (same as  peripheral_hids and the rest of the BT subsystem). 
+
+It may look off in GitHub's diff view depending on tab width settings . please let me know if you see  specific lines that need adjustment.
+
+*--- chengkai15 (2026-05-25 09:10:36+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:12:52+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:19:21+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:21:08+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:24:20+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:28:40+00:00)
+the extra scope is unnecessary. These are static variables that must outlive the function (GATT attrs reference their addresses), so they belong with the other static declarations at the top of the function.
+ 
+I'll remove the extra braces and move the declarations up
+
+*--- chengkai15 (2026-05-25 09:30:50+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:35:12+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:37:25+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:39:36+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:39:47+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 09:41:01+00:00)
+updated
+
+*--- chengkai15 (2026-05-25 10:00:00+00:00)
+next pr add hogp host
+
+*--- Thalley (2026-05-25 10:31:09+00:00)
+There's an extra space; the lines should align with the brackets so
+
+```suggestion
+static void set_report_cb(struct bt_conn *conn, uint8_t report_type,
+			  uint8_t report_id, const uint8_t *data,
+			  uint16_t len)
+```
+
+*--- Thalley (2026-05-25 10:32:41+00:00)
+Did you forget to push this change and some of the others?
+
+*--- chengkai15 (2026-05-25 12:54:07+00:00)
+Got it. I'll restructure as:
+
+  - include/zephyr/bluetooth/services/hids.h — service-level definitions (report types, protocol modes, HID info flags from HIDS spec)
+  - include/zephyr/bluetooth/hogp_device.h — profile-level API   (register, send_report, callbacks)
+
+  The implementation stays in subsys/bluetooth/services/hogp/ since that's  where the GATT attribute table lives. Alternatively I could rename it to subsys/bluetooth/services/hids/ to match the header — what's your
+  preference?
+
+  Regarding /profiles directory: happy to create one if you'd prefer, or  keep it under bluetooth/ for now since it's the first non-audio profile.
+
+*--- chengkai15 (2026-05-25 12:55:52+00:00)
+It would be updated with next push
+
+*--- chengkai15 (2026-05-25 13:37:49+00:00)
+that a good question .here are  two possible approaches:
+
+  Option A: Pure HIDS Service (bt_hids_*)
+  - Register GATT attribute table, forward all events to app
+  - App owns all state (protocol mode, suspend, report caching)
+  - App must handle GATT read/write semantics directly
+  - Simpler implementation, but more burden on app developers
+
+  Option B: HOGP Profile (bt_hogp_device_*) — current approach
+  - Profile manages internal state, app receives high-level notifications
+  - App focuses on HID business logic, not GATT details
+  - Follows the pattern of VCP (manages volume state), nRF bt_hids
+    (manages protocol mode per-connection), and BTstack hids_device
+    (stores protocol_mode + suspend internally, emits events)
+
+ What the profile layer currently provides beyond a raw service:
+
+  | Aspect | Pure Service | This Profile |
+  |--------|-------------|-------------|
+  | Protocol Mode | App stores + returns on read | Profile stores, serves reads, notifies app of changes |
+  | Suspend | App stores + decides behavior | Profile tracks state, app queries via is_suspended() |
+  | GET_REPORT | App manages GATT read buffer | Profile handles GATT, calls app synchronously (CTS pattern) |
+  | Security | App configures permissions | Profile enforces via depends on BT_SMP + encrypted attrs |
+  | Connections | App tracks refs | Profile manages lifecycle, prevents double-unref races |
+  | Host discovery | App does manual GATT discovery | bt_hogp_host_connect() orchestrates HIDS+DIS+BAS (#109579) |
+
+  I believe Option B (profile) is more useful for application developers — it's the approach taken by nRF Connect SDK, BTstack, and ESP-IDF for their HID Device implementations. None of them expose raw GATT
+  events; they all internalize protocol mode and suspend state.
+
+  That said, if you'd prefer Option A (land as pure bt_hids_*`service first, add profile wrapper later), I'm open to that path too.
+
+*--- chengkai15 (2026-05-25 13:39:55+00:00)
+sorry the latest force-push includes all the updates
+
+*--- chengkai15 (2026-05-25 13:40:39+00:00)
+fixed
+
+*--- chengkai15 (2026-05-25 13:41:11+00:00)
+updated
+
+*--- chengkai15 (2026-05-26 12:37:35+00:00)
+Fixed the bsim CI failure (hogp_basic.sh FAILED).
+
+Root cause: The test_scripts/hogp_basic.sh script launched only the Device process (-D=1) without a Host counterpart. The bsim CI runner picked up the script and executed it, causing the Device to wait indefinitely for a Host connection until it was killed by timeout (35s).
+
+Fix: Removed the test_scripts/ directory. The testcase.yaml already specifies build_only: true, which ensures twister only verifies compilation. A full Device+Host integration test will be added once the HOGP Host role is implemented.
+
+No functional code changes in this push — only the test script removal from the test commit.
+
+*--- Copilot (2026-06-10 04:28:36+00:00)
+`write_protocol_mode()` doesn't use the `attr` or `flags` parameters. Zephyr builds commonly treat unused parameters as warnings, which can fail CI with `-Werror`. Mark them unused (or use them) to avoid warnings.
+
+*--- Copilot (2026-06-10 04:28:36+00:00)
+`write_ctrl_point()` doesn't use the `attr` or `flags` parameters. Please mark them unused to avoid `-Wunused-parameter` warnings in builds where warnings are treated as errors.
+
+*--- Copilot (2026-06-10 04:28:36+00:00)
+`write_report()` doesn't use the `flags` parameter. Mark it unused to avoid `-Wunused-parameter` warnings.
+
+*--- Copilot (2026-06-10 04:28:37+00:00)
+`write_boot_report()` doesn't use the `attr` or `flags` parameters. Mark them unused to avoid `-Wunused-parameter` warnings.
+
+*--- Copilot (2026-06-10 04:28:37+00:00)
+`boot_ccc_changed()` doesn't use the `attr` parameter. Mark it unused to avoid `-Wunused-parameter` warnings.
+
+*--- Copilot (2026-06-10 04:28:37+00:00)
+`dev_get_report_cb()` doesn't use the `conn` parameter; please mark it unused to avoid `-Wunused-parameter` warnings.
+
+*--- Copilot (2026-06-10 04:28:37+00:00)
+`dev_set_report_cb()` currently ignores `conn`, `report_type`, and `report_id`, which will trigger `-Wunused-parameter` warnings in many Zephyr builds. Mark them unused (or use them) to keep the test building cleanly.
+
+*--- Copilot (2026-06-10 04:28:37+00:00)
+`dev_protocol_mode_changed_cb()` doesn't use the `conn` parameter; please mark it unused to avoid `-Wunused-parameter` warnings.
+
+*--- Copilot (2026-06-10 04:28:38+00:00)
+`dev_suspend_changed_cb()` doesn't use the `conn` parameter; please mark it unused to avoid `-Wunused-parameter` warnings.
+
+*--- Copilot (2026-06-10 04:28:38+00:00)
+`dev_ccc_changed_cb()` doesn't use `conn`, `report_id`, or `report_type`; please mark them unused to avoid `-Wunused-parameter` warnings.
+
+*--- Copilot (2026-06-10 04:28:38+00:00)
+The public HOGP Device API header is placed at `include/zephyr/bluetooth/hogp_device.h`, but Bluetooth service APIs in Zephyr are consistently exposed under `include/zephyr/bluetooth/services/` (e.g., `bas.h`, `dis.h`, `hrs.h`, `ots.h`). Placing HOGP outside that directory makes the API harder to discover and breaks the established include-path convention for services; consider moving it to `include/zephyr/bluetooth/services/hogp_device.h` (and updating includes accordingly).
+
+*--- Copilot (2026-06-10 04:28:38+00:00)
+This pytest module defines many tests but all required fixtures unconditionally call `pytest.skip()`, so the module can never actually execute any assertions. If this file is meant to be a placeholder/manual test, consider converting it into documentation (README) or adding a clear module-level skip so it doesn't get collected as a large set of skipped tests.
+
+*--- chengkai15 (2026-06-10 06:37:37+00:00)
+i will update it with the result https://github.com/zephyrproject-rtos/zephyr/pull/109578#issuecomment-4517470573
+
+*--- chengkai15 (2026-06-10 06:46:05+00:00)
+fix review comment from Copilot
+
+*--- chengkai15 (2026-06-10 06:47:19+00:00)
+I'd like to hold on restructuring this file for now. The HOGP Device implementation is still under active review on the service-vs-profile boundary, and the test layout depends on how that lands
+
+*--- chengkai15 (2026-07-09 12:40:57+00:00)
+@Thalley @alwa-nordic  any suggestion?
+
+*--- jhedberg (2026-08-11 09:28:38+00:00)
+@chengkai15 sorry for the absence of reviews here. I just kicked off another Copilot review. Regarding the placement of files, it's not clear to me why we wouldn't want a `subsys/bluetooth/profiles`? Is the problem that it would never contain all implemented profiles (like classic or LE Audio) and would therefore be potentially confusing?
+
+*--- Copilot (2026-08-11 09:35:55+00:00)
+The callback can return a length larger than the supplied temporary buffer. Casting that value and passing it to `bt_gatt_attr_read()` then reads beyond `tmp`; reject oversized callback results before exposing them as an attribute value.
+
+*--- Copilot (2026-08-11 09:35:56+00:00)
+A nonzero `len` with `data == NULL` reaches `bt_gatt_notify_cb()`, whose notification path calls `memcpy(..., params->data, params->len)`, causing a null dereference. Validate the public API input before constructing the notify parameters.
+
+*--- chengkai15 (2026-08-11 12:45:23+00:00)
+> @chengkai15 sorry for the absence of reviews here. I just kicked off another Copilot review. Regarding the placement of files, it's not clear to me why we wouldn't want a `subsys/bluetooth/profiles`? Is the problem that it would never contain all implemented profiles (like classic or LE Audio) and would therefore be potentially confusing?
+
+I have no objection to subsys/bluetooth/profiles/,  I'd actually prefer an explicit  place for profiles. My only hesitation is exactly the one you describe: with the current tree it would start out containing HOGP and nothing else, while every other profile stays like subsys/bluetooth/audio/ subsys/bluetooth/host/classic/ subsys/bluetooth/services/.
+
+So profiles/ would be accurate for what it contains but misleading about what it does *not* contain, unless we're willing to say "new non-Audio, non-Classic profiles go here" and treat the existing locations as legacy. If that's the intent, I'm happy to be the first user of it.
+
+Could you and @Thalley agree on which of the two you want (`profiles/` vs. keeping the   profile header directly under `include/zephyr/bluetooth/`)? 
+
+I'll do the move in this PR  this way, and meanwhile I'll work through the Copilot comments
+
+*--- jhedberg (2026-08-11 13:48:44+00:00)
+"Profiles" and "Services" are fairly well defined concepts in Bluetooth specifications and reference a specific layer in the protocol stack, just like "Host". As such it seems reasonable to allocate dedicated directories for them. Only difference is that host is always singular. The other alternative would be to have a dedicated directory for each profile or service rather than a group directory.
+
+*--- jhedberg (2026-08-11 13:49:28+00:00)
+Added the "Bluetooth Review" label so that we can discuss this in Thursday's WG meeting
+
+*--- chengkai15 (2026-08-12 07:41:54+00:00)
+@Thalley @jhedberg — I have pushed a first pass at the restructuring we discussed, so that there is something concrete to look at for Thursday's WG meeting. Nothing here is final. the directory layout in particular is what I would most like feedback on before I invest further.
+  
+  The split follows the spec's own layering: the HID Service (HIDS) is a GATT service, and the HID Device role of HOGP is a profile role that composes HIDS + BAS + DIS.
+  
+HID Service: subsys/bluetooth/services/hids/  include/zephyr/bluetooth/services/hids.h
+HOGP Device role: subsys/bluetooth/profiles/hogp include/zephyr/bluetooth/hogp_device.h
+
+*--- Thalley (2026-08-12 09:21:47+00:00)
+@chengkai15 I removed my request to review because this is such a huge PR for something that I'm not familiar with :) I can keep the review request for now, but I don't know when I'll be able to re-review it.
+
+*--- Thalley (2026-08-13 10:45:24+00:00)
+> "Profiles" and "Services" are fairly well defined concepts in Bluetooth specifications and reference a specific layer in the protocol stack, just like "Host". As such it seems reasonable to allocate dedicated directories for them. Only difference is that host is always singular. The other alternative would be to have a dedicated directory for each profile or service rather than a group directory.
+
+It may be worth noting that in some cases the line between a profile and service is very thin, and some Profile specifications even contain the Service just as a section, instead of a separate document. The line between the two also becomes very thin for some profiles where the client part of the service is nearly the same as the role in the profile (and then there are of course services without profiles and vice versa). 
+
+For LE Audio, where we have the most profiles and services by now, we are trying to / working towards splitting the profiles and services, both in terms of header files but also source files. That approach allows us to define e.g. services as standalone and provide a profile implementation on top of the service, while still providing a service API in case someone wants to implement their own profile instead of using the Zephyr one. I personally think this adds a nice layer of flexibility without too much overhead, and something I'd like to see more.
+
+*--- Copilot (2026-08-13 10:54:03+00:00)
+The disconnect callback and `bt_hids_unregister()` can concurrently find the same non-NULL slot and both call `conn_free()`, causing a double `bt_conn_unref()` (or an unref of NULL after the first caller clears it). Unregistering while Hosts remain connected is explicitly supported, so access to the connection table and registration state needs synchronization or an atomic take-and-clear operation.
+
+*--- jhedberg (2026-08-13 11:25:23+00:00)
+@Thalley from your description it sounds like we might benefit from a single general-purpose directory that accepts both kinds of code? Only question is what should it be called? "services_and_profiles", "above_host"? I'd prefer something simple and short :)
+
+*--- Thalley (2026-08-13 11:35:35+00:00)
+> @Thalley from your description it sounds like we might benefit from a single general-purpose directory that accepts both kinds of code? Only question is what should it be called? "services_and_profiles", "above_host"? I'd prefer something simple and short :)
+
+I actually think that having separate `services` and `profiles` directories make sense. In the cases where the service definition is within the profile specification, I think that can be used to indicate that a standalone service implementation doesn't make sense, and would just be part of the profile implementation in the `profiles` directory. 
+
+The term that the BT core spec uses for anything on top of the host is `application`, but that also does not feel right :D But this is effectively also why I was wondering if we truly want to have service and profile implementations with APIs, or if we should just add them as samples (at least the GATT based ones; Mesh is a unique profile in that regard, and LE Audio is effectively a framework). 
+
+The advantage of having them as samples, is that we don't need to worry about API design, test coverage and all that, as well as that many profiles (and services) can likely be implemented in many different ways anyways, so the advantage of having it as an implementation with `subsys` compared to a sample isn't immediately obvious anyhow.
+
+*--- jhedberg (2026-08-13 12:06:43+00:00)
+> The advantage of having them as samples, is that we don't need to worry about API design, test coverage and all that, as well as that many profiles (and services) can likely be implemented in many different ways anyways, so the advantage of having it as an implementation with `subsys` compared to a sample isn't immediately obvious anyhow
+
+That's a good point, and I'd be in support of it (moving to samples). One exception might be the GAP within GATT (maybe - didn't we just add the option of letting the app implement that?)
+
+*--- Thalley (2026-08-13 12:21:58+00:00)
+> > The advantage of having them as samples, is that we don't need to worry about API design, test coverage and all that, as well as that many profiles (and services) can likely be implemented in many different ways anyways, so the advantage of having it as an implementation with `subsys` compared to a sample isn't immediately obvious anyhow
+> 
+> That's a good point, and I'd be in support of it (moving to samples). One exception might be the GAP within GATT (maybe - didn't we just add the option of letting the app implement that?)
+
+GAP is part of the Bluetooth core system, so IMO it makes sense to treat that separately from the other GATT based profiles and services. 
+
+<img width="1018" height="1264" alt="image" src="https://github.com/user-attachments/assets/73d418ee-214b-4a44-a4ca-e1b778cd6484" />
+
+w.r.t. the custom GAP implementation, we did add that, and that exists today as a sample as well: https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/bluetooth/peripheral_gap_svc
+
+*--- chengkai15 (2026-08-27 13:25:12+00:00)
+> > > The advantage of having them as samples, is that we don't need to worry about API design, test coverage and all that, as well as that many profiles (and services) can likely be implemented in many different ways anyways, so the advantage of having it as an implementation with `subsys` compared to a sample isn't immediately obvious anyhow
+> > 
+> > 
+> > That's a good point, and I'd be in support of it (moving to samples). One exception might be the GAP within GATT (maybe - didn't we just add the option of letting the app implement that?)
+> 
+> GAP is part of the Bluetooth core system, so IMO it makes sense to treat that separately from the other GATT based profiles and services.
+> 
+> <img alt="image" width="1018" height="1264" src="https://private-user-images.githubusercontent.com/2520413/635489586-73d418ee-214b-4a44-a4ca-e1b778cd6484.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3ODc4MzYxOTAsIm5iZiI6MTc4NzgzNTg5MCwicGF0aCI6Ii8yNTIwNDEzLzYzNTQ4OTU4Ni03M2Q0MThlZS0yMTRiLTRhNDQtYTRjYS1lMWI3NzhjZDY0ODQucG5nP1gtQW16LUFsZ29yaXRobT1BV1M0LUhNQUMtU0hBMjU2JlgtQW16LUNyZWRlbnRpYWw9QUtJQVZDT0RZTFNBNTNQUUs0WkElMkYyMDI2MDgyNyUyRnVzLWVhc3QtMSUyRnMzJTJGYXdzNF9yZXF1ZXN0JlgtQW16LURhdGU9MjAyNjA4MjdUMTMwNDUwWiZYLUFtei1FeHBpcmVzPTMwMCZYLUFtei1TaWduYXR1cmU9NzRlNzk1YzU4ODI5NWFlYjJkYjM5ODJlNjYxYTc0ZWE1ZTNkZjA2YzU2Y2JhNTM4NWIzNGJjNjAzMTdkZjUwOSZYLUFtei1TaWduZWRIZWFkZXJzPWhvc3QmcmVzcG9uc2UtY29udGVudC10eXBlPWltYWdlJTJGcG5nIn0.6deZ66t5ghGybySH_G30cF_tf6QXzYq9DAcfzDU6JnY">
+> w.r.t. the custom GAP implementation, we did add that, and that exists today as a sample as well: https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/bluetooth/peripheral_gap_svc
+
+@jhedberg @Thalley — let me boil this down to a concrete choice for the WG meeting.
+
+The "samples vs subsys API" question decides this PR, so let me be honest about it: the HOGP Device layer is a thin wrapper — register/send_report/get_protocol_mode are basically one-line calls into the HIDS service, and the only real logic is requesting security on connect. So Thalley's "the advantage isn't obvious" is fair for the Device side.
+
+But the Device side is only half the profile, and it's the misleading half. The Host role (#109579) is the opposite: a ~1900-line, 18-state async discovery machine (service/characteristic discovery, Report Reference parsing, Report Map long-reads via ATT Read Blob, CCC subscription across multiple HIDS instances, plus DIS PnP + BAS composition). That's not forwarding — it's exactly the "profile handles discovery, provides an easier-to-use API, validates data" role you asked for. There's no GATT-service API to collapse it into on the client side, so if this belongs anywhere, it belongs as a profile. Judging the profile layer by the Device wrapper alone undersells what profiles/ would actually hold.
+
+HIDS (the service) is a third, cleaner case. It's a standalone service spec (not a section inside HOGP) and holds real per-connection state — Protocol Mode/Suspend, managed-CCC report handling, Report Map machinery. That's the "standalone service, profile on top" pattern Thalley said he'd like to see more of, and the Host role would reuse those shared definitions directly.
+
+So, pick one:
+
+- (B), my preference: HIDS stays a service under services/hids/; drop the empty Device wrapper and fold its composition (HIDS + BAS + DIS + security request) into a peripheral_hogp sample; keep the Host role as the real profile under profiles/hogp/ (hogp_host.c + bluetooth/hogp_host.h). profiles/ then starts with a genuine occupant, not a stub.
+- (A): everything becomes a sample like peripheral_gap_svc — no public API. Simplest, but the 18-state Host machine as unshared sample code is a lot to ask an app to copy, and there's no reusable service.
+- (C): keep both roles as profiles under profiles/ and let the Device wrapper earn its keep later (GET_REPORT caching, validation). Bigger effort on the Device side; the Host side already meets this bar today.
+
+I'm fine with (B) or (C) and can rebase #109579 onto whichever layout you land on. I'll hold off on more restructuring until then.
+
+*--- jhedberg (2026-09-03 13:18:46+00:00)
+@chengkai15 we discussed this in the Bluetooth WG, and the consensus is to go with your recommendation, i.e. B.
+
+*--- chengkai15 (2026-09-04 04:02:53+00:00)
+> @chengkai15 we discussed this in the Bluetooth WG, and the consensus is to go with your recommendation, i.e. B.
+
+Thank you very much for your reply. The next version will be implemented according to Plan B.
+
+*--- aescolar (2026-09-04 07:57:57+00:00)
+Note that since a couple of weeks ago we can run these tests with twister too, and that's how they are run now in CI
+
+```suggestion
+  depends_on: bsim
+```
+
+*--- aescolar (2026-09-04 07:58:11+00:00)
+```suggestion
+    harness_config:
+      fixture: bsim_multi_test
+```
+
+*--- chengkai15 (2026-09-07 09:47:22+00:00)
+thanks for your review , updated
+
+*--- chengkai15 (2026-09-07 09:47:32+00:00)
+updated
+
+*--- Copilot (2026-09-07 09:56:05+00:00)
+A later standalone Read Blob Request for the same report reuses `rd_buf` indefinitely because `rd_ctx == ctx`, so `get_report` is not called and stale report data is returned. This also contradicts the public guarantee that the callback runs once per read. Track the expected continuation offset (and clear the cache when the read completes), and refresh whenever the incoming offset is not the next blob of the active read.
+
+*--- Copilot (2026-09-07 09:56:05+00:00)
+This write path does not require a tracked HID connection. If `BT_HIDS_MAX_CONNECTIONS` is lower than `BT_MAX_CONN` and all slots are occupied, an additional Host can still write Output/Feature Reports and invoke the application callback, despite the Kconfig contract that excess connections are denied Report access. Reject writes when `conn_lookup(conn)` returns NULL, as the read and stateful characteristic paths do.
+
+*--- Copilot (2026-09-07 09:56:05+00:00)
+This managed CCC write callback accepts and stores every 16-bit value. Since the associated characteristic supports notifications only, values such as `BT_GATT_CCC_INDICATE` or reserved bits are invalid; accepting them leaves a nonsensical subscription state and reports `enabled == false` as if the write succeeded. Restrict writes to disabled or notify.
+
+*--- Copilot (2026-09-07 09:56:06+00:00)
+The lookup and allocation are separate operations, so this can race with `hids_connected()`: both callers can observe no entry and then claim different slots for the same connection. One Host can therefore consume two slots and cause another valid Host to be denied service. Serialize lookup-and-claim or make allocation atomically detect an existing connection.
+
+*--- Copilot (2026-09-07 09:56:06+00:00)
+`hids.registered` remains true while connection slots are being freed. If a connection callback runs after an earlier slot was cleared but before this assignment, `hids_connected()` can allocate that slot and the cleanup loop will not revisit it, retaining a connection reference after unregistration. Make registration state synchronized across callback/application contexts and clear it immediately after successful GATT unregistration, before releasing slots.
+
+*--- Copilot (2026-09-07 09:56:06+00:00)
+`CONFIG_BT_HIDS_MAX_REPORT_LEN` is documented as the upper bound in both directions, but this API only rejects NULL and zero-length payloads. With a sufficiently large negotiated MTU, a caller can send a report larger than the configured maximum. Reject `len > CONFIG_BT_HIDS_MAX_REPORT_LEN` as invalid.
+
+*--- Copilot (2026-09-07 09:56:07+00:00)
+The per-connection API contract says an unsubscribed Host produces `-EINVAL`, but `bt_gatt_notify_cb()` only performs that check when the independently configurable `CONFIG_BT_GATT_ENFORCE_SUBSCRIPTION` is enabled. With that option disabled, this sends an Input Report to the specified connection even when its CCC is disabled. Enforce the HIDS contract explicitly before notifying.
+
+*--- Copilot (2026-09-07 09:56:07+00:00)
+`hex2bin()` writes into the destination incrementally before returning 0 on an invalid digit. For example, `hids value 3 0G` reports an error but can still overwrite the first byte while leaving the old length, changing subsequent GET_REPORT results. Parse into a temporary buffer and copy it only after successful validation.
+
+*--- Copilot (2026-09-07 09:56:07+00:00)
+The current change exposes only the HIDS service and explicitly leaves HIDS+BAS+DIS composition to the application, while the PR title/description still claim a `bt_hogp_device_*` profile layer under `subsys/bluetooth/profiles/hogp/` and four commits. Either add that advertised profile layer or update the PR scope, title, table, and commit list to describe this HIDS-only three-commit change.
+
+*--- aescolar (2026-09-07 12:45:20+00:00)
+```suggestion
+```
+Very minor: If you place the script in a test**s**_scripts folder, you do not need to define this, as the script will be found by searching in the default  test**s**_scripts  folder.
+
+*--- chengkai15 (2026-09-07 13:09:05+00:00)
+Done — renamed to tests_scripts/ and dropped the key; twister finds the script by itself
+
+*--- chengkai15 (2026-09-07 13:09:35+00:00)
+Gone: the service now holds the Report value and a read is served from it, so there is no per-read cache to go
+  stale. New bt_hids_report_set()/bt_hids_report_get(); the get_report callback is removed.
+
+*--- chengkai15 (2026-09-07 13:10:22+00:00)
+Fixed: parsed into a temporary buffer, so a malformed argument leaves the value untouched
+
+*--- chengkai15 (2026-09-07 13:10:35+00:00)
+Already updated before this review ran: the title is Bluetooth: HIDS: add HID Service and the description matches
+  the three commits.
+
+*--- jhedberg (2026-09-09 12:12:47+00:00)
+HIDS v1.1 Table 2.1 makes the Boot Keyboard Input and Output Report characteristics mandatory for a keyboard (C.2), the Boot Mouse Input Report mandatory for a mouse (C.3), and Protocol Mode mandatory whenever Boot Protocol Mode is supported (C.4). As it stands a mouse or keyboard built on this service is not conformant, and #118458 is a mouse.
+
+Please add them in this PR: a fixed-format value each, a CCC on the input ones, behind `CONFIG_BT_HIDS_PROTOCOL_MODE` or behind per device type options that select it. They fit the same static table pattern as the Report characteristics.
+
+*--- jhedberg (2026-09-09 12:12:47+00:00)
+HIDS v1.1 Table 2.16 defines bits 2 (SCI Supported) and 3 (SCI Low Power mode supported), and Table 2.1 C.5 makes the HID SCI Information and HID SCI Mode characteristics mandatory when SCI is supported. Until the service has those characteristics, `bt_hids_register()` should reject a flags value with any of bits 2 to 7 set, otherwise an application can declare a feature the service cannot back.
+
+*--- jhedberg (2026-09-09 12:12:47+00:00)
+HIDS v1.1 Table 2.17 adds the SCI mode commands 0x02 to 0x05 to the HID Control Point. A `bool suspended` callback cannot carry them, so SCI support later means another callback or a change to this one. A `ctrl_point(conn, enum bt_hids_ctrl_point cmd)` callback keeps the API stable across that follow-up; the Suspend state can stay tracked by the service and readable through `bt_hids_get_suspend_state()`.
+
+*--- jhedberg (2026-09-09 12:12:48+00:00)
+The double slot is released by `hids_disconnected()`, so that part only costs a slot. The real problem in this function is a connection that is not connected yet: `bt_conn_foreach()` also visits objects that are still initiating or directed advertising, the slot gets claimed with a reference, and when that attempt fails only the connected callback runs with an error, never the disconnected one, so the slot and the reference are never released. Claim a slot here only when `bt_conn_get_info()` reports `BT_CONN_STATE_CONNECTED`; the others arrive through `hids_connected()`.
+
+*--- jhedberg (2026-09-09 12:12:50+00:00)
+`conn_free()` takes the pointer out of the slot with `atomic_ptr_set()` and only the caller that got a non-NULL pointer drops the reference, so there is no double unref here.
+
+*--- jhedberg (2026-09-09 12:12:51+00:00)
+Not a leak, since `hids_disconnected()` releases any slot regardless of the registered flag, but clearing `hids.registered` before the loop rather than after it closes the window for free.
+
+*--- chengkai15 (2026-09-10 12:40:33+00:00)
+Added behind CONFIG_BT_HIDS_BOOT_KEYBOARD and CONFIG_BT_HIDS_BOOT_MOUSE, which both select the Protocol Mode characteristic. 
+
+C.2 and C.3 are conditional on the device type rather than on Boot Protocol Mode support, so the  Kconfig help that claimed a Report-mode-only Device could leave them out was wrong and is rewritten.
+
+*--- chengkai15 (2026-09-10 12:40:47+00:00)
+bt_hids_register() now rejects any flag outside bt_hid_info_flags, so bits 2 to 7 fail with -EINVAL;
+
+*--- chengkai15 (2026-09-10 12:41:28+00:00)
+Replaced suspend_changed(conn, bool) with ctrl_point(conn, enum bt_hids_ctrl_point cmd);
+
+*--- chengkai15 (2026-09-10 12:43:15+00:00)
+Moved: hids.registered and the rest of the service state are cleared right after bt_gatt_service_unregister()
+
+*--- chengkai15 (2026-09-10 12:48:26+00:00)
+Confirmed, and wider: a connection that never reached BT_CONN_CONNECTED never gets a disconnected callback, and the placeholder that plain connectable advertising allocates (BT_CONN_ADV_CONNECTABLE) gets no callback at all when the advertiser stops, so bt_le_adv_start() then bt_hids_register() is already enough. 
+
+Fixing it as you suggest; note  the state read and the slot claim are not atomic, so it narrows the window rather than closing it unless the state  is re-read after claiming.
+
+*--- chengkai15 (2026-09-10 12:49:45+00:00)
+@jhedberg  thanks for your review, please have a review when you free
+
+*--- jhedberg (2026-09-11 06:14:24+00:00)
+Not in this push. On the window between the state read and the claim: a failed attempt does get one callback, `connected()` with a non-zero `err`, so releasing any slot of that connection there closes it without re-reading the state.
+
+*--- jhedberg (2026-09-11 06:14:25+00:00)
+Looks mostly good now. Still needed before I can approve:
+
+* the change to `track_existing_conn()` from the open thread, which is not in this push;
+* the bsim test does not touch the three Boot Report characteristics beyond discovering them. Their properties and CCCs, a Boot Input Report notification, and a write of the wrong length to the Boot Keyboard Output Report belong in it;
+* the PR description still describes the previous version: Protocol Mode off by default, Boot Reports not implemented, the migration of `peripheral_hids` as a follow-up.
+
+Nit: HIDS v1.1 section 1.9.2 says a set RFU bit is processed as if it were 0, so `report_ccc_write()` and `boot_report_ccc_write()` should mask bits 2 to 15 rather than reject them. Refusing the indication bit is right.
+
+*--- jhedberg (2026-09-11 09:12:07+00:00)
+Looks good now on the code side. What is left is text:
+
+* the PR description still has the previous version's paragraphs: "Protocol Mode is optional and off by default", the Boot Report characteristics under "Not implemented yet", and the migration of `peripheral_hids` under follow-ups;
+* the RFU change made two commit message sentences wrong. In the service commit, "The CCC of an Input Report takes notify and disabled only", and in the test commit, "the CCC of an Input Report rejects a value other than notify and disabled". The test commit could also say that it now exercises the Boot Report characteristics.
+
+I will approve once those are in and CI is green.
+
+*--- chengkai15 (2026-09-11 09:53:23+00:00)
+Pushed. Your callback does not cover `BT_CONN_ADV_CONNECTABLE`, which gets neither one (`conn.c:1301`), so the state check is the wider fix.
+
+The window I meant reports through `disconnected()`, not `connected()` (`conn.c:2313`), so the slot is also released when the state no longer reads CONNECTED after the claim.
+
+*--- chengkai15 (2026-09-11 09:53:25+00:00)
+Still true, but the mechanism changed: `conn_free()` now exchanges on the expected connection (`atomic_ptr_cas`), so a slot already released and re-claimed by another Host is left alone, and the state reset moved to `conn_alloc()`.
+
+*--- chengkai15 (2026-09-11 09:53:33+00:00)
+@jhedberg  Thank you for the incredibly quick response and review; I truly appreciate it.
+
+Both commit message sentences are fixed, and the test commit now also says that it exercises the three Boot Report characteristics and that it registers the service again while a Host is connected. Only the messages changed, the tree is identical: `f4da3a8cef8`.
+
+The same pass found a third stale sentence you did not name: the test commit claimed a Host write longer than `CONFIG_BT_HIDS_MAX_REPORT_LEN` is rejected without reaching the application, which that scenario cannot do, since `MAX_REPORT_LEN` is 256 against an MTU of 140 and such a write is a long write answered with Invalid Offset. Replaced with the bound `bt_hids_send_report()` enforces, which is tested.
+
+Two gaps for the record: the Boot Mouse Input Report has no notification test of its own, since the three fixed lengths are distinct and a wrong context shows up as `-ENOTSUP` or a wrong read length, and `boot_report_resolve()` answering `-ENOTSUP` for a Boot Report the configuration leaves out is covered by the build matrix only. bsim was run locally with `tests_scripts/hids.sh` on `nrf52_bsim`; the suite is not part of what CI runs here.
+
+*--- chengkai15 (2026-09-11 09:55:01+00:00)
+Fixed: `bt_hids_send_report()` now rejects a `len` greater than `CONFIG_BT_HIDS_MAX_REPORT_LEN`, the way `bt_hids_report_set()` already did, and the bsim test covers it.
+
+*--- chengkai15 (2026-09-11 09:55:03+00:00)
+Documented rather than checked a second time: an explicit check before notifying would also turn the documented `-ENOTCONN` into `-EINVAL`, since `bt_gatt_notify_cb()` tests the connection state first (`gatt.c:2868`) while `bt_gatt_is_subscribed()` is false for a connection that is not up.
+
+Say the word if you prefer the check with a state test that keeps `-ENOTCONN` intact.
+
+*--- chengkai15 (2026-09-11 09:55:05+00:00)
+The premise no longer holds: `CONFIG_BT_HIDS_MAX_CONNECTIONS` documents that the Report characteristics need no per-connection state, since the service holds one value per Report that every Host reads and writes, and `read_report()` does not look up a slot either. The limit applies to Protocol Mode and the HID Control Point, which do have per-connection state.
+
+*--- chengkai15 (2026-09-11 09:55:09+00:00)
+Restricted as you asked, then relaxed for the Reserved bits: the HID Service, section 1.9.2, processes a set Reserved for Future Use bit as if it were zero, so bits 2 to 15 are masked and only the indication bit is refused.
+
+*--- chengkai15 (2026-09-15 13:21:35+00:00)
+@Thalley  could you please have a review when you are free?
+
+*--- Copilot (2026-09-19 09:05:13+00:00)
+These public enum constants collide with the existing `BT_HID_REPORT_TYPE_*` macros in `include/zephyr/bluetooth/classic/hid_device.h:52-56`. In a dual-mode application that includes the Classic HID header first, the preprocessor replaces these enum member names with numeric literals and this header does not compile. Rename the new constants with the service prefix, such as `BT_HIDS_REPORT_TYPE_*`, and update all HIDS users.
+
+*--- Copilot (2026-09-19 09:05:13+00:00)
+When `CONFIG_BT_HIDS_SHELL=y`, these ranges still permit counts greater than one, but `cmd_register()` supplies only the first ID in each configured report-ID array. Any remaining entries are zero, so `bt_hids_register()` rejects a configuration such as 2/1/1 because a type with multiple reports cannot use Report ID 0. Either constrain all three report counts to exactly one while the shell is enabled, or generate matching IDs and Report Map entries for every configured characteristic.
+
+*--- Copilot (2026-09-19 09:05:14+00:00)
+The CAS publishes `conn` before `protocol_mode` and `suspended` are initialized, so `conn_lookup()` can expose stale state to a concurrent GATT callback. Registration can also race the connected callback: both paths can observe the connection as untracked and claim separate slots, while the plain state fields are concurrently accessed by GATT writes and public getters. Protect lookup, allocation, initialization, release, and state access with one synchronization strategy, and publish each connection only after its state is initialized so it owns exactly one slot.
+
+*--- Copilot (2026-09-19 09:05:14+00:00)
+A nonzero write offset is an ATT Invalid Offset, but this combined check returns Invalid Attribute Length for both an offset error and a size error. A Host using a nonzero offset on Protocol Mode therefore receives the wrong ATT error; handle `offset != 0` separately before validating `len`, as the Boot Report writer already does.
+
+*--- Copilot (2026-09-19 09:05:14+00:00)
+The same combined validation maps a nonzero offset on the HID Control Point to Invalid Attribute Length instead of ATT Invalid Offset. Separate the offset check from the fixed-length check so clients receive the protocol-defined error.
+
+*--- Copilot (2026-09-19 09:05:14+00:00)
+Every ATT Read and Read Blob request reads the mutable `ctx->value` and `ctx->value_len` again. If `bt_hids_report_set()` or a Host write replaces the report between fragments, a long read can combine bytes from different values or fail after a length change; the unsynchronized buffer access is also a data race. This contradicts the public API's promise that a long read cannot change halfway through. Keep a connection/bearer-specific snapshot for the whole long-read transaction, or use another synchronized immutable/versioned design that gives all fragments one value.
+
+*--- Copilot (2026-09-19 09:05:15+00:00)
+Reserved bits are accepted but retained in the managed CCC value. This breaks the documented broadcast path: `bt_gatt_notify_cb(NULL, ...)` only visits entries whose stored value exactly equals `BT_GATT_CCC_NOTIFY`, so a Host that writes Notify|Reserved is reported as enabled but receives no broadcast. The Boot Input CCC callbacks have the same issue. Normalize the value before it is stored, or otherwise make broadcast matching treat reserved bits as zero for both regular and Boot Input reports.
+
+*--- Copilot (2026-09-19 09:05:15+00:00)
+Managed CCC `cfg_write` runs before the GATT core commits the new per-connection value. Calling the application here therefore reports `enabled == true` while `bt_gatt_is_subscribed()` still sees the old value; an application that immediately calls `bt_hids_send_report(conn, ...)` from this callback gets `-EINVAL`. The Boot Input callback has the same ordering problem. Deliver these connection-aware callbacks only after the CCC value is committed, or defer them until the committed state is visible.
+
+*--- Thalley (2026-09-19 09:09:53+00:00)
+This seems reverse; a service should define or explain its relationship with profiles; profiles should do this instead. A GATT service, like HIDS, can be with any or no profile (it's a standalone feature).
+
+*--- Thalley (2026-09-19 09:10:33+00:00)
+Good to mention. I guess it would require some API changes to support this, but that's fine as a experimental feature :)
+
+*--- Thalley (2026-09-19 09:10:41+00:00)
+```suggestion
+#define BT_HIDS_REPORT_MAP_MAX_LEN 512U
+```
+
+*--- Thalley (2026-09-19 09:11:56+00:00)
+```suggestion
+/** Length of the Boot Keyboard Input Report */
+#define BT_HIDS_BOOT_KB_IN_LEN 8U
+/** Length of the Boot Keyboard Output Report */
+#define BT_HIDS_BOOT_KB_OUT_LEN 1U
+/** Length of the Boot Mouse Input Report */
+#define BT_HIDS_BOOT_MOUSE_IN_LEN 3U
+```
+
+*--- Thalley (2026-09-19 09:13:06+00:00)
+What is "a Host" in this context? Is this called for both local changes from the local Bluetooth Host, or also from remote HIDS clients?
+
+*--- Thalley (2026-09-19 09:14:35+00:00)
+Defining the calling thread seems tricky. IIRC if there's an unpair (e.g. via `bt_unpair`), this may also be called from whatever thread calls `bt_unpair`, and where `conn` may be NULL?
+
+*--- Thalley (2026-09-19 09:15:07+00:00)
+Struct is missing `@param`s for the callback arguments. Unfortunately this isn't picked up as missing by our documentation build
+
+*--- Thalley (2026-09-19 09:15:51+00:00)
+You have defined several `enum`s above, but not an enum for protocol?
+
+*--- Thalley (2026-09-19 09:16:45+00:00)
+I'm not familiar with HIDS, but are there a set of pre-defined reports, and if so, could we parse those and provide them a union of structs here?
+
+*--- Thalley (2026-09-19 09:17:31+00:00)
+Treating `ccc` as enabled/disabled seems tricky; I guess the service only defines it to be either notification or indications, and not both?
+
+*--- Thalley (2026-09-19 09:17:59+00:00)
+```suggestion
+#if CONFIG_BT_HIDS_INPUT_REPORT_COUNT > 0 || defined(__DOXYGEN__)
+```
+
+Applies multiple places
+
+*--- Thalley (2026-09-19 09:20:30+00:00)
+Invalid combination of `@retval` and a non-value like `-errno`. See https://docs.zephyrproject.org/latest/contribute/style/doxygen.html#return-values
+
+*--- Thalley (2026-09-19 09:21:24+00:00)
+Applies multiple places
+
+*--- Thalley (2026-09-19 09:22:03+00:00)
+Any recommendations of what the data buffer size should be?
+
+*--- Thalley (2026-09-19 09:23:09+00:00)
+```suggestion
+#define HID_INFO_VAL_SIZE 4U
+
+#define HID_INFO_BCDHID_OFFSET       0U
+#define HID_INFO_COUNTRY_CODE_OFFSET 2U
+#define HID_INFO_FLAGS_OFFSET        3U
+```
+
+*--- Thalley (2026-09-19 09:23:27+00:00)
+```suggestion
+#define HIDS_INPUT_BASE   0U
+```
+
+*--- Thalley (2026-09-19 09:24:35+00:00)
+Is it not valid for a central device to have this service?
+
+*--- Thalley (2026-09-19 09:26:05+00:00)
+```suggestion
+#define TEST_BCD_HID      0x0111U
+#define TEST_COUNTRY_CODE 0x00U
+```
+
+*--- Thalley (2026-09-19 09:26:19+00:00)
+```suggestion
+#define TEST_INPUT_REPORT_LEN 3U
+static const uint8_t test_input_data[TEST_INPUT_REPORT_LEN] = {0x01, 0x10, 0x20};
+
+/* Output Report payload: the LED bitmap */
+#define TEST_OUTPUT_REPORT_LEN 1U
+static const uint8_t test_output_data[TEST_OUTPUT_REPORT_LEN] = {0x05};
+
+/* Feature Report payload: the vendor defined byte */
+#define TEST_FEATURE_REPORT_LEN 1U
+static const uint8_t test_feature_data[TEST_FEATURE_REPORT_LEN] = {0x5A};
+```
+
+*--- Thalley (2026-09-19 09:27:23+00:00)
+I'm wondering if BSIM tests of services should be under `tests/bsim/bluetooth/services` instead of `host/gatt`
+
+*--- Thalley (2026-09-19 09:28:20+00:00)
+Since you added a `depends on BT_SMP`, should this depend on `BT_MAX_PAIRED` instead?

@@ -1,0 +1,77 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118388
+TITLE: drivers: watchdog: sam0: add Always-On (ALWAYSON) support
+
+*--- opening post by josenieto (2026-09-05 18:02:32+00:00)
+The SAMC21/SAMD21/SAME51 WDT has an Always-On bit (CTRLA.ALWAYSON, bit 7) that, when set, makes the watchdog run continuously and prevents disabling it. CONFIG and EWCTRL registers become read-only, so timeout and window configuration cannot be changed.
+
+The driver previously ignored this bit entirely, causing:
+- wdt_disable() to silently fail (returned 0 but WDT kept running when ALWAYSON was set by the NVM User Row fuse)
+- wdt_is_enabled() to return false when only ALWAYSON was set, misleading callers about the WDT state
+- CONFIG_WDT_DISABLE_AT_BOOT to silently fail when ALWAYSON was programmed in the NVM User Row
+
+Fix this by:
+- Reading CTRLA.ALWAYSON at init and storing the state
+- Making wdt_is_enabled() check both ENABLE and ALWAYSON bits
+- Returning -ENOTSUP from wdt_disable() when ALWAYSON is set
+- Handling disable-at-boot with a warning when ALWAYSON is active
+- Letting install_timeout() and setup() skip CONFIG/EWCTRL writes when ALWAYSON is set (those registers are read-only), but still allowing callback and interrupt configuration
+
+When ALWAYSON is set by software on a previous boot, it persists across warm resets. The driver now handles this by accepting the current configuration and continuing operation. The NVM User Row fuse always takes priority over devicetree.
+
+Add an 'always-on' boolean devicetree property so applications can request Always-On mode from the devicetree without programming fuses.
+
+Also remove a redundant declaration of wdt_sam0_data.
+
+Tested on SAMC21N Xplained Pro (samc21n_xpro):
+- With always-on property: wdt_disable() returned -ENOTSUP, the watchdog kept running and was correctly fed every 3 seconds
+- Without always-on (and after POR): wdt_disable() worked, re-enable succeeded
+- Warm resets with always-on active: install_timeout() and setup() detected the persisted ALWAYSON state and continued operation
+
+Assisted-by: opencode:deepseek-v4-pro
+
+*--- yvesll (2026-09-07 10:04:31+00:00)
+```suggestion
+		return -EPERM;
+```
+
+*--- yvesll (2026-09-07 10:07:44+00:00)
+It may skip the check of `options` and `data->timeout_valid`
+
+*--- yvesll (2026-09-07 10:12:02+00:00)
+```suggestion
+	if (DT_INST_PROP(0, always_on)) {
+```
+
+*--- yvesll (2026-09-07 10:14:09+00:00)
+It shared the name with dts property. Suggest replace with:
+```c
+static inline bool wdt_sam0_is_always_on(void)
+{
+#ifdef WDT_CTRLA_ENABLE
+	return WDT_REGS->CTRLA.bit.ALWAYSON;
+#else
+	return WDT_REGS->CTRL.bit.ALWAYSON;
+#endif
+}
+```
+
+*--- yvesll (2026-09-07 10:16:58+00:00)
+Returning 0 here claims the requested timeout was applied, but with ALWAYSON set CONFIG/EWCTRL are read-only, so the caller keeps feeding on a window the hardware never accepted and gets reset by the fuse-programmed period instead; -ENOTSUP is the honest answer, and `cfg->flags` / `cfg->window.max` are left unvalidated on this path as well.
+
+*--- yvesll (2026-09-07 10:33:34+00:00)
+Latching an irreversible bit from setup() is a heavy side effect for a routine API call, and the fuse-detection fix would merge faster on its own. Consider splitting the devicetree property into a follow-up commit.
+
+*--- josenieto (2026-09-07 16:02:13+00:00)
+Changed to -EPERM as suggested.
+
+*--- josenieto (2026-09-07 16:04:36+00:00)
+Reordered: options validated first, then always-on check, then timeout_valid after. Ready.
+
+*--- josenieto (2026-09-07 16:06:02+00:00)
+Replaced the cached field with wdt_sam0_is_always_on() helper that reads the hardware register directly.
+
+*--- josenieto (2026-09-07 16:09:56+00:00)
+Changed to return -ENOTSUP when ALWAYSON is set. The caller now receives an error and can handle the failure instead of feeding on a timeout that was never accepted.
+
+*--- josenieto (2026-09-07 16:10:37+00:00)
+Done. Split into 2 commits: Commit A handles fuse detection (detect ALWAYSON at init, return errors from disable/install_timeout), Commit B adds the devicetree property to enable ALWAYSON from software.

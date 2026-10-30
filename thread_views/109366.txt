@@ -1,0 +1,202 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109366
+TITLE: modem: pipe: support dual transmit buffers
+
+*--- opening post by JordanYates (2026-05-19 01:57:39+00:00)
+Rework of #98541 to address compatibility feedback.
+The existing function `modem_pipe_transmit` continues to work as it does now, regardless of backend support for `transmit_double`.
+The new function `modem_pipe_transmit_double` works regardless of backend support for `transmit_double`.
+
+Handle sending the request and delimiter strings in a single call to the pipe backend. This has two advantages:
+     1. No time gap between request and delimiter on the interface (more efficient line utilization)
+     2. Fewer bytes transmitted on the line for pipes that perform wrapping (CMUX).
+
+For example, sending "ATE0" + "\n" through CMUX now takes 11 bytes, instead of the previous 17 bytes (10 + 7):
+```
+[00:00:38.268,064] <wrn> modem_cmux: TX
+                                     f9 0b ef 0b 41 54 45 30  0d 5d f9                |....ATE0 .].
+```
+
+The double buffer send functionality is exposed through a new function in the modem pipe API, meaning all existing code does not require any changes.
+
+*--- JordanYates (2026-05-19 11:15:22+00:00)
+> quirk related solely to the modem_chat module not using an intermediary buffer to transmit whole "lines" in chunks
+
+It's a "quirk" that is never going to be addressed or changed. Why add an intermediate buffer and waste a bunch of ROM per chat instance when the two sources are permanently in ROM already.
+
+> Implement cache in backends where it makes sense, which behaves like "if any data to send, start timer, if buffer full, flush, timer expires, flush"
+
+Sounds like this would result in either worse performance (waiting for a timer to actually send) or require API usage changes.
+edit: and just worse performance from the additional buffering
+
+> Fix the issue at the root, make modem_chat build more efficient buffers, and pass them instead of splitting it into two pipe write ops.
+
+See first point, why build buffers in RAM when they're already in ROM.
+
+> I'm reluctant to modify a large part of the modem subsystem to address it
+
+The diff for `modem_pipe.c` is `+8/-3`. Everything else is either new tests, or updating existing backends to take advantage of the efficiency improvements. Existing users can use the pipe API without any changes. Existing backends can still be used with the new functions without any changes. If this counts as changing a large part of the subsystem I don't know what to say.
+
+*--- Copilot (2026-05-19 13:49:56+00:00)
+In the ISR UART backend, extra_buf is queued even if ring_buf_put() couldn't enqueue the full primary buffer. That can interleave delimiter bytes before the remaining request bytes, breaking the required byte ordering for transmit_double. Only enqueue extra_buf when written == size (or compute available space up front so buf is fully enqueued before any extra).
+
+*--- Copilot (2026-05-19 13:49:56+00:00)
+LOG_ERR format string uses "%u" but buf_len + extra_len is a size_t; on 64-bit targets this can cause incorrect output or stack corruption in cbprintf. Use "%zu" (or cast to an appropriate unsigned type) to match the argument type.
+
+*--- Copilot (2026-05-19 13:49:57+00:00)
+modem_pipe_transmit_double() returns 0 when the pipe isn't opened, but the public API docs in include/zephyr/modem/pipe.h state it returns -EPERM when the pipe is closed. Please align implementation and documentation (either return -EPERM here, or update the docs to reflect the 0-bytes-accepted semantics).
+
+*--- Copilot (2026-05-19 13:49:57+00:00)
+Removing MODEM_CHAT_SCRIPT_SEND_STATE_DELIMITER from this public header is a source-level API break for any out-of-tree users referencing that enum value. Consider keeping the enumerator (even if unused) to preserve compatibility, or formally deprecate it before removal.
+
+*--- JordanYates (2026-05-19 22:48:01+00:00)
+Enumeration is an internal state for `modem_chat.c`, only present in the header for inclusion in the `modem_chat` struct.
+
+*--- JordanYates (2026-05-19 23:19:06+00:00)
+Wasn't an issue as `ring_buf_put` wouldn't queue any more bytes in the second call if the first didn't fully consume `buf`, but added the check as extra validation anyway.
+
+*--- rerickson1 (2026-05-20 03:08:55+00:00)
+I am a little confused why two buffers are needed. Why not just append the delimiter to the buffer when you know you need to instead of using a second buf.
+Then it would do one write.
+
+*--- JordanYates (2026-05-20 03:18:13+00:00)
+Because both "buffers" in the context of `modem_chat` are ROM constant strings. There is no intermediary buffer in the module, and adding one would impose:
+ 1. RAM overhead, and questions around how large the buffer should be given the required size in the `modem_chat` instance would depend on the scripts that are being run
+ 2. Runtime overhead, copying both ROM strings into a RAM buffer to pass off to a backend, which often does its own copy into a RAM buffer.
+
+*--- rerickson1 (2026-05-20 13:36:08+00:00)
+Thanks for clarification, that makes sense.
+
+*--- SeppoTakalo (2026-05-27 12:26:22+00:00)
+@JordanYates Why not just `modem_pipe_transmit_chain()` that would allow any number of pointer&size pairs?
+
+Why limit to two?
+IP packets and PPP frames come from the stack in `struct net_pkt` structures, and could be fragmented. The same mechanism might be usable in the PPP to send fragments directly to CMUX, instread of first wrapping into big intermediate buffer.
+
+Also, I don't think it makes much sense to implement the double transmit to anywhere else but CMUX. That really benefits it.
+
+*--- JordanYates (2026-05-28 00:00:28+00:00)
+> Why limit to two?
+
+The motivating use-case for the functionality is `modem_chat`, which for every request has exactly two buffers. From an implementation perspective my feeling is handling a fixed number of buffers is less complicated, but not by a large amount.
+
+> IP packets and PPP frames come from the stack in `struct net_pkt` structures, and could be fragmented
+
+Unless I am misunderstanding `modem_ppp_send_handler`, the `struct net_pkt` is already deserialised (by `modem_ppp_wrap`) into a contiguous RAM before before anything hits a pipe. The deserialisation is nothing to do with transmission efficiency, but because of the control character wrapping requirements.
+
+> Also, I don't think it makes much sense to implement the double transmit to anywhere else but CMUX. That really benefits it.
+
+I disagree, the cost of implementing it on the UART backends is practically nothing, and it provides a meaningful speedup for short commands. Have you ever seen a logic trace of sending a `AT+CFUN?` command to the modem? It basically takes twice as long as it should do due to the gap between the `?` and `\r\n` characters. (I'm trying to find a historical trace, but it should be pretty easy for you to verify with a nRF93M1 DK)
+
+*--- JordanYates (2026-06-11 00:37:33+00:00)
+So I want to be very clear on this before I implement this feature for the third time, because the consequences of your suggestions just lead back to the reasons the first attempt in #98541 was rejected.
+
+> I don't want us to have to break the API again in the future to add a third buffer
+
+Point 1, this PR is the exact opposite of a breaking change, neither backends nor users of the API need to do anything to continue operating correctly.
+
+> and I don't want to carry around two transmit APIs
+> ...
+> If we add transmit_double or transmit_chain, transmit should be a thin wrapper on top of either of those.
+
+https://github.com/zephyrproject-rtos/zephyr/pull/98541#pullrequestreview-3397782650 rejected the proposal because
+
+> This API change spans through way too many modules and causes API breaks for pipe backends that are implemented outside of Zephyr tree
+
+
+Point 2, presumably the "thin wrapper" you suggest would look something like:
+```
+static inline int pipe_transmit(struct modem_pipe *pipe, const uint8_t *buf, size_t size)
+{
+    struct modem_pipe_fragment frag = {
+        .data = buf, .size = size,
+    };
+
+    return pipe->api->transmit_chain(pipe, &frag, 1);
+}
+```
+Combined with your comment about not wanting two transmit API's, presumably the `transmit` backend function disappears, leading to exactly the breaking changes and OOT problems that led to @SeppoTakalo blocking the first PR.
+
+`pipe_transmit_chain` is not much different from this PR from an implementation perspective, but it has a number of consequences that this PR does not that I want approved beforehand before spending yet more time on this.
+
+I'm not a fan of the `flush/configure` pattern. You say `"Its not a breaking API change"` but it sort of is, every backend would need to be updated to conform with the API, its not described as a "may or may not do anything" option. Which IMO is actually worse, as it leads to divergence from the API behavior without any corresponding compiler errors.
+
+*--- bjarki-andreasen (2026-06-11 14:38:15+00:00)
+> So I want to be very clear on this before I implement this feature for the third time, because the consequences of your suggestions just lead back to the reasons the first attempt in #98541 was rejected.
+
+I think breaking the API in this case will result in a more efficient and scalable solution, at quite little cost to users of pipes, and implementers of backends:
+
+Given we are modifying the API to bring efficiency enhancements, not functional ones, we can add thin wrappers on both the user and backend sides of the pipe transmit APIs:
+```
+static int pipe_call_transmit_chain(struct modem_pipe *pipe,
+                                    const struct modem_pipe_fragment *fragments,                            
+                                    size_t fragments_size)
+{
+        int ret;
+        int transmitted;
+
+        if (pipe->api->transmit_chain == NULL) {
+                for (size_t i = 0; i < fragments_size; i++) {
+                        ret = pipe->api->transmit(pipe->data, fragments[i].data, fragments[i].size);
+                        if (ret <= 0) {
+                                return ret;
+                        }
+
+                        transmitted += ret;
+                };
+
+                return transmitted;
+        }
+
+	return pipe->api->transmit_chain(pipe->data, fragments, fragments_size);
+}
+```
+which would compliment the thin wrapper for `modem_pipe_transmit` below. We could then deprecate the transmit API over a release.
+
+> > I don't want us to have to break the API again in the future to add a third buffer
+> 
+> Point 1, this PR is the exact opposite of a breaking change, neither backends nor users of the API need to do anything to continue operating correctly.
+>
+> > and I don't want to carry around two transmit APIs
+> > ...
+> > If we add transmit_double or transmit_chain, transmit should be a thin wrapper on top of either of those.
+> 
+> [#98541 (review)](https://github.com/zephyrproject-rtos/zephyr/pull/98541#pullrequestreview-3397782650) rejected the proposal because
+> 
+> > This API change spans through way too many modules and causes API breaks for pipe backends that are implemented outside of Zephyr tree
+> 
+> Point 2, presumably the "thin wrapper" you suggest would look something like:
+> 
+> ```
+> static inline int pipe_transmit(struct modem_pipe *pipe, const uint8_t *buf, size_t size)
+> {
+>     struct modem_pipe_fragment frag = {
+>         .data = buf, .size = size,
+>     };
+> 
+>     return pipe->api->transmit_chain(pipe, &frag, 1);
+> }
+> ```
+> 
+> Combined with your comment about not wanting two transmit API's, presumably the `transmit` backend function disappears, leading to exactly the breaking changes and OOT problems that led to @SeppoTakalo blocking the first PR.
+>
+> `pipe_transmit_chain` is not much different from this PR from an implementation perspective, but it has a number of consequences that this PR does not that I want approved beforehand before spending yet more time on this.
+
+With the proposed wrapper for the transmit API on the backend side, this would not be the case I believe
+ 
+> I'm not a fan of the `flush/configure` pattern. You say `"Its not a breaking API change"` but it sort of is, every backend would need to be updated to conform with the API, its not described as a "may or may not do anything" option. Which IMO is actually worse, as it leads to divergence from the API behavior without any corresponding compiler errors.
+
+I don't think we should go with this either because of the added complexity of adding "statefullness" to the backends where they need to "save" half wrapped packets between calls to transmit if BUFFERED option is set.
+
+In summary, I prefer the chained API, and I believe we can implement it without any breaking changes, and can decide to deprecate the transmit API later to get back to a single API implemented by the backends. The `modem_pipe_transmit ` thin wrapper seems like it would remain useful.
+
+*--- wkhadgar (2026-06-11 18:50:37+00:00)
++1 to the chain + fallback direction. The fallback wrapper is the part that makes it work: a backend that only implements transmit keeps running unchanged, so this isn't a repeat of the out-of-tree break from #98541, the backend hook stays functional, and only the user-facing surface soft-deprecates.
+
+To be fair to the double approach though: every current consumer is effectively 2 regions (chat request + delimiter), and double serves all of them. I went looking for an in-tree case that needs more, parameterized commands like `cellular_set_apn()` get `snprintk`'d into a single buffer before they reach the pipe, so they're 2 blocks too, not N. So there's no live N>2 caller today that double can't handle, at least not that I can think of right now...
+
+Where I still lean on chain is future-proofing: it can be non-breaking via the fallback, and it means we don't re-break the API the day a caller wants to hand over fragmented sources. It's somewhat more to implement than double, mostly in the partial-write resume (cursor into a fragment array vs two fixed regions), so it's not free, just a one-time cost that buys not having to touch the API signature again. That's a preference, not a concrete gap double leaves open today, if it's not worth that cost, double is a fine place to land.
+
+Either way happy to help review.
+
+*--- JordanYates (2026-07-20 07:43:20+00:00)
+Closing in favor of #114033, which implements the chained API

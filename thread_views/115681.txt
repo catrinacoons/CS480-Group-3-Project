@@ -1,0 +1,9 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115681
+TITLE: drivers: ethernet: move NETC internal header next to its drivers
+
+*--- opening post by kartben (2026-08-07 17:30:19+00:00)
+`include/zephyr/drivers/ethernet/nxp_imx_netc.h` only holds definitions
+shared between the NXP i.MX NETC Ethernet and DSA drivers, which both
+live under `drivers/ethernet`. Move the header to the NETC driver
+directory, following the private header convention already used there,
+so that it is no longer part of the public include tree.

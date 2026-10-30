@@ -1,0 +1,92 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113138
+TITLE: zbus: Fix message subscribers net buf isolated pools usage
+
+*--- opening post by rodrigopex (2026-07-09 12:59:21+00:00)
+The net buf isolated pools feature definition inside the channel was wrong. That was causing a false sensation that the feature was set up correctly, but it was never set. It was forcing the developer to set an isolated pool to all the msg subscribers, which is a wrong behavior.
+
+This commit fixes that by adjusting the configuration usage, adding the `CONFIG_` prefix, and placing the initialization in the proper place (the `zbus_channel_data`, instead of the `zbus_channel` directly). It also adapts the test to capture the issue and avoid regressions.
+
+It addresses the issue mentioned in #107533 PR. The direction the PR was taking would take more time to converge than opening another one.  
+
+Please @MarkoSagadin, review this one and check if it solves what you were meant to solve.
+
+*--- MarkoSagadin (2026-07-10 18:49:03+00:00)
+Hello @rodrigopex! I took a look at this PR. The first commit indeed solves the issue that I ran into while trying to use isolated pools feature.
+
+However, the solution doesn't use a static approach, as you claimed in this [comment](https://github.com/zephyrproject-rtos/zephyr/pull/107533#issuecomment-4925333271); `_zbus_vded_exec` decides which pool to use at run-time. Also, with every run of that function there is now an additional if check, my solution avoided that by pushing the pool assignments to the init function that ran once after boot.
+
+> The direction the PR was taking would take more time to converge than opening another one.
+
+I don't feel like that was the case. Yes, my PR doesn't contain tests, as I was waiting for the feedback. They would be added once I knew the direction of the proper fix.
+
+But alas, I would be happy with any solution that fixes the issue.
+
+*--- rodrigopex (2026-07-14 14:00:12+00:00)
+> Hello @rodrigopex! I took a look at this PR. The first commit indeed solves the issue that I ran into while trying to use isolated pools feature.
+> 
+> However, the solution doesn't use a static approach, as you claimed in this [comment](https://github.com/zephyrproject-rtos/zephyr/pull/107533#issuecomment-4925333271); `_zbus_vded_exec` decides which pool to use at run-time. Also, with every run of that function there is now an additional if check, my solution avoided that by pushing the pool assignments to the init function that ran once after boot.
+> 
+> > The direction the PR was taking would take more time to converge than opening another one.
+> 
+> I don't feel like that was the case. Yes, my PR doesn't contain tests, as I was waiting for the feedback. They would be added once I knew the direction of the proper fix.
+> 
+> But alas, I would be happy with any solution that fixes the issue.
+
+The PR does not rely on the SYS_INIT to address the lack of an isolated pool and consider only static information for that feature. Which was the goal of the comment.
+
+@MarkoSagadin sorry for the direction your PR ends up going, replaced by this one. I am almost out of spare time for contributing here, and I was investigating the changes, and I noticed the solution was just there, so I did it. I didn't mean to be rude, and I would like to apologize about that and thank you for the contribution. Do not give up on zbus. Your contributions will count. ❤️ 
+
+Thanks again. Could you please add your review on it?
+
+*--- JordanYates (2026-07-21 11:39:51+00:00)
+```suggestion
+	struct net_buf_pool *pool;
+#if defined(CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_ISOLATION)
+    /* Channel specific pool if set, otherwise common pool */
+    pool = chan->data->msg_subscriber_pool != NULL ?
+                chan->data->msg_subscriber_pool :
+                &_zbus_msg_subscribers_pool;
+#else
+    /* Always the common subscriber pool */
+    pool = &_zbus_msg_subscribers_pool;
+#endif
+```
+Personally this is a lot easier to read than the `COND_CODE_1` version at this point.
+
+*--- rodrigopex (2026-07-23 10:58:55+00:00)
+Indeed. Done. 
+
+I solved it using the approach but with slightly different lines, please take a look:
+
+```c
+	/* Always the common subscriber pool */
+	struct net_buf_pool *pool = &_zbus_msg_subscribers_pool;
+
+#if defined(CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_ISOLATION)
+	/* Channel specific pool if set, otherwise common pool */
+	if (chan->data->msg_subscriber_pool != NULL) {
+		pool = chan->data->msg_subscriber_pool;
+	}
+#endif
+
+```
+
+*--- Copilot (2026-07-23 11:24:34+00:00)
+The `#if defined(CONFIG_ZBUS_MSG_SUBSCRIBER_NET_BUF_POOL_ISOLATION)` block ends with an unannotated `#endif`, which is inconsistent with the rest of this file and makes nested preprocessor logic harder to follow.
+
+*--- Copilot (2026-07-23 11:24:35+00:00)
+This Kconfig prompt is misleading: the symbol controls whether the sample uses the shared default msg-subscriber pool vs calling `zbus_chan_set_msg_sub_pool()`, not the size of the isolated pool.
+
+*--- Copilot (2026-07-23 11:24:35+00:00)
+This list item exceeds the usual documentation line-length guidance and is difficult to read; please wrap it to multiple continuation lines.
+
+*--- Copilot (2026-07-23 11:24:35+00:00)
+The new top-level `* ZBus` bullet should be separated from the preceding `* Video` nested list with a blank line, and the long kconfig option line should be wrapped to keep formatting consistent.
+
+*--- pdgendt (2026-07-23 11:26:32+00:00)
+I think this is needed for correct formatting of the bullet points.
+
+EDIT: or not https://builds.zephyrproject.io/zephyr/pr/113138/docs/releases/release-notes-4.5.html#libraries-subsystems
+
+*--- rodrigopex (2026-07-23 16:27:56+00:00)
+Fixed with: https://github.com/zephyrproject-rtos/zephyr/pull/114418

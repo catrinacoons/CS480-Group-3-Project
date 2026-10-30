@@ -1,0 +1,20 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/89461
+TITLE: drivers: entropy: add iproc_rng200 (rpi_5) random generator driver
+
+*--- opening post by soburi (2025-05-05 04:27:59+00:00)
+Add driver for iproc_rng200 entropy generator.
+This device is used by rpi_5.
+
+*--- Copilot (2025-05-06 00:48:21+00:00)
+[nitpick] Consider introducing a separate variable (e.g., 'remaining') to track the number of bytes left to fill, rather than modifying 'length' directly in the loop. This would improve clarity and reduce potential confusion in understanding how many bytes are expected to be copied.
+```suggestion
+		memcpy(&buffer[i * 4], &random_word, MIN(remaining, 4));
+		remaining -= 4;
+```
+
+*--- soburi (2025-05-13 23:39:16+00:00)
+@lahyllas @xingrz 
+Could you take a look please?
+
+*--- Lahyllas (2025-05-14 06:27:41+00:00)
+I can't test this right now, but it looks pretty good to me.

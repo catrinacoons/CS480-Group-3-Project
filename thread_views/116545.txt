@@ -1,0 +1,22 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116545
+TITLE: tests: drivers: reset: mmio: keep the fake registers out of kernel RAM
+
+*--- opening post by nashif (2026-08-18 00:34:27+00:00)
+The qemu_cortex_m3 overlay placed the fake reset-mmio registers at
+0x20000004/0x20000008, inside the SRAM the kernel links into. The
+words they occupy are owned by whatever .data the linker places at
+the start of RAM, so every write through the reset driver corrupts
+live kernel state, and the test only ever passed by layout luck.
+
+A recent timer-core change added an 8-byte .data variable that landed
+at 0x20000000, which pushed libc's _char_out console output function
+pointer to exactly 0x20000008: the active-low test case then wrote
+its register patterns over the pointer, console output jumped through
+the corrupted value into a HardFault, the fault handler's own print
+re-took the fault, and QEMU stopped with "Lockup: can't escalate 3 to
+HardFault". Any future .data layout change could break this test the
+same way.
+
+Shrink the kernel's view of the 64 KiB SRAM by one KiB in the overlay
+and move the fake registers into the carved-out tail, so no linker
+layout can ever place kernel data under them.

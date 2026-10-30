@@ -1,0 +1,71 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114677
+TITLE: drivers: pcie: defer recursive bridge scans for multifunction ports
+
+*--- opening post by khademullah (2026-07-27 10:45:18+00:00)
+## Description
+Fixes an issue where scanning nested multifunction bridges premature-dives down the first bridge function before processing peer functions on the same slot. This can cause missing hardware tracking cells if secondary buses aren't allocated in order.
+## Solution
+Maintain the core DFS pattern but defer the vertical branch descent until the horizontal function traversal across the parent slot node completes. This queues the target buses into an array buffer to secure parent interfaces before downstream enumeration begins.
+## Testing Matrix
+
+* Verified on qemu_cortex_a53 with a multi-root port bridge topology (multifunction=on).
+* Low-level pci_cfg tracing confirms the horizontal ports are fully initialized in hardware before child branches are traversed.
+
+
+### Real-World Topology Verification
+
+Tested against a multi-root port slot hosting a nested downstream switch array layout (forcing dynamic bus expansion under Function 0).
+
+####  Originally (Scrambled/Out-of-Order Enumeration)
+The original engine premature-dives down the first branch immediately, executing complete leaf-node discovery on Bus 01, 02, and 03 before ever discovering that peer Bridge B (`0:1.1`) exists on the parent layer. This scrambles the internal device tree topology array layout. 
+
+```text
+uart:~$ pcie ls 
+0:0.0 ID 1b36:8 class 6 subclass 0 prog i/f 0 rev 0
+    wired interrupt on IRQ 0
+0:1.0 ID 1b36:c class 6 subclass 4 prog i/f 0 rev 0 [bridge]
+1:0.0 ID 104c:8232 class 6 subclass 4 prog i/f 0 rev 2 [bridge]
+2:0.0 ID 104c:8233 class 6 subclass 4 prog i/f 0 rev 1 [bridge]
+3:0.0 ID 8086:10d3 class 2 subclass 0 prog i/f 0 rev 0
+    bar 0: MEM addr 0x10020000
+    bar 1: MEM addr 0x10040000
+    bar 2: I/O addr 0x00001000
+    bar 3: MEM addr 0x10060000
+    wired interrupt on IRQ 0
+0:1.1 ID 1b36:c class 6 subclass 4 prog i/f 0 rev 0 [bridge]
+```
+
+####  Now
+With the patch applied, the localized breadth-first barrier safely captures the peer bridge entries across the slot layout first. Sibling bridges (`0:1.0` and `0:1.1`) are discovered and registered sequentially next to each other on the parent bus before the vertical recursive dive safely unwinds:
+
+```text
+uart:~\$ pcie ls 
+0:0.0 ID 1b36:8 class 6 subclass 0 prog i/f 0 rev 0
+    wired interrupt on IRQ 0
+0:1.0 ID 1b36:c class 6 subclass 4 prog i/f 0 rev 0 [bridge]
+0:1.1 ID 1b36:c class 6 subclass 4 prog i/f 0 rev 0 [bridge]
+1:0.0 ID 104c:8232 class 6 subclass 4 prog i/f 0 rev 2 [bridge]
+2:0.0 ID 104c:8233 class 6 subclass 4 prog i/f 0 rev 1 [bridge]
+3:0.0 ID 8086:10d3 class 2 subclass 0 prog i/f 0 rev 0
+    bar 0: MEM addr 0x10020000
+    bar 1: MEM addr 0x10040000
+    bar 2: I/O addr 0x00001000
+    bar 3: MEM addr 0x10060000
+    wired interrupt on IRQ 0
+```
+
+*--- Copilot (2026-07-27 16:40:55+00:00)
+`do_cb` now becomes true for PCI bridges when `PCIE_SCAN_RECURSIVE` is set, even if `PCIE_SCAN_CB_ALL` is not. This changes the documented `pcie_scan()` callback contract (pcie.h:200-201 says bridges are included only with `PCIE_SCAN_CB_ALL`) and can cause callers to stop scanning early if their callback returns false on a bridge.
+
+*--- khademullah (2026-08-28 03:45:25+00:00)
+Hi @dcpleung , please review this PR as well. 
+Thanks!
+
+*--- dcpleung (2026-08-28 17:11:22+00:00)
+Need to guard against overflow. Will probably not going to happen but some tools will flag this as potential buffer overflow.
+
+*--- khademullah (2026-09-09 11:48:56+00:00)
+Hi @dcpleung , please review this PR.
+
+*--- khademullah (2026-09-16 04:53:07+00:00)
+Hi @dcpleung , can we please review/approve this MR from other reviewers as well ? so that it could be merged.

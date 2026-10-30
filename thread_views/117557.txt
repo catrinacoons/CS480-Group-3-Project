@@ -1,0 +1,43 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117557
+TITLE: net: l2: ppp: act on a received Protocol-Reject
+
+*--- opening post by ShahriarAhnaf (2026-08-27 05:32:05+00:00)
+`ppp_fsm_recv_protocol_rej()` logged the LCP state and returned `NET_DROP`, so a received Protocol-Reject was ignored: the rejected protocol kept retransmitting until Max-Configure (RFC 1661 §5.7 says it MUST stop), and the fallthrough to `ppp_fsm_input()`'s default branch answered a valid Protocol-Reject with a Code-Reject.
+
+Read the Rejected-Protocol field and dispatch to the matching FSM's `proto_reject` callback (already registered by IPCP/IPV6CP/PAP, never invoked). Per §4.2 a Protocol-Reject of a network-layer protocol is RXJ+ (LCP stays up); per §5.7 one outside LCP Opened is discarded. Matches pppd's `lcp_rprotrej()`.
+
+Found running a Zephyr PPP client against a peer that rejects IPV6CP: link came up 30s late, and the client wrongly Code-Rejected a valid Protocol-Reject.
+
+Note: `ppp_fsm_proto_reject()` in fsm.c is unused — that's the RXJ- (Protocol-Reject of LCP itself) case, not this one.
+
+Verified: `west twister -p mps2/an385 -T tests/net/ppp/driver` — 4/4 pass; fails on both assertions with the fix reverted. checkpatch clean.
+
+*--- Copilot (2026-08-27 06:41:56+00:00)
+In ppp_tx_cb(), the current length check allows len == sizeof(uint16_t), which stores a frame with frame->len == 0. tx_frames_get()/tx_frames_count() later read tx_frames[i].data[0] for non-zero codes, which can become an uninitialized/stale read if a 0-length frame is ever captured. Tighten the length check to require at least one payload byte (the control-protocol code).
+
+*--- Copilot (2026-08-27 06:41:57+00:00)
+tx_frames and tx_frame_count are written from the PPP send path (which can run from the FSM delayable workqueue) and read/reset from the test thread without synchronization. This can lead to flaky results or corrupted captures. A simple mitigation is to disable tx_capture while inspecting/building the reject frame, and re-enable it only when starting the next capture window.
+
+*--- Copilot (2026-08-27 06:41:57+00:00)
+This test changes global PPP driver/L2 callbacks (ppp_driver_register_send_cb, ppp_l2_register_pkt_cb) but never restores them. That makes the suite order-dependent and can leak state if more tests are added later. Consider unregistering the send callback and restoring the L2 callback before returning from the test.
+
+*--- jukkar (2026-08-27 07:07:00+00:00)
+We could use `zexpect` here instead of `zassert` so that all of these conditions are checked if there is an failure.
+
+*--- ShahriarAhnaf (2026-08-27 23:19:51+00:00)
+Fixed - length check now requires at least one payload byte (`len <= sizeof(uint16_t)` is rejected).
+
+*--- ShahriarAhnaf (2026-08-27 23:19:53+00:00)
+Fixed - `tx_capture` is now dropped before inspecting/building the reject frame and re-enabled only for the second capture window, as suggested.
+
+*--- ShahriarAhnaf (2026-08-27 23:19:55+00:00)
+Fixed - both callbacks are restored (`ppp_driver_register_send_cb(NULL)`, `ppp_l2_register_pkt_cb(ppp_l2_recv)`) before the test returns.
+
+*--- ShahriarAhnaf (2026-08-27 23:19:58+00:00)
+Done - switched to `zexpect_equal`/`zexpect_true` for the final assertions.
+
+*--- ShahriarAhnaf (2026-08-28 00:33:47+00:00)
+addressed comments. please review again. First time contributing happy to get more feedback
+
+*--- ShahriarAhnaf (2026-09-06 04:44:57+00:00)
+Bumping to review. dont want this buried

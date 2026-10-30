@@ -1,0 +1,5 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114201
+TITLE: kernel: misc. Doxygen documentation fixes
+
+*--- opening post by kartben (2026-07-21 12:55:34+00:00)
+Fix a copy-pasted `@brief` and `@param` names that don't match the HW shadow-stack macro signatures.

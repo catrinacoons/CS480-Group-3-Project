@@ -1,0 +1,46 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115534
+TITLE: net: Fixes for code-scanning alerts in `subsys/net/lib`
+
+*--- opening post by rlubos (2026-08-06 10:57:59+00:00)
+Fixes a batch of GitHub code-scanning alerts (GCC static analyzer, Sanitizers, SonarCloud) in `subsys/net/lib`. Each alert is addressed by a dedicated commit; similar findings in the same area are grouped into one commit:
+
+#### `net: lwm2m: Fix NULL access in SenML CBOR write handling`
+- [#1661](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1661) — GCC analyzer `-Wanalyzer-null-dereference`, `lwm2m/lwm2m_rw_senml_cbor.c:749` (`dereference of NULL 'rec'`)
+- [#1782](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1782) — Sanitizers (UBSAN) `ubsan-null-pointer`, `lwm2m/lwm2m_rw_senml_cbor.c:655` (`NULL` passed to `memcpy`)
+#### `net: lib: tls_credentials: Prevent digest wipe from being optimized out`
+- [#1007](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1007) — SonarCloud `c:S5798`, `tls_credentials/tls_credentials_digest_raw.c:46` (`memset` likely optimized away)
+#### `net: lwm2m: Validate buffer size against resource data type`
+- [#1735](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1735) — GCC analyzer `-Wanalyzer-out-of-bounds`, `lwm2m/lwm2m_registry.c:913`
+- [#1736](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1736) — GCC analyzer `-Wanalyzer-out-of-bounds`, `lwm2m/lwm2m_registry.c:943`
+- [#1737](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1737) — GCC analyzer `-Wanalyzer-out-of-bounds`, `lwm2m/lwm2m_registry.c:951`
+- [#1738](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1738) — GCC analyzer `-Wanalyzer-out-of-bounds`, `lwm2m/lwm2m_registry.c:955`
+- [#1739](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1739) — GCC analyzer `-Wanalyzer-out-of-bounds`, `lwm2m/lwm2m_registry.c:959`
+- [#1740](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1740) — GCC analyzer `-Wanalyzer-out-of-bounds`, `lwm2m/lwm2m_registry.c:971`
+- [#1741](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1741) — GCC analyzer `-Wanalyzer-out-of-bounds`, `lwm2m/lwm2m_registry.c:975`
+#### `net: mdns_responder: Use static storage for listener poll arrays`
+- [#1795](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1795) — Sanitizers (ASAN) `asan-stack-use-after-return`, `sockets/sockets_service.c:101`
+#### `net: dns: Bound dispatcher local address copy by source length`
+- [#1733](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1733) — GCC analyzer `-Wanalyzer-out-of-bounds`, `dns/mdns_responder.c:1530` (`stack-based buffer over-read`)
+- [#1734](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1734) — GCC analyzer `-Wanalyzer-out-of-bounds`, `dns/resolve.c:726` (`stack-based buffer over-read`)
+#### `net: lwm2m: Zero-initialize OMA TLV read buffer`
+- [#1767](https://github.com/zephyrproject-rtos/zephyr/security/code-scanning/1767) — GCC analyzer `-Wanalyzer-use-of-uninitialized-value`, `lwm2m/lwm2m_rw_oma_tlv.c:243` (`use of uninitialized value 'buf[1]'`)
+
+Fixes https://github.com/zephyrproject-rtos/zephyr/issues/115535
+
+*--- jukkar (2026-08-06 12:23:29+00:00)
+Would there be problem now if len<0 (out of bounds write)?
+Should we return error in this case?
+
+*--- jukkar (2026-08-06 12:25:21+00:00)
+There exists `mbedtls_platform_zeroize(dest, len);` that is already being used in various parts of net stack.
+
+*--- rlubos (2026-08-06 12:44:49+00:00)
+There seems to be some mixup regarding types used in this function, yes `len` is int, but it is initialized with a value of `size_t` so unless it overflows it should never be negative (which shouldn't ever be the case as we're in datagram size limit).
+
+But probably better to just update `len` to be of type size_t as well to avoid confusion, will fix.
+
+*--- rlubos (2026-08-06 12:47:02+00:00)
+I'm not sure if that's a good idea, it'd create a new dependency in the library to mbed TLS, so far it only required PSA API access. This could be a real issue on non-secure platforms, were PSA API is provided by TFM and mbed TLS may not be available.
+
+*--- jukkar (2026-08-06 13:37:48+00:00)
+Ok, doing it like this is fine.

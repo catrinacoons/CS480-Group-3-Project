@@ -1,0 +1,32 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115964
+TITLE: drivers: sensor: lsm6dso: fix embedded sensor init, drain loop and humidity
+
+*--- opening post by kartben (2026-08-11 22:01:21+00:00)
+This PR fixes three independent correctness bugs found in the LSM6DSO driver,
+one commit per issue:
+
+- **Fix uninitialised embedded sensor struct**: `lsm6dso_enable_tilt_int()`
+  declared an `lsm6dso_emb_sens_t` on the stack, set only the tilt bit, and
+  wrote the whole struct to EMB_FUNC_EN_A/EMB_FUNC_EN_B. Stack residue in the
+  other members could therefore enable the pedometer, significant-motion or
+  FSM engines at random. The struct is now zero-initialised and the current
+  embedded-function state is read back first, so only the tilt bit changes.
+- **Bound the data-ready drain loop**: `handle_interrupt()` looped until every
+  data-ready status bit cleared, but a bit is only cleared when a handler
+  reads the corresponding output registers. With an enabled data-ready source
+  that has no registered handler (or a handler that defers the fetch), the
+  loop never terminated, hanging the trigger thread or the system workqueue.
+  The exit condition is now handler-qualified and the loop is additionally
+  bounded; the GPIO interrupt is re-armed afterwards as before, so nothing is
+  lost.
+- **Fix sensor hub humidity value conversion**: the humidity converter set
+  `val1 = rh` *and* `val2 = rh * 1000000`, i.e. it put the whole value in the
+  fractional field instead of the remainder — roughly doubling the reported
+  %RH and leaving `val2` far outside its ±999999 range. Replaced with
+  `sensor_value_from_float()`. The same copy/pasted code exists in the
+  ism330dhcx and iis2iclx sensor-hub converters and is fixed here too;
+  lsm6dso16is and lsm6dsv16x carry the same bug and are fixed in their own
+  PRs.
+
+*--- kartben (2026-08-31 10:06:58+00:00)
+rebased due to merge conflict

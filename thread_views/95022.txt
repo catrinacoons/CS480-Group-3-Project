@@ -1,0 +1,32 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/95022
+TITLE: Bluetooth: Audio: Shell: Store broadcast_id statically
+
+*--- opening post by Thalley (2025-08-26 13:32:33+00:00)
+Add a broadcast_id field in broadcast_source so that it can be lookup later, which is useful for doing broadcast assitant procedures on a local broadcast source.
+
+*--- Copilot (2025-08-26 13:41:22+00:00)
+The function should return an error code (like -ENOEXEC) when broadcast ID generation fails, not 0 which indicates success.
+```suggestion
+		return -ENOEXEC;
+```
+
+*--- Copilot (2025-08-26 13:41:23+00:00)
+The function should return an error code when broadcast ID generation fails, not 0 which indicates success.
+```suggestion
+		return err;
+```
+
+*--- Copilot (2025-08-26 13:44:55+00:00)
+The broadcast_id may be invalid (BT_BAP_INVALID_BROADCAST_ID) when this function is called. There should be a check to ensure the broadcast_id is valid before using it in the advertisement data.
+
+*--- Copilot (2025-08-26 13:44:56+00:00)
+The broadcast_id may be invalid (BT_BAP_INVALID_BROADCAST_ID) when this function is called. There should be a check to ensure the broadcast_id is valid before using it in the advertisement data.
+
+*--- Copilot (2025-08-26 14:10:56+00:00)
+The code uses `default_source.broadcast_id` without checking if it's valid. If broadcast source creation failed and `broadcast_id` was set to `BT_BAP_INVALID_BROADCAST_ID`, this will put an invalid broadcast ID in the advertisement data.
+
+*--- Copilot (2025-08-26 14:10:56+00:00)
+The code uses `default_source.broadcast_id` without checking if it's valid. If broadcast source creation failed and `broadcast_id` was set to `BT_BAP_INVALID_BROADCAST_ID`, this will put an invalid broadcast ID in the advertisement data.
+
+*--- Thalley (2025-08-28 12:40:18+00:00)
+Added new commit to remove some functions that are no longer needed after the initial change

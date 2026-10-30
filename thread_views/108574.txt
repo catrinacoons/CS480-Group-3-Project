@@ -1,0 +1,453 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108574
+TITLE: STM32MP13 second Ethernet integration
+
+*--- opening post by eszSTM (2026-05-06 13:27:45+00:00)
+Hello,
+This pull request enables the second Ethernet port on the STM32MP135F-DK board.
+
+### Context and Current state
+
+Currently, the ETH_STM32_HAL drivers are singletons and do not support multiple instances. This pull request introduces changes with the following impacts:
+
+- _modules/hal/stm32_ requires modification to support the MP13 in multiple instances.
+- _STM32MP135 ETH SRAM memory-region_ must be adapted to provide sufficient space for 2 instances.
+- _eth_stm32_hal_* drivers require rework and adaptation.
+- STM32MP13 DTSI / DTS must be updated to support 2 Ethernet instances. A new _stm32mp133.dtsi_ file is created as the minimum reference product number supporting two Ethernet controllers.
+
+### Content of the PR
+
+1. **west.yml update**: Update _modules/hal/stm32_ to reference the necessary pull request supporting this feature. When the HAL pull request is merged, remove this west.yml modification.
+2. **ETH_SRAM size up**:  Modify the STM32MP135F-DK board to double the Ethernet SRAM size, which is the minimum required for 2 instances.
+3. **Zephyr STM32 ETH drivers rework**: Adapt the drivers step by step to prepare for multiple instances.
+   * Remove static global declarations of buffers, descriptors, and PHYs, and add them to structures.
+   * Remove static unused checks for random MAC address generation, now handled in the Zephyr framework.
+   * Switch MP13 REF_CLK configuration from Ethernet controller dedicated to Ethernet controller agnostic.
+   * Implement support for multiple instances in the drivers.
+4. **DTSI MP13 SoC Support**: Add the new _stm32mp133.dtsi_ file and enable support for the new Ethernet port.
+5. **DTS MP135F-DK Board support**: Add the board configuration to enable the second Ethernet port.
+
+### Technical aspects / drivers adaptations
+
+Although the drivers change in many places, the main modifications are:
+- Move all static declarations inside eth_stm32_hal_dev_cfg and eth_stm32_hal_dev_data structures to handle one RX buffer, DMA descriptor, or PHY per instance.
+- Change eth0* functions to generate them through macros, as done for other multiple instance drivers in Zephyr.
+
+A software choice was made for MCUs supporting only one Ethernet port. As targeted by @arnopo in a previous commit, the HAL differs between STM32MP13, which supports two Ethernet controllers, and other MCUs supporting only one. The STM32MP13 uses the following prototype: _void HAL_ETH_RxAllocateCallback(ETH_HandleTypeDef *heth, uint8_t **buff)_. Other MCUs use: _void HAL_ETH_RxAllocateCallback(uint8_t **buff)_.
+
+@arnopo addressed this by creating the **STM32_ETH_ARGS** macro in _eth_stm32_hal_v2.c_. I completed this by declaring the **ETH_STM32_HAL_CB_HAS_HETH** macro. The approach distinguishes between singleton and multiple instance use cases. In the singleton case, the prototype does not reference a _heth_ pointer, so it redirects to a single instance declared as static. In the multiple instance case, the function uses the _heth_ pointer passed as an argument. This is managed by the **ETH_STM32_HAL_GET_CB_DEVDATA** macro to maintain a consistent implementation.
+
+###  Split ?
+
+If you want to split this pull request into multiple ones, please let me know.
+
+Thanks,
+Erwan
+
+*--- Copilot (2026-05-06 14:13:42+00:00)
+`west.yml` should not pin `hal_stm32` to a GitHub PR ref (`refs/pull/366/head`). That ref is not immutable and can disappear/retarget, making builds non-reproducible. Please pin to a specific commit SHA (or a released tag) from that HAL PR; if this is intended as temporary bring-up, consider carrying it in an out-of-tree manifest instead of Zephyr’s main `west.yml`.
+
+*--- Copilot (2026-05-06 14:13:42+00:00)
+The new `stm32mp133.dtsi` uses inconsistent indentation/whitespace (leading spaces before `#include`, root node, and properties) compared to other STM32MP13 devicetree sources (e.g. `dts/arm/st/mp13/stm32mp13.dtsi`). Please reformat to match the established style (no leading spaces before preprocessor directives; consistent tab-based indentation/alignment).
+
+*--- Copilot (2026-05-06 14:13:43+00:00)
+For STM32N6, Ethernet DMA descriptors previously had an explicit `__aligned(32)` in addition to `__eth_stm32_desc`. With the new per-instance `struct eth_stm32_dma_desc` definition, that extra 32-byte alignment is no longer applied. Please ensure the descriptor storage is still 32-byte aligned on STM32N6 (e.g., add `__aligned(32)` to `ETH_STM32_HAL_COMMON_DMA_DESC_DEFN(n)` when `DT_HAS_COMPAT_STATUS_OKAY(st_stm32n6_ethernet)`), otherwise DMA/cache coherency requirements may be violated.
+
+*--- erwango (2026-05-06 14:15:39+00:00)
+```suggestion
+      revision: pull/366/head
+```
+
+*--- eszSTM (2026-05-06 15:21:19+00:00)
+Done
+
+*--- eszSTM (2026-05-06 15:21:54+00:00)
+The alignment has been placed in the eth_stm32_hal_priv.h as it is done for other SoCs reference
+
+*--- mathieuchopstm (2026-05-07 08:49:32+00:00)
+perhaps rename to `eth_phy0` as well?
+
+*--- maass-hamburg (2026-05-07 08:53:40+00:00)
+as that is for the cases where there is only one instance, you could do somethink like
+```
+DEVICE_DT_INST_GET(0)->data
+```
+and
+```
+DEVICE_DT_INST_GET(0)->config
+```
+for getting the config struct, so you don't need to save dev in the data struct
+
+*--- mathieuchopstm (2026-05-07 08:53:44+00:00)
+See other comment wrt this field: make it a pointer to the device configuration instead.
+
+*--- maass-hamburg (2026-05-07 08:54:38+00:00)
+it seems like this is only needed for v2
+
+*--- mathieuchopstm (2026-05-07 08:55:34+00:00)
+Directly store a pointer to the configuration in `dev_data` instead if that's what you want.
+
+*--- mathieuchopstm (2026-05-07 09:03:05+00:00)
+Since `mac`/`mdio` nodelabels are gone, this probably needs to be mentioned in Migration Guide.
+
+*--- maass-hamburg (2026-05-07 09:03:38+00:00)
+just do a build assert with DT_NUM_INST_STATUS_OKAY instead
+
+*--- maass-hamburg (2026-05-07 09:10:21+00:00)
+little info: the struct net_if *iface in the data struct already contains a pointer to the dev, get it via `net_if_get_device`
+
+*--- maass-hamburg (2026-05-07 09:14:07+00:00)
+as you are already filing some values in the data struct, you could also set the iface via `NET_IF_DT_INST_GET`. see https://github.com/zephyrproject-rtos/zephyr/pull/108427 But you either need to use NET_IF_DT_INST_DECLARE before, or move this after ETH_NET_DEVICE_DT_INST_DEFINE
+
+*--- mathieuchopstm (2026-05-07 09:29:55+00:00)
+I didn't add a comment because it's a bit out of scope but FTR, I'd like to eventually make the instance data zero-initialized so it'd be nice to avoid adding even more pre-initialized stuff to it.
+
+*--- eszSTM (2026-05-07 12:08:15+00:00)
+Ok, will add this into the migration-guide-4.5.rst to notice that labels are changed.
+
+*--- eszSTM (2026-05-07 12:12:34+00:00)
+Agree, will change this
+
+*--- eszSTM (2026-05-07 12:32:30+00:00)
+@maass-hamburg , @mathieuchopstm , I think this method will be the more suitable in my case. Indeed you are right, I do not want to multiply references to dev in structures if already done somewhere else.
+By quickly looking across the project, I see 2 main approaches. 
+1) Using net_if_get_device because we often already have a dev_data access, and so it will be easy to get back the dev reference (as it is done in eth_sam_gmac.c driver).
+2) declaring the dev in data structure and initialize it by using DEVICE_DT_INST_GET(n). It is done is some other drivers.
+
+I prefer option 1) and will try an implementation with it
+
+*--- eszSTM (2026-05-07 14:20:16+00:00)
+Done
+
+*--- eszSTM (2026-05-07 14:20:43+00:00)
+Choice has been made to use iface reference to dev as proposed in other comments
+
+*--- eszSTM (2026-05-07 14:21:14+00:00)
+With the use of iface, no need to store dev reference in the struct anymore
+
+*--- eszSTM (2026-05-07 14:21:29+00:00)
+No present anymore in last version
+
+*--- eszSTM (2026-05-07 14:21:46+00:00)
+Done, thanks for the proposal
+
+*--- eszSTM (2026-05-07 14:22:44+00:00)
+ditto
+
+*--- eszSTM (2026-05-07 14:23:06+00:00)
+Done, thanks for pointing this out @mathieuchopstm
+
+*--- eszSTM (2026-05-07 14:30:43+00:00)
+Not managed in my last patchset.
+From what I see, the iface reference is set in eth_iface_init function declared in eth_api.
+I do not know if we have some cases where the iface can be not referenced before HAL_xx_Callback being called in eth_stm32_hal_v2.c.
+
+Anyway, maybe this is not clean to let it like this. Is the proposal of @maass-hamburg something considerable @mathieuchopstm ? Or do I need to find another implementation ?
+
+*--- eszSTM (2026-05-07 14:31:11+00:00)
+ditto
+
+*--- maass-hamburg (2026-05-07 14:57:33+00:00)
+I suspect that these callbacks are only called after the interrupts is enabled and also after eth_stm32_hal_start, that also will only be called after setting the phy callback in iface init
+
+*--- eszSTM (2026-05-12 06:42:56+00:00)
+Hello @maass-hamburg, understood, I will wait for @juickar to check this point too and see if this is suitable for him as well. Then if OK, let's go for this implementation
+
+*--- juickar (2026-05-18 09:49:09+00:00)
+> Hello @maass-hamburg, understood, I will wait for @juickar to check this point too and see if this is suitable for him as well. Then if OK, let's go for this implementation
+
+These callbacks can only be called if the interrupts are enabled ( via eth_stm32_hal_start, that is called when the link is up). Also FYI I have detected a regression with your PR for the N6 series, I am still trying to figure out what introduced it
+
+*--- eszSTM (2026-05-19 07:08:52+00:00)
+Hello @juickar ,
+You are right, I had a non consistent attribute for N6 series after my PR. Should be corrected now
+
+*--- eszSTM (2026-05-19 08:13:39+00:00)
+New version pushed to resolve west.yml conflict / rebase on recent main.
+
+*--- arnopo (2026-05-29 14:40:05+00:00)
+what about (not tested)
+```
+#if DT_HAS_COMPAT_STATUS_OKAY(st_stm32mp13_ethernet)
+#define ETH_STM32_HAL_CB_HAS_HETH
+#define STM32_ETH_ARGS(heth, ...) heth, __VA_ARGS__
+#else
+#define STM32_ETH_ARGS(heth, ...) __VA_ARGS__
+#endif
+```
+
+then you could use `#ifdef ETH_STM32_HAL_CB_HAS_HETH` instead of` #if !ETH_STM32_HAL_CB_HAS_HETH`
+
+*--- arnopo (2026-05-29 14:56:25+00:00)
+this commit can be ignored depending of way of coding...
+
+From my perspective assert is a bad  protection as the check can be disabled
+I would replace it  this by 
+```
+if (!dev_data || !buff) 
+	goto inval_param
+}
+
+dev = net_if_get_device(dev_data->iface);
+
+if(!dev)
+	goto inval_param
+
+[...]
+inval_param:
+		LOG_ERR("invalid parameters");
+
+```
+
+*--- arnopo (2026-05-29 14:57:55+00:00)
+nitpicking , reorder for rideability
+```
+ 	struct eth_stm32_hal_dev_data *dev_data = ETH_STM32_HAL_GET_CB_DEVDATA(heth);
+	struct eth_stm32_rx_buffer_header *header;
+	const struct eth_stm32_hal_dev_cfg *cfg;
+	const struct device *dev;
+	size_t index;
+```
+some other places to improve
+
+*--- arnopo (2026-05-29 14:59:24+00:00)
+check of `index `should be done before the use
+
+*--- arnopo (2026-05-29 15:07:04+00:00)
+better to declare variable before the execution part
+```
+	while (remaining_read > ETH_STM32_TX_BUF_SIZE) {
+		const uint16_t next_buffer_id;
+		if (net_pkt_read(pkt, buf_header->tx_buff.buffer, ETH_STM32_TX_BUF_SIZE)) {
+			res = -ENOBUFS;
+			goto error;
+		}
+		next_buffer_id = allocate_tx_buffer(dev_data);
+```
+
+*--- maass-hamburg (2026-05-29 17:11:22+00:00)
+All of these checks can be removed. They are not needed. We don't need to check them. We do as little checks as possible and needed.
+
+*--- eszSTM (2026-06-01 07:50:05+00:00)
+Corrected in last pushed version
+
+*--- eszSTM (2026-06-01 07:50:20+00:00)
+Corrected in last pushed version
+
+*--- eszSTM (2026-06-01 07:51:04+00:00)
+Order adapted for functions touched by my patches. I did not touch other ones to stay compliant with my commit topics.
+
+*--- eszSTM (2026-06-01 07:51:43+00:00)
+Agree with this approach. Adapted with removing the "1" value and use ifdef / ifndef instead.
+
+*--- eszSTM (2026-06-01 07:52:26+00:00)
+Accorded to both of your comments, I removed the ASSERT check in these specific functions.
+Thanks.
+
+*--- eszSTM (2026-06-01 07:53:57+00:00)
+West.yml have been updated by removing the PR pointer on stm32_hal module because the necessary patch has been merged on HAL side. Points now on the right SHA1.
+
+New version forced-pushed to answer last comments from @arnopo and @maass-hamburg.
+
+*--- juickar (2026-06-01 11:46:15+00:00)
+```suggestion
+ * Copyright (c) 2026 STMicroelectronics
+```
+Nit, not mandatory
+
+*--- etienne-lms (2026-06-01 12:47:53+00:00)
+Could you consistently indent the line escape characters?
+Maybe indent all of them to 100 char, as default suggested when using clang-format in the Zephyr source file tree.
+
+*--- etienne-lms (2026-06-01 12:52:25+00:00)
+```suggestion
+  ``mdio0:``. The goal is to distinguish the 2 Ethernet controllers available. (:github:`108574`)
+
+*--- eszSTM (2026-06-03 14:52:42+00:00)
+New force pushed to solve merge conflict on migration guide
+
+*--- Copilot (2026-06-03 14:55:28+00:00)
+Defining `/soc { compatible = ... }` in an included DTSI risks overriding the SoC compatible of boards that include this file (and may also trigger duplicate-property behavior, depending on how the base DTSI defines `/soc`). If this file is intended to *add* an extra Ethernet node, it should avoid overriding SoC-level `compatible` and instead extend the existing SoC node (e.g., via `&soc { ... }` or by only adding the `ethernet@...` subnode). This keeps SoC identification stable while still introducing `mac1/mdio1`.
+
+*--- Copilot (2026-06-03 14:55:29+00:00)
+Including `stm32mp133.dtsi` from `stm32mp135.dtsi` couples MP135 to an MP133-named SoC description file. If the intent is to share an 'extra Ethernet controller' fragment, consider moving that fragment into a clearly shared include (e.g., `stm32mp13-eth2.dtsi`) or modifying `stm32mp13.dtsi` directly (with `status = \"disabled\"`) and enabling it per-board. This avoids implying MP135 is MP133 and makes the include layering clearer for DTS consumers.
+
+*--- Copilot (2026-06-03 14:55:29+00:00)
+For SoCs that require 32-byte aligned DMA descriptors (e.g., the `st_stm32n6_ethernet` path previously used `__aligned(32)` on the descriptor arrays), relying on field-level alignment inside `struct eth_stm32_dma_desc` may not be sufficient if the linker section used by `__eth_stm32_desc` doesn't preserve the required alignment for the *object start*. Consider enforcing alignment on the `eth##n##_dma_desc` object itself (conditionally for the affected SoC, or unconditionally) to prevent hard-to-debug DMA faults due to misalignment.
+
+*--- Copilot (2026-06-03 14:55:29+00:00)
+The HAL RX callbacks now do an `iface -> device -> config` lookup on every callback invocation. These callbacks can be hot (and often execute in interrupt context), so this adds avoidable overhead. A concrete alternative is to store a direct `const struct eth_stm32_hal_dev_cfg *` (or `const struct device *`) pointer in `dev_data` during init, and use it directly in callbacks instead of calling `net_if_get_device()`.
+
+*--- Copilot (2026-06-03 14:55:30+00:00)
+Grammar fix: 'rename label' should be 'rename labels', and 'the 2 Ethernet controller available' should be 'the two Ethernet controllers available' (or '2 ... controllers').
+
+*--- eszSTM (2026-06-04 07:25:57+00:00)
+@maass-hamburg , @arnopo , @juickar , each of your comments have been taken into consideration in this last version. If you are OK with it, we can try to review and merge.
+Thanks for your review.
+
+*--- eszSTM (2026-06-04 07:28:05+00:00)
+Hi @juickar, forgot this point, but minor as you said. I let it aside for now.
+
+*--- etienne-lms (2026-06-04 12:45:22+00:00)
+maybe wiping the whole contexts with `memset()` could be simpler:
+```c
+	/* Reset context buffers and preapre Tx buffer headers */
+	memset(dev_data->rx_buffer_header, 0, sizeof(dev_data->rx_buffer_header));
+	memset(dev_data->tx_buffer_header, 0, sizeof(dev_data->tx_buffer_header));
+	memset(dev_data->tx_context, 0, sizeof(dev_data->tx_context));
+
+	for (uint16_t i = 0; i < ARRAY_SIZE(dev_data->tx_buffer_header); ++i) {
+		dev_data->tx_buffer_header[i].tx_buff.buffer = cfg->dma_buf->tx_buf[i];
+	}
+```
+
+*--- etienne-lms (2026-06-04 12:47:37+00:00)
+suggestion: add a coma here:
+```suggestion
+			HAL_ETH_REF_CLK_RX_CLK_PIN),
+
+*--- etienne-lms (2026-06-04 12:49:25+00:00)
+Indentation of line escape characters is a bit fuzzy. Maybe consider running clan-format toolin a next P-R to have a cleaner layout.
+
+*--- eszSTM (2026-06-05 09:07:45+00:00)
+Hello @etienne-lms, I will consider another PR for this cleanout, to not mix functional changes and code style changes.
+
+*--- eszSTM (2026-06-05 09:09:29+00:00)
+For this part, I voluntary keep the same syntax as the original code to not integrate risks of regressions as my changes are already big, but can be considered in a next PR if you agree.
+
+*--- eszSTM (2026-06-05 09:32:43+00:00)
+Finally, I will make another patchset to correct other remarks, so I will take it inside
+
+*--- eszSTM (2026-06-05 12:45:33+00:00)
+clang-format done on this file
+
+*--- eszSTM (2026-06-05 12:45:49+00:00)
+Comma added in last patchset
+
+*--- eszSTM (2026-06-05 12:46:55+00:00)
+Correction made
+
+*--- eszSTM (2026-06-05 12:47:21+00:00)
+clang-format made on this file in last patchset
+
+*--- eszSTM (2026-06-05 12:48:15+00:00)
+done
+
+*--- eszSTM (2026-06-05 12:49:27+00:00)
+Done in last patchset @juickar, thanks for the highlight
+
+*--- etienne-lms (2026-06-05 13:00:27+00:00)
+Nitpicking: Zephyr allows up to 100 char/line.
+```c
+					LOG_ERR("Failed to enqueue frame into RX queue: %d",
+						res);
+```
+Maybe run clang-format on your current last code state and append a commit to get all coding style issues fixed.
+
+*--- etienne-lms (2026-06-05 13:05:29+00:00)
+ok
+
+*--- eszSTM (2026-06-05 16:13:36+00:00)
+@etienne-lms , done and split in 2 commits for this file. Only one MACRO cannot be handled properly by the clang-format (cannot reduce to less than 100c long). I so handled it myself. (this is ETH_STM32_HAL_COMMON_DATA_DEFN(n))
+
+*--- eszSTM (2026-06-05 16:43:22+00:00)
+New patchset pushed according to formatting aspects raised by @etienne-lms and Copyright aspect raised by @juickar.
+Thanks for your comments
+
+*--- eszSTM (2026-06-08 07:28:00+00:00)
+@maass-hamburg, is this last version suitable for you ?
+
+*--- etienne-lms (2026-06-09 05:48:09+00:00)
+Indentation on line escape characters?
+Ditto a few lines below and in `ETH_STM32_HAL_COMMON_DATA_DEFN()` macro definition.
+
+*--- etienne-lms (2026-06-09 05:52:10+00:00)
+I think it would be worth to have this trace message in a single line. It would help when one greps for `Failed to enqueue frame into RX queue` trace message into the code.
+Not a blocking issue, though.
+
+*--- maass-hamburg (2026-06-09 09:32:31+00:00)
+why no longer using `DT_INST_REG_ADDR`
+
+*--- eszSTM (2026-06-11 08:32:33+00:00)
+Hello @maass-hamburg ,
+Agree, corrected in last patchset
+
+*--- eszSTM (2026-06-11 08:33:18+00:00)
+Indentation better fit with your remarks in last patchset, still warning but the best we can provide I guess.
+
+*--- eszSTM (2026-06-11 08:43:42+00:00)
+@juickar @etienne-lms @maass-hamburg , new patchset with minor correction asked in the thread. Thanks in advance.
+
+*--- erwango (2026-06-15 07:48:18+00:00)
+Commit could be removed once https://github.com/zephyrproject-rtos/zephyr/pull/110534 is merged
+
+*--- eszSTM (2026-06-23 13:43:55+00:00)
+Done in last patchset.
+
+*--- eszSTM (2026-06-23 13:45:51+00:00)
+Rebase done due to conflict with west.yml and migration guide.
+@maass-hamburg can you please review this PR when you will have some times ? I think all the points you mentioned have been tackled.
+@juickar , @etienne-lms, @erwango sorry, I need to ping you again due to rebase done.
+Thanks all.
+
+*--- maass-hamburg (2026-06-23 13:52:15+00:00)
+these are part of the ``struct eth_stm32_hal_dev_data`` , which means all values should already be 0 initialized
+
+*--- maass-hamburg (2026-06-23 13:52:43+00:00)
+same for these
+
+*--- Copilot (2026-06-23 13:53:34+00:00)
+`HAL_ETH_RxAllocateCallback()` unconditionally references the identifier `heth` via `ETH_STM32_HAL_GET_CB_DEVDATA(heth)`, but on non-STM32MP13 platforms `STM32_ETH_ARGS()` removes the `heth` parameter from the function signature. This will not compile when the HAL callback prototype does not include `ETH_HandleTypeDef *heth`.
+
+*--- Copilot (2026-06-23 13:53:34+00:00)
+`HAL_ETH_RxLinkCallback()` has the same issue as `HAL_ETH_RxAllocateCallback()`: when `STM32_ETH_ARGS()` removes the `heth` parameter, the reference to `heth` in `ETH_STM32_HAL_GET_CB_DEVDATA(heth)` will not compile.
+
+*--- Copilot (2026-06-23 13:53:35+00:00)
+`HAL_ETH_TxFreeCallback()` also references `heth` via `ETH_STM32_HAL_GET_CB_DEVDATA(heth)` even when `STM32_ETH_ARGS()` removes the `heth` parameter from the callback signature. This will fail to compile on platforms where the HAL callback prototype is `void HAL_ETH_TxFreeCallback(uint32_t *buff)`.
+
+*--- Copilot (2026-06-23 13:53:35+00:00)
+The large run of spaces before the line-continuation (\\) makes this preprocessor condition hard to read and is inconsistent with the surrounding style. Consider formatting it like other multi-line `#if` conditions in the tree (single space before `\\` and consistent indentation on the continuation line).
+
+*--- maass-hamburg (2026-06-23 13:59:09+00:00)
+tc_config is only needed for HAL_ETH_Transmit_IT, it can be a local variable inside ``eth_stm32_tx``
+
+*--- eszSTM (2026-06-30 06:52:40+00:00)
+Agree and corrected
+
+*--- eszSTM (2026-06-30 06:53:33+00:00)
+Agree, done
+
+*--- eszSTM (2026-06-30 06:55:42+00:00)
+Corrected too
+
+*--- eszSTM (2026-06-30 07:00:17+00:00)
+New patchset to rebase on main (due to dts conflict) and to correct @maass-hamburg last comments.
+Thanks for your new review on it.
+
+*--- etienne-lms (2026-06-30 07:02:40+00:00)
+@eszSTM, is this suggestion applicable?
+
+*--- maass-hamburg (2026-06-30 07:07:33+00:00)
+use ``DEVICE_DT_INST_GET(0)->data`` here, that way you don't need to have ``static struct eth_stm32_hal_dev_data *eth_stm32_cb_dev_data``
+
+*--- eszSTM (2026-06-30 07:15:32+00:00)
+I did not investigate a lot this comment as Copilot mentions:
+**_This will fail to compile on platforms where the HAL callback prototype is void HAL_ETH_TxFreeCallback(uint32_t *buff)._**
+
+However, seems not right as the _stm32f746g_disco_ can compile without any trouble, while the HAL prototype does not content the heth reference.
+
+*--- maass-hamburg (2026-06-30 07:53:06+00:00)
+just to mention ``ETH_STM32_HAL_GET_CB_DEVDATA`` is just a preprocessor function, it works on a text base. it just insets the text you gave it ``heth``. but in
+```
+#define ETH_STM32_HAL_GET_CB_DEVDATA(_heth) \
+	(eth_stm32_cb_dev_data)
+```
+it is not used and therefore no problem
+
+*--- eszSTM (2026-06-30 13:04:10+00:00)
+Really nice catch, this way to deal with single instance case is much more elegant. Thanks for this remark. I will make the modification to change this.
+
+*--- eszSTM (2026-06-30 13:10:37+00:00)
+Change has been applied in last patchset, thanks @maass-hamburg for all your inputs
+
+*--- eszSTM (2026-06-30 13:11:35+00:00)
+New patchset pushed to answer @maass-hamburg remark on static declaration of _eth_stm32_cb_dev_data_.

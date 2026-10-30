@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117053
+TITLE: [Backport v3.7-branch] bluetooth: classic: rfcomm: improve error handling and buffer check
+
+*--- opening post by d3zd3z (2026-08-21 14:20:39+00:00)
+Backport of the fix from #115768 to `v3.7-branch`.
+
+Fixes: #117045
+
+*--- Copilot (2026-08-21 14:25:07+00:00)
+Use the parsed MCC `len` here instead of `buf->len`. The latter includes any bytes beyond the TEST payload, so malformed frames echo unintended trailing data; it can also be 128–255, which `BT_RFCOMM_SET_LEN_8()` cannot encode as a valid one-byte length. Passing `len` keeps the response within the declared 7-bit MCC payload.

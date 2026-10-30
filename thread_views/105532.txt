@@ -1,0 +1,44 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/105532
+TITLE: drivers: display: add EFI GOP driver for x86 EFI boot
+
+*--- opening post by rede97 (2026-03-15 21:02:38+00:00)
+Add a display driver that uses EFI GOP (Graphics Output Protocol) information saved by the x86 EFI boot stub (zefi).
+
+- zefi: when CONFIG_DISPLAY_EFI_GOP is set, obtain GOP via ConOut handle and save framebuffer address, size, pitch, width, height in efi_arg.
+- arch/x86: add efi_get_gop_* getters in efi.c and efi.h.
+- drivers/display: new display_efi_gop driver (DT compatible zephyr,efi-gop-display), supports non-MMU by using framebuffer physical address directly.
+
+Enables LVGL and other display apps on x86_64 with EFI and GOP.
+
+
+Made-with: Cursor
+
+*--- Copilot (2026-03-16 16:44:43+00:00)
+`efi_get_gop_mode()` treats the GOP mode as valid as long as width/height are non-zero, but it can still return a zero pitch. A zero (or otherwise invalid) pitch will cause the GOP display driver to compute incorrect offsets and potentially scribble memory. Consider validating `efi->gop_pitch` (e.g., non-zero, and optionally >= width) before returning true.
+
+*--- Copilot (2026-03-16 16:44:44+00:00)
+`efi_gop_write()` does not validate `desc->width <= desc->pitch` or that the write region stays within the framebuffer bounds (x/y + width/height). Many display drivers in-tree add `__ASSERT()`s and return `-EINVAL` on invalid descriptors/coordinates (see `drivers/display/display_dummy.c`). Without these checks this driver can write past the framebuffer and corrupt memory.
+
+*--- Copilot (2026-03-16 16:44:44+00:00)
+`efi_gop_read()` similarly lacks validation of `desc` (width vs pitch) and bounds checks for x/y + region size. This can read past the framebuffer and potentially leak/corrupt memory via the destination buffer. Add the same assertions and `-EINVAL` guards used by other drivers (e.g., `display_dummy.c`).
+
+*--- Copilot (2026-03-16 16:44:44+00:00)
+The bootloader accepts both `PixelRedGreenBlueReserved8BitPerColor` and `PixelBlueGreenRedReserved8BitPerColor`, but the runtime driver exposes only `PIXEL_FORMAT_ARGB_8888` (which corresponds to a specific byte order). If the GOP is in the RGB-reserved order, colors will be swapped at runtime because the pixel format isn’t recorded/preserved. Either restrict to the byte order that matches `PIXEL_FORMAT_ARGB_8888`, or store the GOP PixelFormat in `efi_arg` and have the driver select/convert accordingly.
+
+*--- Copilot (2026-03-16 16:44:45+00:00)
+`struct efi_boot_arg` stores GOP resolution/pitch and framebuffer base/size, but it does not record the GOP PixelFormat/byte order. Since the display driver advertises `PIXEL_FORMAT_ARGB_8888`, the pixel byte order matters for correct colors. Consider adding a field to carry the GOP pixel format (or a boolean for BGR vs RGB) so the runtime driver can validate/handle the framebuffer layout correctly.
+
+*--- Copilot (2026-03-16 16:44:45+00:00)
+The framebuffer is mapped with `k_mem_map_phys_bare(..., K_MEM_PERM_RW)` but no cache mode is specified. Many drivers mapping MMIO / framebuffers explicitly request `K_MEM_CACHE_NONE` to avoid cache incoherency (e.g., `drivers/ethernet/eth_dwmac_mmu.c`). Consider adding an explicit cache mode flag appropriate for a framebuffer mapping (often `K_MEM_CACHE_NONE`, or an arch-specific write-combining mode if available).
+
+*--- Copilot (2026-03-16 16:44:45+00:00)
+Before using `width/height/pitch` to write into the framebuffer (including the gray fill loop), the driver should validate that the mapped `fb_size` is large enough for the claimed mode (e.g., `pitch * height * 4` bytes, with `pitch >= width`). As written, a corrupted/incorrect GOP mode could lead to out-of-bounds writes into whatever follows the mapped region.
+
+*--- Copilot (2026-03-16 16:44:45+00:00)
+Devicetree binding is missing an `include: display-controller.yaml` (most display bindings, including `dts/bindings/display/intel,multiboot-framebuffer.yaml`, include it). Without this, common display-controller properties/validation may be skipped and downstream tooling may not treat this node as a display device. Add the appropriate include so the binding inherits the standard display schema.
+
+*--- Copilot (2026-03-16 16:44:46+00:00)
+The binding declares a `status` property. `status` is a standard devicetree property handled generically and is not typically declared in bindings; declaring it here can conflict with common schemas and is inconsistent with other display bindings in this tree. Drop the explicit `status` property block from this binding.
+
+*--- rede97 (2026-03-26 17:47:03+00:00)
+The code will be resubmitted after testing with the new version.

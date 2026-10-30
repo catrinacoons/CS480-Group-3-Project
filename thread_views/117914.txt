@@ -1,0 +1,19 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117914
+TITLE: drivers: can: document the fake CAN controller driver
+
+*--- opening post by kartben (2026-08-31 21:00:31+00:00)
+Documents the fake CAN controller driver as a Doxygen group, with each fake documented as the API function it stands in for.
+
+The first two commits come from #117979 and will be dropped from this PR once that merges.
+
+https://builds.zephyrproject.io/zephyr/pr/117914/docs/doxygen/html/group__can__fake.html
+
+*--- henrikbrixandersen (2026-09-01 12:14:33+00:00)
+Rather, these custom fakes need to be overwritten in individual test cases for changing their return value. Clearing the `custom_fake` and relying on `return_val` will leave the output variables in an undefined state.
+
+*--- kartben (2026-09-01 15:10:11+00:00)
+> It just occurred to me that the `@fake_of{}` parameters reference top-level CAN controller driver API functions. This is a simplification and not true. These fakes are for the driver ops, not the API functions.
+> 
+> This will matter for driver ops not mapping 1:1 to a top-level (application-facing) API function.
+
+Uh, very nice catch. Thanks for paying attention. Should easily be able to keep using `fake_of` but have it point to the ops instead. On it.

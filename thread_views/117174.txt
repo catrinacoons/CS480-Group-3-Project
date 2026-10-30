@@ -1,0 +1,109 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117174
+TITLE: tests: net: dhcpv4: add a libFuzzer harness for the server receive path
+
+*--- opening post by TheArkadiuszGrzelka (2026-08-23 18:19:11+00:00)
+A DHCPv4 client has no address yet, so nothing authenticated it: every byte the server decodes is chosen by whoever sends a datagram to port 67.
+
+The harness registers a dummy interface the way `tests/net/dhcpv4/server` does and injects a full IPv4 + UDP + DHCP packet, so the fuzzed path includes the socket read in the server's own callback.
+
+The case runs on a Zephyr thread, following `samples/subsys/debug/fuzz`: the server reads its socket from a socket-service thread woken by `zsock_poll()`, which the fuzzer's own context never reaches. `CONFIG_NET_TC_RX_COUNT=0` keeps the parse in the caller's context, so a crash replays.
+
+Proof it can fail: disabling the length check in `dhcpv4_find_client_id_option()` makes `-runs=0` on the `client_id_oversize` seed stop with `stack-buffer-overflow, WRITE of size 32` into the 20 byte `DHCPV4_CLIENT_ID_MAX_SIZE` buffer. Restoring it replays clean. 27044480 executions over 901 seconds produced no report.
+
+Coverage of the path it drives: 75.7% of lines and 35 of 36 functions in `dhcpv4_process_data()` and its callees, over two million runs from the committed corpus. What is left is almost all state one message cannot reach - the ACK arms need a lease already RESERVED or ALLOCATED, and the address validator and provider callbacks are never registered.
+
+The server restarts per case, so a defect needing two messages in sequence is out of reach. Client side: #117144, independent of this one.
+
+## What this changes
+
+A libFuzzer harness for the DHCPv4 server receive path, the counterpart to the client harness in #117144, driving the real server through net_recv_data() from a Zephyr thread.
+
+*--- Copilot (2026-08-24 06:56:05+00:00)
+Avoid casting away const when passing pool_base_addr to net_dhcpv4_server_start(). The API copies the address (dhcpv4_server.c assigns `server_ctx[slot].base_addr = *base_addr;`), so a local non-const copy is sufficient and keeps the type system intact.
+
+*--- Copilot (2026-08-24 06:56:05+00:00)
+NET_DEVICE_INIT() invocation exceeds the 100-column limit and is hard to scan as a single long line. Please wrap it similar to other net tests (e.g., tests/net/dhcpv4/server/src/main.c) to keep style consistent.
+
+*--- Copilot (2026-08-24 06:56:06+00:00)
+CMake style: quote path expressions passed to target_include_directories(). This avoids issues with paths containing spaces and matches the project CMake guidelines.
+
+*--- TheArkadiuszGrzelka (2026-08-24 10:19:27+00:00)
+Already addressed: main.c:172 takes a local non-const copy (`struct net_in_addr base_addr = pool_base_addr;`) and passes `&base_addr` at line 180, so nothing casts away const here anymore.
+
+*--- TheArkadiuszGrzelka (2026-08-24 10:19:32+00:00)
+Already addressed: the NET_DEVICE_INIT() call at main.c:150-152 is wrapped across three lines, none exceeding the 100-column limit.
+
+*--- TheArkadiuszGrzelka (2026-08-24 10:19:36+00:00)
+Already addressed: both target_include_directories() paths in CMakeLists.txt:10-11 are quoted.
+
+*--- jukkar (2026-08-24 11:38:35+00:00)
+I think this should be `host/llvm`
+
+*--- jukkar (2026-08-24 11:42:25+00:00)
+This looks something that could cause message corruption. Zephyr thread could read whatever libFuzzer has put in that buffer for the *next* input, and a crash is attributed to the wrong case
+Perhaps `static uint8_t fuzz_case[FUZZ_MAX_INPUT]` and a `memcpy()` to that?
+
+*--- jukkar (2026-08-24 11:44:50+00:00)
+Could the `run_one()` return an error if failure, so we could notice failures. There are failure points in run_one() like  `net_dhcpv4_server_start()` failing, the pkt alloc failing, and `net_recv_data()` rejecting the packet that we ignore atm.
+
+*--- jukkar (2026-08-24 11:48:10+00:00)
+This is disabled together with UDP checksums, this fuzzed configuration is not the the one the code is shipped with. Is there a problem if we enable these, after some quick experiment, everything seemed to work ok if we use the defaults for these two
+
+*--- jukkar (2026-08-24 11:49:56+00:00)
+indentation seems to be off by one
+
+*--- jukkar (2026-08-24 11:50:09+00:00)
+same here for indentation
+
+*--- TheArkadiuszGrzelka (2026-08-24 19:40:57+00:00)
+You're right. Twister resolves a posix/unit platform (native_sim included) to `host/llvm`, not bare `llvm` (testplan.py `get_toolchains()`), so the filter as written never matched and left the test unpinned. Fixed in 2e65e1bf3ad806c2d932418193364bdc14169061, using the same spelling as tests/test_config_ci.yaml and tests/drivers/build_all/video/tests.yaml.
+
+*--- TheArkadiuszGrzelka (2026-08-24 19:41:03+00:00)
+Fixed in 2e65e1bf3ad806c2d932418193364bdc14169061.
+
+*--- TheArkadiuszGrzelka (2026-08-24 19:41:08+00:00)
+Fixed in 2e65e1bf3ad806c2d932418193364bdc14169061.
+
+*--- TheArkadiuszGrzelka (2026-08-24 20:29:47+00:00)
+run_one() now returns the failure instead of swallowing it: the error from net_dhcpv4_server_start(), -ENOMEM when the packet allocation fails, and the error from net_recv_data() rejecting the packet. main() prints it, so a harness that stopped delivering cases says so rather than silently counting runs it never performed.
+
+*--- TheArkadiuszGrzelka (2026-08-24 20:42:28+00:00)
+Copied. LLVMFuzzerTestOneInput() now memcpy()s the case into a static uint8_t fuzz_case[FUZZ_MAX_INPUT], the bound it already rejects longer cases against, so main()'s thread no longer reads memory libFuzzer owns. On the rebuilt harness, 5471611 executions over 901 seconds produced no ASan or UBSan report.
+
+*--- TheArkadiuszGrzelka (2026-08-25 05:45:07+00:00)
+Measured both, native_sim, same seed corpus, 200000 executions per variant.
+
+UDP checksum: enabling it is fine. Tx and rx gate on the same per-interface predicate, true for the dummy interface both ways, so the harness recomputes its own checksum and rejects nothing: coverage stays 1499/1498, 11/11 seeds still reach `dhcpv4_process_data()`. Corrupting the checksum after finalize does get dropped, confirming the check is live. Removing the option.
+
+ICMP probe: off, but now for a stated reason. Probing on defers the Offer to a 1000 ms timer that never expires inside the case that armed it: over 19298 cases, 527 probes, zero `dhcpv4_send_offer()` calls. One more tick and it recovers (1079 Offers). Can raise `FUZZ_TICKS` instead if you prefer the shipped value here too.
+
+*--- jukkar (2026-08-27 13:47:32+00:00)
+Please squash the commits together, we do not do fixup commits in zephyr.
+If you do **not** rebase against main, then it is easy for a reviewer to see what is being changed in newer pushes.
+
+*--- TheArkadiuszGrzelka (2026-08-27 19:30:55+00:00)
+Done - one commit now, and further pushes to this branch won't rebase onto main, so diffs stay incremental.
+
+*--- rlubos (2026-09-08 11:48:30+00:00)
+As per https://github.com/zephyrproject-rtos/zephyr/pull/117138#issuecomment-5448946663, wasn't it agreed to group  those new fuzzing tests into `tests/net/fuzz` directory (and to be fair it was my preference too before seeing it's already been settled)? I see this PR still puts the new test in `‎tests/net/lib/dhcpv4`. It'd be much preferred to put the code in the right location from starters, instead of moving it around later.
+
+A common code could be placed in `tests/net/fuzz/common` rightaway as well. I woudn't mind a brief generic readme   in `tests/net/fuzz` as well, describing the overall nature of those tests, as they're something new compared to the default ztest testing we have.
+
+*--- TheArkadiuszGrzelka (2026-09-08 12:16:29+00:00)
+Agreed, done here rather than deferred. This harness now lives at
+`tests/net/fuzz/dhcpv4/`, `gen_corpus.py` moved to the shared
+`tests/net/fuzz/common/` (it now takes the seeds file as an argument,
+so #117139 and #117144 can point at it unchanged), and
+`tests/net/fuzz/README.rst` gives the tree a brief description.
+
+*--- TheArkadiuszGrzelka (2026-09-10 19:50:43+00:00)
+Reshaped since your approval, so flagging it rather than force-pushing quietly.
+
+Two changes you asked for: squashed to one commit, and moved to
+`tests/net/fuzz/dhcpv4/server/` with shared code in `tests/net/fuzz/common/`.
+The nesting leaves `dhcpv4/` free for the client harness in #117144, which
+would otherwise want the same path.
+
+One change you did not ask for and have not seen: the wait between cases is now
+bounded instead of `K_FOREVER`. That is an execution-model change, so it should
+be reviewed rather than ride in on the earlier approval.

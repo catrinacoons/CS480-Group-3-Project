@@ -1,0 +1,489 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/104431
+TITLE: scripts: Add HTML build dashboard script
+
+*--- opening post by grahamroff-dev (2026-02-23 23:15:37+00:00)
+Nomination issue: https://github.com/zephyrproject-rtos/zephyr/issues/105883
+
+This change adds a script to generate an HTML dashboard, invoked via west, providing a consolidated and user-friendly view of various build artifacts and metrics. This includes footprint information (as both tables and plots), configuration tracing, sys init levels, an interactive devicetree browser, and more.
+
+Invoke using ``west build -t dashboard``
+
+An example of the HTML output is available at https://grahamroff-dev.github.io/zephyr-buildreport/index.html
+
+I added the documentation to the "Optimization Tools" section as that is where the memory report tools are documented. The dashboard covers a lot more than just optimization though, so suggestions welcome if there is a better place.
+
+*--- pdgendt (2026-02-24 09:40:35+00:00)
+This should not be a single commit, changes to the existing scripts `check_init_priorities.py`/`edtlib.py`/`plot.py` should each be a separate commit.
+
+*--- mbolivar (2026-02-24 16:23:28+00:00)
+Alas, this is an abstraction violation we can't allow in edtlib. See the "general biased advice" at top of the file.
+
+*--- pdgendt (2026-02-24 17:27:48+00:00)
+> This should not be a single commit, changes to the existing scripts `check_init_priorities.py`/`edtlib.py`/`plot.py` should each be a separate commit.
+
+Your last update did something wrong, the first commit now deletes the existing scripts, and later commits re-introduce them with changes...
+
+You _first_ need to update the existing scripts (not delete!), and add your new stuff after.
+
+*--- grahamroff-dev (2026-02-24 17:32:28+00:00)
+I acknowledge this goes against the abstraction advice, however that advice seems somewhat arbitrary ;)
+Any suggestion on how to get a list of all the properties in a node? The current edtlib purposefully leaves out valid properties like #address-cells, leaving a consumer (the build report in this case) unable to get a complete list of properties. As an abstraction layer this is broken.
+
+*--- grahamroff-dev (2026-02-24 18:00:29+00:00)
+> > This should not be a single commit, changes to the existing scripts `check_init_priorities.py`/`edtlib.py`/`plot.py` should each be a separate commit.
+> 
+> Your last update did something wrong, the first commit now deletes the existing scripts, and later commits re-introduce them with changes...
+> 
+> You _first_ need to update the existing scripts (not delete!), and add your new stuff after.
+
+Sorry, messed up the rework of the commit history. Fixed.
+
+*--- grahamroff-dev (2026-02-24 20:54:05+00:00)
+There are two problems I am trying to get around. First, in Node._init_prop a bunch of properties are simply skipped even though they appear in the devicetree:
+
+```
+        # Skip properties that start with '#', like '#size-cells', and mapping
+        # properties like 'gpio-map'/'interrupt-map'
+        if name[0] == "#" or name.endswith("-map"):
+            return
+```
+
+Then in Node._check_undeclared_props the validation also allows a number of properties that will not appear in the Node.props list:
+
+```
+        wl = {"compatible", "status", "ranges", "phandle",
+              "interrupt-parent", "interrupts-extended", "device_type"}
+
+        for prop_name in self._node.props:
+            # Allow a few special properties to not be declared in the binding
+            if (prop_name.endswith("-controller")
+                or prop_name.startswith("#")
+                or prop_name in wl):
+                continue
+```
+
+If I just iterate over Node.props then the table view will be missing a lot of important properties.
+
+*--- grahamroff-dev (2026-02-25 05:16:46+00:00)
+@mbolivar I removed the change to edtlib by reparsing the dts file using dtlib directly, then pulling in the nodes and bindings that match.
+
+*--- nordicjm (2026-02-25 07:25:24+00:00)
+how funny, this sounds like the same issue I hit yesterday on defaults in bindings being wholly ignored, https://github.com/zephyrproject-rtos/zephyr/issues/104478 @mbolivar there is some issue there
+
+*--- tejlmand (2026-02-26 12:36:33+00:00)
+`plotly` is part of requirements-extra.
+
+Perhaps better to refer there instead, or in addition.
+https://github.com/zephyrproject-rtos/zephyr/blob/69f3a442708eb2b4429298b72cbb2a5ba99125ff/scripts/requirements-extras.txt#L9-L10
+
+*--- grahamroff-dev (2026-02-26 20:21:15+00:00)
+Thanks. I updated to handle missing plotly and just skip generating the plots, also updated the import error to suggest looking at requirements-extra.
+
+*--- grahamroff-dev (2026-02-26 20:22:18+00:00)
+> > Invoke using west build -t buildreport
+> 
+> Doesn't work. Did you forget to include some files in the commit ?
+
+@tejlmand, I updated with missing cmake script changes, sorry about that, please try again.
+
+*--- tejlmand (2026-02-27 11:50:28+00:00)
+Other commands, such as ram_report, rom_report, initlevels, etc produces textual output directly.
+
+Commands not doing so or relies on dedicated program indicates this is their target name, such as pahole and puncover.
+
+I would like `buildreport` to reflect in its name that this is not a textual output.
+
+For example `html_report` / `html_buildreport`.
+
+*--- tejlmand (2026-02-27 11:54:36+00:00)
+are those extra dots really neccesary ?
+
+It's annoying that I cannot just double click on line and copy it to the browser to open it.
+I need to strip the extra dots.
+
+<img width="1295" height="71" alt="Image" src="https://github.com/user-attachments/assets/80749eab-17a8-48ab-84b1-9c8807092d31" />
+
+```suggestion
+        logger.info(f"Creating {fname}")
+```
+
+*--- tejlmand (2026-02-27 11:58:45+00:00)
+perhaps move it a level down, such as:
+```suggestion
+  --output ${CMAKE_BINARY_DIR}/html/report
+```
+
+*--- grahamroff-dev (2026-02-27 16:46:24+00:00)
+@pdgendt ,
+
+> I have to say, this looks impressive. The report output is nice, and provides a lot of info in an easy accessible way.
+
+Thanks! There is a lot of great tooling and build information available, and making it easy to generate and use without having to know about each on individually is the goal.
+
+> I do have a question regarding maintainership: Are you/Qualcomm going to oversee this? Should we create an area/subarea in the MAINTAINERS.yml file for this?
+
+We (Qualcomm) have begun making extensive use of Zephyr internally (working on an open-source and upstreaming plan) and these optimization tools are a critical part of our work. So yes, absolutely willing to oversee and maintain it, with whatever mechanism makes the most sense.
+
+*--- grahamroff-dev (2026-02-27 17:06:42+00:00)
+Makes sense. There are number of locations whose name should be consistent. Currently the PR uses:
+
+- west command: ``west build -t buildreport``
+- Script location: ``scripts/buildreport``
+- Script name: ``buildreport.py``
+- Output location: ``build/report``
+
+Based on suggestions so far I will update the west command to ``west build -t html_report`` and the default output location to ``build/html/report``.
+
+What are your thoughts on the script location and name? Would this be preferred:
+
+- Script location: ``scripts/html_report``
+- Script name: ``html_report.py``
+
+*--- grahamroff-dev (2026-02-28 21:16:58+00:00)
+Another naming idea could be "dashboard":
+
+- west command: ``west build -t dashboard`` or ``west build -t html_dashboard``
+- Script location: ``scripts/dashboard``
+- Script name: ``dashboard.py``
+- Output location: ``build/html/dashboard``
+
+*--- tejlmand (2026-03-02 09:58:20+00:00)
+I like both `html_report` and `dashboard`.
+
+If creating only the files, and users manually have to open the page, then I prefer `html_report`, cause it indicates that this is a html report generated, and not necessarily opened.
+
+If using `dashboard`, it makes sense that this target actually lauches the browser with said dashboard, similar to `puncover`.
+
+Hopefully more people will give input, as having good user facing names like this is important :)
+
+*--- grahamroff-dev (2026-03-04 01:45:41+00:00)
+I removed the trailing ...
+
+*--- grahamroff-dev (2026-03-04 01:47:19+00:00)
+I went with "dashboard" and added the default opening of the browser to the generated page. The output location is build/dashboard (let me know if build/html/dashboard is preferred). West command is:
+
+```
+west build -t dashboard
+```
+
+*--- pdgendt (2026-03-04 07:48:15+00:00)
+Out-of-date now that it has been renamed to `dashboard`?
+
+*--- pdgendt (2026-03-04 07:52:19+00:00)
+> > I do have a question regarding maintainership: Are you/Qualcomm going to oversee this? Should we create an area/subarea in the MAINTAINERS.yml file for this?
+> 
+> We (Qualcomm) have begun making extensive use of Zephyr internally (working on an open-source and upstreaming plan) and these optimization tools are a critical part of our work. So yes, absolutely willing to oversee and maintain it, with whatever mechanism makes the most sense.
+
+I'd suggest adding a (sub?)area to the MAINTAINERS.yml file, this will likely require some contributor nomination as well.
+
+*--- tejlmand (2026-03-05 09:39:21+00:00)
+Should we mention somewhere that this will launch the dashboard using the default browser ?
+
+*--- kartben (2026-03-05 09:43:46+00:00)
+That's a lot of dependencies on external CDN and something we typically avoid in the project (see e.g. how the documentation is fully "self-contained" and doesn't require any internet connection to "look nice")
+
+It looks to me as you can probably get rid of Bootstrap with minimal effort, especially given the pages are not even responsive (maybe they should but that's a different story and an opportunity for later improvement :) )
+
+*--- kartben (2026-03-05 09:51:12+00:00)
+ditto re external deps - for syntax highlighting you can call pygments from the python code to render html fragments at build time (and the existing CSS we have for docs should then just work https://github.com/zephyrproject-rtos/zephyr/blob/768095e06b41f0a159fcfb02bac2d50066ba4e7c/doc/_static/css/custom.css#L273)
+
+fancytree seems really ... fancy so maybe we need to look at redistributing it
+for jquery, it can probably be obtained through sphinxcontrib.jquery which sphinx pulls in
+
+BTW note that all the versions of the various css and js files you are pulling don't seem to be the latest.
+
+*--- Copilot (2026-03-05 10:05:04+00:00)
+When limiting results, the slice uses `limit - 1`, which returns one fewer element than requested (e.g., limit=10 yields 9 symbols). Use `symbol_list[:limit]` to honor the limit.
+```suggestion
+            symbol_list = symbol_list[:limit]
+```
+
+*--- Copilot (2026-03-05 10:05:04+00:00)
+The docs describe the build target as `dashboard`, but the PR description mentions invoking `west build -t buildreport`, and `.gitignore` whitelists `scripts/buildreport`. Please ensure the target name is consistent everywhere (CMake target name, docs, west invocation, and ignore rules) to avoid user confusion.
+
+*--- Copilot (2026-03-05 10:05:04+00:00)
+When a memory report fails to load, the context sets e.g. `ram_report`/`rom_report` to Python `None`. The template injects these directly into JavaScript (`let ramReport = {{ram_report|safe}};`), so it would render as `None` (invalid JS) and break the page. Consider always passing JSON (e.g., `json.dumps(None)` -> `null`) or conditionally omitting the JS init when the report is unavailable.
+```suggestion
+            ctxt[f'{mem_type}_report'] = json.dumps(None)
+```
+
+*--- Copilot (2026-03-05 10:05:05+00:00)
+The `<thead>` is missing a `<tr>` wrapper around the `<th>` elements, which produces invalid table markup and can break table rendering/accessibility in some browsers/screen readers.
+```suggestion
+        <tr>
+          <th class="ps-0" colspan="2"><input id="kconfigFilter"
+            class="form-control" placeholder="Filter Kconfigs..."/></th>
+          <th class="text-center">Value</th>
+          <th>Source</th>
+          <th></th>
+        </tr>
+```
+
+*--- Copilot (2026-03-05 10:05:05+00:00)
+`subprocess.call(cmd)` ignores the return code, so dashboard generation can succeed even if `size_report` fails. Consider using `subprocess.check_call`/`run(..., check=True)` and surfacing a clear error if the report generation fails.
+
+*--- Copilot (2026-03-05 10:05:05+00:00)
+Grammar: "can be also be generated" should be rephrased (e.g., "can also be generated") for readability.
+```suggestion
+An :ref:`HTML dashboard <dashboard>` can also be generated for a
+```
+
+*--- Copilot (2026-03-05 10:05:06+00:00)
+The active tab button has `aria-selected="false"`, and `aria-controls`/`aria-labelledby` values don't match the corresponding element IDs. This makes the tabs less accessible and can confuse assistive tech; align the IDs/labels and set the active tab's `aria-selected` to true.
+
+*--- Copilot (2026-03-05 10:05:06+00:00)
+`node = tree.getNodeByKey(key);` assigns to an undeclared variable, creating/overwriting a global. Declare it with `const`/`let` to avoid leaking globals and potential bugs when multiple handlers run.
+```suggestion
+    const node = tree.getNodeByKey(key);
+```
+
+*--- Copilot (2026-03-05 10:05:06+00:00)
+Typo in comment: "Extra the original text value" should be "Extract the original text value".
+```suggestion
+            # Extract the original text value from the string conversion of the
+```
+
+*--- Copilot (2026-03-05 10:05:07+00:00)
+This custom target always passes `--open`, which will try to launch a browser even in headless/CI environments (and can hang or fail builds). Consider making `--open` opt-in (e.g., a separate `dashboard_open` target or a CMake option) and keep the default target non-interactive.
+
+*--- Copilot (2026-03-05 10:05:07+00:00)
+These templates pull JS/CSS from public CDNs (Bootstrap/Icons, etc.). This makes the generated report non-reproducible/offline-unfriendly and introduces supply-chain risk. Consider vendoring the needed assets into `scripts/dashboard/static/` (or at least adding SRI+`crossorigin` for all external scripts/styles) so reports work offline and have stronger integrity guarantees.
+```suggestion
+    <link href="static/css/bootstrap.min.css" rel="stylesheet">
+    <script src="static/js/bootstrap.bundle.min.js"></script>
+    <link rel="stylesheet" href="static/css/bootstrap-icons.min.css">
+```
+
+*--- Copilot (2026-03-05 10:05:07+00:00)
+Importing Plotly at module import time means running this script without the optional dependency now raises an ImportError with a full stack trace (and prints to stdout). For CLI tooling, prefer a clean exit with a concise message (e.g., raise SystemExit with the message and write to stderr), and avoid printing during import so other modules can import this file without side effects.
+
+*--- Copilot (2026-03-05 10:05:08+00:00)
+This template iterates over `build.sys_init_errors` twice, which will duplicate each error entry in the rendered HTML list.
+```suggestion
+
+```
+
+*--- Copilot (2026-03-05 10:05:08+00:00)
+`call.split(':')` will split on every colon; if the left-hand side ever contains additional colons, indexing `[1]` can fail or lose data. Use a single split (e.g., split with `maxsplit=1`) and handle the no-colon case to avoid template errors.
+```suggestion
+      {% set call_split = call.split(':', 1) %}
+      {% if call_split|length > 1 %}
+      <li>{{call_split[0]}}: <code>{{call_split[1]}}</code></li>
+      {% else %}
+      <li><code>{{call_split[0]}}</code></li>
+      {% endif %}
+```
+
+*--- Copilot (2026-03-05 10:05:08+00:00)
+Typo in the help text: "associtated" should be "associated".
+```suggestion
+    to view additional details from the associated binding file as well
+```
+
+*--- Copilot (2026-03-05 10:05:09+00:00)
+`renderTitle()` injects a self-closing `<a name="..."/>` tag. Self-closing anchors aren’t valid HTML and may not create a reliable navigation target; prefer using an element with an `id` (e.g., wrap the title in an element with `id=node.key`, or use `<a id="...">...</a>`).
+```suggestion
+          html += `<span id="${node.key}" class="bold-lt">${node.title}</span>`;
+```
+
+*--- Copilot (2026-03-05 10:05:09+00:00)
+The error message references "requirements-extra", but the repository uses `scripts/requirements-extras.txt` (plural). Updating the message to point at the correct file will make it more actionable.
+```suggestion
+    print("Missing dependency: You need to install plotly (see scripts/requirements-extras.txt).")
+```
+
+*--- kartben (2026-03-05 10:07:29+00:00)
+consider creating this in .webp format - this will likely be _a lot_ smaller in size
+
+*--- kartben (2026-03-05 10:08:23+00:00)
++1
+
+*--- kartben (2026-03-05 10:08:35+00:00)
++1
+
+*--- fabiobaltieri (2026-03-05 10:21:30+00:00)
+Would it make sense to have a test that runs the command? Not even checking the output just something to make sure the new script runs in CI. Guess that'd need an option to skip `--open` too
+
+*--- grahamroff-dev (2026-03-05 17:35:29+00:00)
+@fabiobaltieri,
+
+> Would it make sense to have a test that runs the command? Not even checking the output just something to make sure the new script runs in CI. Guess that'd need an option to skip `--open` too
+
+Definitely, I have been trying to figure out how best to add testing. @mbolivar suggested a workflow similar to the web_cmds.yml based on what files in the PR or push are changed. Any other ideas?
+
+*--- fabiobaltieri (2026-03-05 20:49:12+00:00)
+> Definitely, I have been trying to figure out how best to add testing. @mbolivar suggested a workflow similar to the web_cmds.yml based on what files in the PR or push are changed. Any other ideas?
+
+I'd just do something like `tests/misc/check_init_priorities`, worked well for that target
+
+*--- grahamroff-dev (2026-03-06 05:45:13+00:00)
+Good suggestion on using pygments (although tragically the 2.19.2 has a bug specifically with devicetree that hangs in the lexer in some conditions that we hit quickly - I have a fix but have to make a PR on the pygments library). Removing bootstrap would require pulling in a lot of their css and some javascript (for tabs at a minimum, maybe more) - seems better to have a redistribution (library is small) which will allow future uses including better responsiveness support.
+Relying on sphinxcontrib-jquery to get jquery.js file introduces a dependency on getting the doc/requirements.txt which we should not need for the dashboard. So a redistribution of jquery and jquery.fancytree would be required to avoid the CDNs.
+I can update the PR with these additions if we agree this is preferred to the CDN approach.
+
+*--- kartben (2026-03-06 06:48:50+00:00)
+Please try pygments from main, I sent two now merged PRs recently so I'd say there's a good chance these are the same issues you encountered. We just need to push them to do an actual release :)
+
+Re: redistribution of the libs that would otherwise be pulled from a CDN, I'm inclined to say it should be fine (especially if they're small) but let's also hear the opinion of others.
+
+*--- grahamroff-dev (2026-03-06 18:20:16+00:00)
+Unfortunately even the tip pygments has the bug. I raised a PR on pygments with the details and an example that fails (essentially hangs): https://github.com/pygments/pygments/pull/3057
+
+*--- grahamroff-dev (2026-03-07 00:02:57+00:00)
+I added a note indicating that on line 332.
+
+*--- grahamroff-dev (2026-03-07 00:06:53+00:00)
+As per discussion, the default for west is to open the browser. In headless environments at least under Unbuntu, this results in a text dump of the main page, not a hang or failure.
+
+*--- grahamroff-dev (2026-03-07 00:08:34+00:00)
+Yes, updated to remove this change.
+
+*--- grahamroff-dev (2026-03-07 00:10:40+00:00)
+I pushed a change to remove the use of highlight.js (along with a somewhat ugly hack around the devicetree formatter bug until the new pygments is released) as well as the CDN for plotly.js. I agree we should have a fully-offline capable dashboard so will continue to work on either re-distributing or removing the dependency on bootstrap, jquery, and fancytree.
+
+*--- grahamroff-dev (2026-03-07 00:11:37+00:00)
+I converted it to webp and it is about 1/2 the size. Thanks for the suggestion.
+
+*--- grahamroff-dev (2026-03-07 00:22:32+00:00)
+This is handled properly in the html template now.
+
+*--- grahamroff-dev (2026-03-07 00:22:45+00:00)
+Added this change.
+
+*--- grahamroff-dev (2026-03-07 00:23:13+00:00)
+Fixed.
+
+*--- grahamroff-dev (2026-03-07 00:23:25+00:00)
+Fixed.
+
+*--- grahamroff-dev (2026-03-07 00:23:37+00:00)
+Fixed.
+
+*--- grahamroff-dev (2026-03-07 00:23:47+00:00)
+Fixed.
+
+*--- grahamroff-dev (2026-03-07 17:47:39+00:00)
+The pygments devicetree fix PR was merged, so when they make a release and I will update this PR to remove my workaround and bump requirements to the new pygments release.
+
+*--- mbolivar (2026-03-10 17:04:31+00:00)
+@grahamroff-dev I think the best approach for now is to add a note to the output that says some properties may not be shown and treat the edtlib extension as a known issue.
+
+*--- mbolivar (2026-03-10 19:56:33+00:00)
+```suggestion
+    compressed_bytes = byte_cnt
+    unit = 'Bytes'
+    for unit_size, unit_str in MEMORY_UNIT_SIZES.items():
+        if abs(byte_cnt) >= unit_size:
+            compressed_bytes = int(byte_cnt / unit_size)
+            unit = unit_str
+            break
+
+    return f"{compressed_bytes} {unit}"
+```
+
+*--- mbolivar (2026-03-10 19:59:22+00:00)
+```suggestion
+    :return: A dictionary with keys "bss", "rodata", "rwdata", "text", "other"
+```
+
+*--- mbolivar (2026-03-10 20:17:10+00:00)
+Misleading link -- this is a link to the application version docs, which -- though based on the same sort of data as zephyr/VERSION -- are a different thing entirely.
+
+I think https://docs.zephyrproject.org/latest/project/release_process.html is the best link we have to what goes in the zephyr VERSION file.
+
+*--- mbolivar (2026-03-11 00:38:09+00:00)
+fair play
+
+*--- mbolivar (2026-03-11 22:21:27+00:00)
+@grahamroff-dev I finished reviewing this today (at least the main dashboard.py script in detail) and I noticed a few more things, but the only comment I have that I think is worth blocking over is the misleading link in https://github.com/zephyrproject-rtos/zephyr/pull/104431#discussion_r2914207501
+
+We're going to get bug reports that this doesn't work when  CONFIG_KERNEL_BIN_NAME is not set to its default value of "zephyr" pretty soon, so if you have time to fix that, it would be good, but I think we can get to that later as well since this is new.
+
+*--- grahamroff-dev (2026-03-17 01:47:59+00:00)
+@mbolivar, @pdgendt, @kartben, @fabiobaltieri,
+I have pushed a new change to address the remaining issues:
+1. Added support for ``CONFIG_KERNEL_BIN_NAME`` setting a non "zephyr" elf file name.
+2. Added a Twister test in ``tests/misc/dashboard``
+3. Removed the use of CDNs and made the entire dashboard standalone. This involved the following:
+  -- Created a simple tree table javascript library to support just what we need instead of the large fancytree and jquery.
+  -- Created a custom version of the bootstrap icons with just the ones we are using.
+  -- Created a chopped version of bootstrap js/css that just has what we use - the size I believe is quite reasonable now.
+  -- Documented the procedure for updating these if additional functionality is added in the future in a README.md file.
+
+There are three outstanding issues I need help with:
+1. Compliance fails due to the inclusion of a font file (woff2 format, used for icons) since it is binary. I assume there is a way to override this or add .woff2 as an accepted format? It is possible to embed the icons directly in the CSS by base64 encoding the woff file but this adds significant size and is not generally recommended - but easy to do if necessary.
+2. The License scan fails because the bootstrap code contains an MIT license. I have dual-licensed it also under Apache 2.0 (as is allowed by MIT) but it still fails. I am not sure what to do here. 
+3. I do not have the permissions to actually be included in MAINTAINERS.yml, so please let me know what we should do there.
+
+Thanks everyone for the helpful feedback!
+
+*--- grahamroff-dev (2026-03-17 16:32:12+00:00)
+> > The License scan fails because the bootstrap code contains an MIT license. I have dual-licensed it also under Apache 2.0 (as is allowed by MIT) but it still fails. I am not sure what to do here.
+> 
+> are you / Qualcomm the original copyright holder of the file ? If not, then you're not allowed to change / re-licence the file, only the copyright holder of the file is allowed to do so.
+
+MIT does allow re-licensing as long as the original MIT license is maintained (which it is), and the new license indicates to what it applies (which it does). See, for example, https://interoperable-europe.ec.europa.eu/licence/compatibility-check/MIT/Apache-2.0. That being said, I have no problem not adding the Apache 2.0 license to the stripped down versions of bootstrap if we do not have to, just need to understand the Zephyr policy!
+
+*--- tejlmand (2026-03-18 13:01:29+00:00)
+> MIT does allow re-licensing as long as the original MIT license is maintained (which it is), and the new license indicates to what it applies (which it does)
+
+I don't think you can license / copyright removed stuff, as it's no longer there.
+Even when re-licensing then the content of what is already licensed under MIT is still licensed under MIT.
+
+Having a file licensed under MIT is acceptable, for example:
+https://github.com/zephyrproject-rtos/zephyr/blob/d465eac074fa26093888d4c34a3fb70efefb0604/doc/LICENSING.rst?plain=1#L71-L74
+
+It just needs approval.
+So start by updating this page: https://github.com/zephyrproject-rtos/zephyr/blob/main/doc/LICENSING.rst
+
+Also, introducing 3rd party code into Zephyr requires TSC approval, as per:
+https://docs.zephyrproject.org/latest/contribute/external.html#contributing-external-tooling
+<img width="1669" height="113" alt="image" src="https://github.com/user-attachments/assets/08d52886-c516-42eb-b1a7-ce532f3a70f8" />
+
+*--- carlescufi (2026-03-18 13:17:33+00:00)
+> @carlescufi do we force-merge the PR, or do we have a file for license check exemption ?
+
+If I understand correctly, this is only about the two `bootstrap-chop` files in the PR. I have two things to say here:
+
+1. This is not being included in the final binary, so changing licenses here seems unnecessary. We already have several other dependencies under the MIT license (e.g. `doc/_doxygen/`, `doc/_extensions/` or `scripts/build/uf2conv.py` so I see no reason to change it
+2. As @tejlmand mentioned this has to go through the [Contributing external tooling process](https://docs.zephyrproject.org/latest/contribute/external.html#contributing-external-tooling) and so must go through the TSC, so I would revert the license change and instead mention it in the TSC when discussing it
+
+*--- mbolivar (2026-03-18 21:05:18+00:00)
+added DNM until we can resolve the license question for the bootstrap code
+
+*--- nashif (2026-03-19 19:00:21+00:00)
+would be nice to have those files listed in the doc/LICENSING.rst file with some explainaton similar to other items. 
+
+waiting until next TSC meeting is just going to delay things quite a bit, so my suggestion:
+
+if you do that and given this is time-sensitive and we are targeting 4.4 if possible @mbolivar  please raise a motion to approve those files for inclusion to the private tsc mailing list, we can initiate a vote and hopfully get this resolved before the feature freeze. If we miss the feature freeze we can request an exception, i think this should be doable.
+
+@tejlmand please remove your -1, it will not go in without TSC approval, the CI check will need an override anyways.
+
+*--- grahamroff-dev (2026-03-19 21:38:09+00:00)
+@nashif,
+
+> would be nice to have those files listed in the doc/LICENSING.rst file with some explainaton similar to other items.
+
+The last change included updates to the LICENSING.rst file already, take a look and let me know if that is good. Thanks!
+
+*--- mbolivar (2026-03-19 21:54:20+00:00)
+LGTM, thanks @grahamroff-dev -- I've raised a motion to the private TSC list to see if we can squeeze this in for v4.4.
+
+*--- nashif (2026-03-23 15:18:11+00:00)
+Although TSC vote is still ongoing, it already passed the needed number of votes.
+
+*--- nashif (2026-03-23 15:23:16+00:00)
+Dashboard is a bit too general and can be anything, also the label below, Can this be called "Build Dashboard" or something that narrows it down to what it actually does?
+
+*--- mbolivar (2026-03-23 15:33:11+00:00)
+@nashif done, thanks for review
+
+*--- pdgendt (2026-03-23 15:36:25+00:00)
+Entries need to be in alphabetical order.
+
+*--- mbolivar (2026-03-23 15:45:33+00:00)
+crap, fixing, thanks
+
+*--- nashif (2026-03-23 17:57:30+00:00)
+license approved, @tejlmand  already approved and only maintainer file was fixed, @grahamroff-dev was added as contrib in the repo, but this will take time for this org to sync....

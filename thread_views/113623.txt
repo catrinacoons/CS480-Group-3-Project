@@ -1,0 +1,50 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113623
+TITLE: tests: kernel: split overloaded test cases into focused ones
+
+*--- opening post by nashif (2026-07-15 20:13:54+00:00)
+Several kernel test suites bundled many unrelated behaviors into a single test
+body, so a failure anywhere gave one pass/fail verdict and obscured which
+behavior actually broke. This series splits those overloaded tests across
+events, msgq, queue, mutex, fifo, stack, common (uptime), timer, and poll,
+adding focused test cases so each API or scenario is exercised on its own
+rather than folded into a larger test.
+
+Behavior coverage is unchanged; the tests are just reorganized to be smaller,
+single-purpose, and order-independent.
+
+*--- peter-mitsis (2026-07-16 18:34:43+00:00)
+It would be worthwhile to have the same k_msgq_peek() check that test_msgq_init() has.
+
+*--- peter-mitsis (2026-07-16 18:52:10+00:00)
+This test would be a little stronger if it used _zassert_equal(k_queue_get(&kqueue, K_NO_WAIT), NULL)_ instead of _zassert_true(k_queue_is_empty(&kqueue))_ as the test case currently only tests for success, and not for failure.
+
+*--- peter-mitsis (2026-07-16 18:54:14+00:00)
+Same comment as test_queue_define.
+
+*--- peter-mitsis (2026-07-16 19:02:03+00:00)
+From a black box perspective, there is no difference between append and prepend when adding the first item to the queue. Change this description to 'Add one item, then prepend two items'. Adjust other comments as necessary.
+
+*--- peter-mitsis (2026-07-16 19:22:29+00:00)
+There is no _back_ of the queue in this test; there is only an empty queue. To have a _back_, implies that there must be at least one item in the queue.
+
+*--- peter-mitsis (2026-07-16 19:26:59+00:00)
+This check would be stronger if it used k_queue_get() and compared the result against NULL.
+
+*--- peter-mitsis (2026-07-16 19:34:53+00:00)
+I am surprised that a test case to wake pending threads by calling k_queue_merge_slist() was not added.
+
+*--- peter-mitsis (2026-07-16 19:43:23+00:00)
+To demonstrate that it is adding to the back of the FIFO, the FIFO must first have something in it. Otherwise it is indistinguishable from adding to the front of the FIFO.
+
+*--- peter-mitsis (2026-07-16 19:46:00+00:00)
+To put it in the back implies that the FIFO must not be empty.
+
+*--- peter-mitsis (2026-07-16 19:50:11+00:00)
+1. Test description says that the stack must be empty. There is no check for emptiness.
+2. Use of _zassert_false()_ is incorrect here. It should be using zassert_ok().
+
+*--- peter-mitsis (2026-07-16 19:51:19+00:00)
+Do not use _zassert_false()_ as the return value is not a boolean. _zassert_ok()_ would be better.
+
+*--- peter-mitsis (2026-07-16 19:55:16+00:00)
+More _zassert_false()_ -> _zassert_ok()_.

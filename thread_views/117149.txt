@@ -1,0 +1,7 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117149
+TITLE: drivers: i2c: infineon: use inclusive terminology
+
+*--- opening post by kartben (2026-08-23 14:59:11+00:00)
+Update comments, log messages, Kconfig prose, and driver-local identifiers to use the controller/target terminology ratified by coding guideline A.2 and already used by the Zephyr I2C API.
+
+Identifiers mirroring the Cypress/Infineon PDL and HAL (e.g. CYHAL_I2C_MASTER_*/CYHAL_I2C_SLAVE_* event macros, cyhal_i2c_master_transfer_async, cyhal_i2c_slave_config_write_buffer) are kept unchanged.

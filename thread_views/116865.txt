@@ -1,0 +1,16 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116865
+TITLE: [Backport v4.4-branch] drivers: ieee802154: harden drivers
+
+*--- opening post by d3zd3z (2026-08-19 22:41:48+00:00)
+Backport of the fix from #115135 to `v4.4-branch`.
+
+Fixes: #116864
+
+*--- Copilot (2026-08-19 22:46:41+00:00)
+The new validation only checks for underflow before subtracting the FCS, but it still accepts radio-supplied lengths above IEEE 802.15.4’s maximum PHY packet size. Since `rx_frame->psdu` is a single PHY buffer, an oversized `rx_frame->length` can still drive an out-of-bounds read in `net_pkt_write()` (and potentially `net_pkt_rx_alloc_with_buffer()` growth). Add an upper bound check against `IEEE802154_MAX_PHY_PACKET_SIZE` before computing `pkt_len`.
+
+*--- Copilot (2026-08-19 22:46:41+00:00)
+`verify_rxfifo_validity()` now bounds `pkt_len` to `IEEE802154_MAX_PHY_PACKET_SIZE`, but the RX path still reads `pkt_len` bytes directly into `pkt->buffer->data` (first fragment only). If `CONFIG_NET_BUF_DATA_SIZE` is configured smaller than `pkt_len`, `net_pkt_rx_alloc_with_buffer()` will allocate multiple fragments and `read_rxfifo_content()` will overflow the first fragment. Add a runtime bound to `CONFIG_NET_BUF_DATA_SIZE` (or switch the RX copy to fragment-aware writes) to prevent this.
+
+*--- MaureenHelm (2026-09-02 14:29:43+00:00)
+@axelnxp please take a look

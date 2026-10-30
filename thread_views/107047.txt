@@ -1,0 +1,60 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107047
+TITLE: ST: STM32WB09: Fix PM issues
+
+*--- opening post by HoZHel (2026-04-09 15:40:36+00:00)
+Fix the issues related to preventing `suspend-to-ram` state:
+- Handle TRNG repetition and adaptive health test errors properly.
+- Calculate the future time passed to `pm_policy_event_register` correctly to avoid negative value when the system timer goes beyond 32-bit range.
+- Increase the minimum residency value to 1500us since the minimum threshold is 1070us and depends on `max-hs-startup-time` (default value: 780us). Therefore, a safe margin is 1500us to support other values for `max-hs-startup-time`.
+
+Supplementary PR: [#361](https://github.com/zephyrproject-rtos/hal_stm32/pull/361)
+
+*--- Copilot (2026-04-21 16:37:24+00:00)
+This loop can block forever if HSE never becomes ready (e.g., board/clock misconfig or failure), potentially hanging resume with IRQs still disabled. Consider adding a bounded timeout (and an error log/assert) or relying on a clock driver API that can validate readiness with a timeout.
+
+*--- Copilot (2026-04-21 16:37:24+00:00)
+Grammar: “an enough margin” is incorrect; consider “a sufficient margin” or “enough margin”.
+```suggestion
+				/* 1.5ms seems to be a sufficient margin. */
+```
+
+*--- Copilot (2026-04-21 16:37:25+00:00)
+`revision: pull/361/head` pins the manifest to a GitHub PR ref, which is not immutable and can break reproducibility/offline fetches. Please pin `hal_stm32` to a specific commit SHA (or a release tag/branch) that contains the needed changes instead of a PR head ref.
+```suggestion
+      revision: <full-commit-sha-containing-the-required-pr-361-changes>
+```
+
+*--- Copilot (2026-04-21 16:37:25+00:00)
+Using `abs(current_time - last_cpu_wakeup_time)` is unsafe here: `current_time`/`last_cpu_wakeup_time` are `uint32_t`, so the subtraction is unsigned (wrap-around) and passing it to `abs(int)` can truncate/overflow and produce incorrect results. Prefer keeping the delta in an unsigned type (e.g., `uint32_t diff = current_time - last_cpu_wakeup_time;`) and compare `diff < 16U` (which already handles wraparound modulo 2^32).
+
+*--- HoZHel (2026-04-22 14:30:52+00:00)
+Fixed.
+
+*--- HoZHel (2026-04-22 14:33:42+00:00)
+The commit has been dropped as it was redundant.
+
+*--- etienne-lms (2026-04-23 08:44:23+00:00)
+The P-R has been merged. Can you update the reference?
+
+*--- HoZHel (2026-04-23 11:11:35+00:00)
+Done.
+
+*--- HoZHel (2026-04-23 11:11:58+00:00)
+> I think commit _"drivers: entropy: Fix repetition and adaptive health test errors for WB09"_ could be split into 3 commits since it addresses somewhat unrelated issues (but that that relate to RNG), especially some issues not related to STM32WB09.
+
+Done.
+
+*--- HoZHel (2026-04-23 11:18:52+00:00)
+This PR needs to be backported to Zephyr v4.4
+
+*--- erwango (2026-04-24 08:50:50+00:00)
+>  Is that possible @erwango?
+
+Yes, it should be doable. @MaureenHelm do  you confirm ?
+
+*--- MaureenHelm (2026-04-27 23:31:46+00:00)
+> > Is that possible @erwango?
+> 
+> Yes, it should be doable. @MaureenHelm do you confirm ?
+
+yes

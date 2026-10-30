@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117462
+TITLE: net: ethernet: handle forwarded packets without headroom
+
+*--- opening post by maass-hamburg (2026-08-26 12:03:11+00:00)
+Packets allocated by another L2 do not have the Ethernet header
+headroom reserved by ethernet_l2_alloc().
+Use a separate header fragment when a forwarded packet cannot
+accommodate the reserved Ethernet header in its first fragment.
+
+Fixes: #117863

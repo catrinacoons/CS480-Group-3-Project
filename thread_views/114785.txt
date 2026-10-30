@@ -1,0 +1,59 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114785
+TITLE: Bluetooth: audio: Fix VOCS and AICS client instances on alloc fail
+
+*--- opening post by Thalley (2026-07-28 13:20:20+00:00)
+Fixes issue with VCP and MICP init failures not cleaning up allocated AICS and VOCS instances.
+
+Assisted-by: copilot-swe-agent
+
+fixes https://github.com/zephyrproject-rtos/zephyr/issues/109776
+
+*--- Copilot (2026-07-28 13:24:39+00:00)
+`bt_vocs_client_free_instance()` computes `CONTAINER_OF(vocs, struct bt_vocs_client, vocs)` before verifying that the passed `vocs` pointer actually belongs to the `insts[]` pool. If a caller accidentally passes a non-pooled `struct bt_vocs` with `client_instance=true`, this becomes undefined behavior. Prefer searching the pool for a matching `&vocs_inst->vocs == vocs` first (like the AICS free helper does) and only then reset/clear flags.
+
+*--- Copilot (2026-07-28 15:01:05+00:00)
+The BUSY flag check is inverted: this returns -EBUSY when the instance is *not* busy, which prevents freeing newly allocated instances (BUSY is clear right after bt_aics_client_free_instance_get()). This breaks the intended alloc-failure cleanup.
+
+*--- Copilot (2026-07-28 15:01:06+00:00)
+The BUSY flag check is inverted: this returns -EBUSY when the instance is *not* busy, which prevents freeing instances immediately after bt_vocs_client_free_instance_get() (BUSY is clear at allocation time).
+
+*--- Copilot (2026-07-28 15:45:56+00:00)
+bt_aics_client_free_instance() only checks BT_AICS_CLIENT_FLAG_BUSY with atomic_test_bit(), so it can race with other threads setting BUSY and end up resetting/freeing an instance while another operation is starting. Use atomic_test_and_set_bit() to claim BUSY during the free path, and clear it before returning.
+
+*--- Copilot (2026-07-28 15:45:57+00:00)
+bt_vocs_client_free_instance() only checks BT_VOCS_CLIENT_FLAG_BUSY with atomic_test_bit(), so it can race with another thread setting BUSY and end up resetting/freeing an instance while an operation is starting. Use atomic_test_and_set_bit() to claim BUSY during free, and clear it before returning.
+
+*--- sjanc (2026-07-29 10:04:36+00:00)
+shouldn't this be `atomic_test()` instead?
+
+*--- sjanc (2026-07-29 10:11:59+00:00)
+ditto
+
+*--- sjanc (2026-07-29 10:14:14+00:00)
+oh, I see now why it is test_and_set,   I'd suggest to add comment as this is not clear immediately
+
+btw if this race would occur it indicates bug (stale pointer) in code anyway, wouldn't it?
+
+*--- Thalley (2026-07-29 10:31:03+00:00)
+> btw if this race would occur it indicates bug (stale pointer) in code anyway, wouldn't it?
+
+Yes :( I didn't originally add it for that reason, but it slightly helps. I think we'd need a mutex here instead, but overall VOCS and AICS are not 100% thread safe anyhow. 
+
+Will add comments
+
+*--- sjanc (2026-07-29 12:27:35+00:00)
+or maybe just ignore busy here?  can instance be busy but not active?
+
+*--- Thalley (2026-07-29 12:43:48+00:00)
+Nope: First we check if it's `BT_AICS_CLIENT_FLAG_ACTIVE`, and if it is, then we check if it is `BT_AICS_CLIENT_FLAG_BUSY` and if it's ACTIVE and not BUSY, then only then we reset the instance. 
+
+If the instance is ACTIVE and BUSY, then we probably shouldn't call `aics_client_reset`
+
+*--- Thalley (2026-08-19 17:34:18+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-08-20 07:20:34+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-08-27 11:34:50+00:00)
+Rebased to solve merge conflicts

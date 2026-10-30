@@ -1,0 +1,137 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/90787
+TITLE: drivers: misc: ethos_u: Create the ethos_u_common for every vendor
+
+*--- opening post by khoa-nguyen-18 (2025-05-29 08:40:24+00:00)
+Some vendors require custom procedures to be executed before and after calling the `ethosu_init` and `ethosu_irq_handler` APIs from the Ethos-U core driver.
+
+As a solution, I propose separating `ethos_u_common` for each vendor and `ethos_u_arm` for specific Arm boards, enabling vendors to self-configure the initialization flow and IRQ handler.
+
+Building sample `samples/modules/tflite-micro/tflm_ethosu` log:
+```
+[307/307] Linking CXX executable zephyr/zephyr.elf
+Memory region         Used Size  Region Size  %age Used
+           FLASH:       74232 B       512 KB     14.16%
+             RAM:       23000 B       512 KB      4.39%
+            ITCM:          0 GB       512 KB      0.00%
+            SRAM:          0 GB         1 MB      0.00%
+            DTCM:          0 GB       512 KB      0.00%
+           ISRAM:          0 GB         2 MB      0.00%
+ NULL_PTR_DETECT:          0 GB         1 KB      0.00%
+            DDR4:      127270 B       256 MB      0.05%
+        IDT_LIST:          0 GB        32 KB      0.00%
+Generating files from /home/khoanguyen18/zephyrproject/zephyr/build/zephyr/zephyr.elf for board: mps3
+```
+
+*--- ccli8 (2025-06-02 01:46:17+00:00)
+It seems this Kconfig is not used
+
+*--- wearyzen (2025-06-05 16:14:04+00:00)
+> Some vendors require custom procedures to be executed before and after calling the ethosu_init and ethosu_irq_handler APIs from the Ethos-U core driver.
+
+Could you provide more details on what the custom procedures are? maybe this is something that can be done in one of the CONFIG_SOC_*_HOOK
+
+*--- khoa-nguyen-18 (2025-06-17 01:29:13+00:00)
+> > Some vendors require custom procedures to be executed before and after calling the ethosu_init and ethosu_irq_handler APIs from the Ethos-U core driver.
+> 
+> Could you provide more details on what the custom procedures are? maybe this is something that can be done in one of the CONFIG_SOC_*_HOOK
+
+From our Renesas MCU side, we need to clear the HW frag when the interrupt is raised, and it definitely can't be cleared in the `CONFIG_SOC_*_HOOK`. For other vendors, I see they have vendor-specific procedures, such as configuring the clock, enabling power to the module, or resetting the module.
+
+Therefore, I propose this PR to clarify the init function and allow modifying the handler to clear the NPU flag for each vendor, rather than simply covering it within `soc_hook_init`.
+
+*--- ccli8 (2025-06-19 05:21:55+00:00)
+Would you explain the purpose of unused `ETHOS_U_INIT_PRIORITY`? Or I am fine with the common layer support.
+
+*--- khoa-nguyen-18 (2025-06-19 07:20:54+00:00)
+> It seems this Kconfig is not used
+
+Sorry, I forgot to update for `ethos_u_arm.c`
+
+> Would you explain the purpose of unused `ETHOS_U_INIT_PRIORITY`? Or I am fine with the common layer support.
+
+Hmm, from my perspective, I defined this to allow kernel developers to configure the priority of Ethos like other drivers.
+
+*--- wearyzen (2025-06-19 12:14:57+00:00)
+You are still using the hal_ethos_u module, right? so, I feel the right way should be replacing ARM_ETHOS_U with ETHOS_U [here](https://github.com/zephyrproject-rtos/zephyr/blob/b9bfff29f4bf99ecb19dd2078bd06447e279cfcf/modules/hal_ethos_u/Kconfig#L5), actually in that whole file.
+so `modules/hal_ethos_u/Kconfig` would enable ethos-u misc driver and within the driver you use ARM_ETHOS_U to enable ethos_u_arm.c
+
+*--- wearyzen (2025-06-19 12:19:08+00:00)
+I think the default priority CONFIG_KERNEL_INIT_PRIORITY_DEFAULT should be ok for now, if in the future we need to move the driver initialization up/down then we can think of adding this.
+
+*--- wearyzen (2025-06-19 12:20:23+00:00)
+this is already done [here](https://github.com/zephyrproject-rtos/zephyr/blob/b9bfff29f4bf99ecb19dd2078bd06447e279cfcf/modules/hal_ethos_u/Kconfig#L16)
+
+*--- wearyzen (2025-06-19 12:43:18+00:00)
+The issue I see with having this file is that it differentiates configs based on board and not vendors, so we could see Kconfig.arm_mps2 Kconfig.arm_mps4 Kconfig.vendor1_board1 Kconfig.vendor1_board2 etc. soon which is not what you are expecting.
+What we need is just 1 choice in maybe `drivers/misc/ethos_u/Kconfig` which does something like:
+```
+choice
+    default ETHOS_U_ARM
+
+config ETHOS_U_ARM
+    default y if DT_HAS_ARM_ETHOS_U_ENABLED
+
+config ETHOS_U_VENDOR
+    default n if DT_HAS_VENDOR_ETHOS_U_ENABLED
+endchoice
+
+*--- wearyzen (2025-06-19 13:58:59+00:00)
+similar to what @ccli8 has here : https://github.com/zephyrproject-rtos/zephyr/pull/88941/files#diff-882d6ba9c4958d02572f437265744f0e24764e6511c314b6f9f5fdd026a244d8R6 what
+
+*--- dkalowsk (2025-06-23 20:06:02+00:00)
+@khoa-nguyen-18 just a reminder that the feature freeze for 4.2 is rapidly approaching (end of the week) and if this is needed in for 4.2 you'll need to get the reviews from the maintainers.
+
+*--- khoa-nguyen-18 (2025-06-24 02:37:15+00:00)
+Thank you, I have updated it as you suggested. The update is in commit [`modules: hal_ethos_u: Update ARM_ETHOS_U config`](https://github.com/zephyrproject-rtos/zephyr/pull/90787/commits/2299ffa2113dec796f96a467c6e005eab866b8d7)
+
+*--- khoa-nguyen-18 (2025-06-24 02:37:34+00:00)
+I have removed this. Thank you
+
+*--- khoa-nguyen-18 (2025-06-24 02:38:24+00:00)
+Agree with your suggestion. I have updated it in `drivers/misc/ethos_u/Kconfig` and removed the Kconfig.vendor
+
+*--- ccli8 (2025-06-24 09:19:12+00:00)
+Try to rebase #88941 on this reorg, and that's fine.
+
+*--- wearyzen (2025-06-24 10:35:59+00:00)
+```suggestion
+* Rename all configs that have prefix ``CONFIG_ARM_ETHOS_U_`` to ``CONFIG_ETHOS_U_``.
+```
+
+*--- wearyzen (2025-06-24 10:37:35+00:00)
+since the ethos_u folder itself is selected if CONFIG_ETHOS_U is enabled then do we still need this?
+
+*--- khoa-nguyen-18 (2025-06-24 15:53:04+00:00)
+Since the Kconfig will be included when `CONFIG_ETHOS_U` is enabled, I think we should add a condition check for it in this file.
+
+Build blinky app on `mps4_corstone320_fvp`:
+- When the condition `if ETHOS_U` is present:
+![image](https://github.com/user-attachments/assets/11b8beba-6760-4ace-8899-1c71b483ff0e)
+
+- When the condition `if ETHOS_U` is not present:
+![image](https://github.com/user-attachments/assets/1d772702-a158-4dca-bef9-2704ce3d3714)
+
+*--- khoa-nguyen-18 (2025-06-24 15:54:40+00:00)
+Thank you. I have updated it.
+
+*--- wearyzen (2025-06-24 16:40:41+00:00)
+I think "depends on " is preferred over the "if" in zephyr, let me find a doc to confirm this otherwise this is ok
+
+*--- wearyzen (2025-06-24 16:53:07+00:00)
+https://docs.zephyrproject.org/latest/build/kconfig/tips.html?utm_source=chatgpt.com#select-recommendations this has a few lines suggesting that in general we should use "depends on" and rarely we use the "if"
+so could you please try below suggestion?
+```
+choice
+	prompt "Select vendor Ethos-U NPU driver"
+	depends on ETHOS_U
+	default ETHOS_U_ARM if DT_HAS_ARM_ETHOS_U_ENABLED
+
+config ETHOS_U_ARM
+	bool "Arm Ethos-U NPU driver"
+	help
+	  Enables Arm Ethos-U NPU driver.
+endchoice
+```
+
+*--- khoa-nguyen-18 (2025-06-25 04:51:17+00:00)
+Sure, I have updated it. Many thanks for the information. After applying this, CONFIG_ETHOS_U_ARM no longer appears when I build blinky app for `mps4_corstone320_fvp`

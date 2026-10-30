@@ -1,0 +1,13 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/119400
+TITLE: [Backport v4.4-branch] drivers: ethernet: nxp_enet_qos: reclaim TX resources on link drop
+
+*--- opening post by d3zd3z (2026-09-16 20:55:55+00:00)
+Backport of the fix from #117399 to `v4.4-branch`.
+
+Fixes: #119378
+
+*--- Copilot (2026-09-16 21:02:13+00:00)
+When FTQ remains set after the 1 ms bound, the queue has not been confirmed flushed, but the code still reinitializes the descriptor ring, restarts DMA, and then releases the packet/buffer references. If the DMA is still active, it can follow the new ring or write into buffers that have already returned to the pool. Keep TX stopped and perform a full reset or record a failed state until DMA quiescence is guaranteed before releasing these resources.
+
+*--- Copilot (2026-09-16 21:02:13+00:00)
+The backport hands the descriptors to DMA by setting OWN without a memory barrier. `volatile` only constrains compiler ordering; on the Cortex-M AXI path the DMA can observe OWN before the buffer/control words are visible, causing intermittent corrupt TX. Add a DMB before the OWN writes and a DSB after them before publishing the tail pointer.

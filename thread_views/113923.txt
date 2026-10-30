@@ -1,0 +1,5 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113923
+TITLE: input: vs1838b: fix typo and build in CI
+
+*--- opening post by kartben (2026-07-19 09:39:45+00:00)
+Build driver in CI and fix typo in init code

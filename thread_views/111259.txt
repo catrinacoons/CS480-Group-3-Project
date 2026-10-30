@@ -1,0 +1,25 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111259
+TITLE: Bluetooth: BAP: Shell: Handle delete of CAP group
+
+*--- opening post by Thalley (2026-06-15 08:37:48+00:00)
+If the is_cap boolean is set, the group was not automatically deleted when all the streams were relased. CAP instead had a different way of deleting the group, but in the case of an error in CAP unicast start, that group was not deletable.
+
+This change make it so that the user can always delete the unicast group, as BAP or CAP, by releasing all the streams, regardless of what procedures have failed or succeeded, or even been cancelled.
+
+*--- Copilot (2026-06-15 08:41:00+00:00)
+The condition checks `default_unicast_group.bap_group != NULL` even when `default_unicast_group.is_cap` is true. Since `bap_group`/`cap_group` share a union (audio.h:198-204), reading the inactive union member is fragile and also makes the CAP-vs-BAP selection harder to reason about. Gate the BAP pointer check behind `!is_cap` so we only access the active union member.
+
+*--- sjanc (2026-06-25 09:15:30+00:00)
+this suggests that cap_group can be null while is_cap is true, I'd suggest to make this check and check in 3186 same for sake of code clarity
+
+*--- Thalley (2026-06-29 13:46:34+00:00)
+Hmm, that's a good point. 
+
+`is_cap` determines whether which union member to check, so while `is_cap == true && cap_group == NULL` cannot happen, we should check `is_cap` before checking `cap_group`. 
+
+From a practical perspective it doesn't matter whether we check `cap_group` or `bap_group` (or even make a generic `group` union field), so this is just semantics in terms of checking and using the right type. 
+
+Not sure how we can improve this check. Any suggestions?
+
+*--- sjanc (2026-07-14 12:44:15+00:00)
+maybe assert would do?

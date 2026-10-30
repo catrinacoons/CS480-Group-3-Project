@@ -1,0 +1,27 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114351
+TITLE: drivers: sensor: sensirion: add SCD30 CO2 sensor driver
+
+*--- opening post by flwb-li (2026-07-23 02:22:02+00:00)
+Add an I2C driver for the Sensirion SCD30, exposing CO2, ambient temperature and humidity channels with configuration attributes and optional ready-gpios support for data-ready signalling.
+
+*--- Copilot (2026-08-19 13:30:17+00:00)
+This file calls k_msleep() but does not include <zephyr/kernel.h>, which can lead to a build failure due to missing prototypes (device.h does not include kernel.h).
+
+*--- Copilot (2026-08-19 13:30:18+00:00)
+This comment uses the non-ASCII degree symbol (°). Zephyr generally avoids non-ASCII characters in source to prevent tooling/encoding issues.
+
+This issue also appears in the following locations of the same file:
+- line 42
+- line 55
+- line 67
+
+*--- Copilot (2026-08-19 13:30:18+00:00)
+This adds a second '* Sensors' section in the 'New Drivers' list (there is already a Sensors section below), which makes the release notes structure inconsistent. Add the SCD30 entry to the existing Sensors section instead of creating a new one.
+
+*--- kartben (2026-08-21 04:59:38+00:00)
+@flwb-li can you please address Copilot review comments? Thanks!
+
+*--- flwb-li (2026-08-21 08:13:18+00:00)
+> @flwb-li can you please address Copilot review comments? Thanks!
+
+Thanks for the reminder. I've already made the changes.

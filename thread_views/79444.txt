@@ -1,0 +1,165 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/79444
+TITLE: Bluetooth: Controller: Replace prepare pipeline with ordered list
+
+*--- opening post by cvinayak (2024-10-05 03:52:44+00:00)
+Replace prepare pipeline with ordered linked list.
+
+*--- cvinayak (2025-10-22 16:29:36+00:00)
+I can’t post comments to GitHub from here. Please paste the following into a PR comment:
+
+```list type="pr"
+data:
+- url: "https://github.com/zephyrproject-rtos/zephyr/pull/79444"
+  state: "open"
+  draft: true
+  title: "Bluetooth: Controller: Replace prepare pipeline with ordered list"
+  number: 79444
+  created_at: "05 October 2024"
+  closed_at: ""
+  merged_at: ""
+  labels:
+  author: "cvinayak"
+  comments: 2
+  assignees_avatar_urls:
+- url: "https://github.com/zephyrproject-rtos/zephyr/pull/79444"
+  state: "open"
+  draft: true
+  title: "Bluetooth: Controller: Replace prepare pipeline with ordered list"
+  number: 79444
+  created_at: "05 October 2024"
+  closed_at: ""
+  merged_at: ""
+  labels:
+  author: "cvinayak"
+  comments: 2
+  assignees_avatar_urls:
+```
+
+Summary of what changed
+- Replaced the MFIFO-based prepare pipeline with an explicitly ordered singly linked list in subsys/bluetooth/controller/ll_sw/ull.c.
+  - New pipeline structure: pool-backed nodes storing a next pointer plus struct lll_event.
+  - Enqueue is now order-aware by ticks_at_expire and treats resume events specially.
+  - Dequeue/iteration now uses void** as an iterator cursor (NULL means start/end), replacing uint8_t indices.
+- API updates:
+  - ull_prepare_dequeue_iter signature changed from uint8_t* to void** (see subsys/bluetooth/controller/ll_sw/lll.h). All call sites in Nordic and OpenISA LLL updated accordingly.
+- Nordic LLL changes (subsys/bluetooth/controller/ll_sw/nordic/lll/lll.c):
+  - prepare_dequeue_iter_ready_get now filters out aborted, resume, and defer entries.
+  - lll_disable, lll_prepare_resolve, and preempt reworked for the new iterator. Notably, the prior workaround that aborted earlier prepares to make room for “short” prepares has been removed; ordering is handled by the list.
+- OpenISA LLL changes (subsys/bluetooth/controller/ll_sw/openisa/lll/lll.c):
+  - Equivalent iterator and control-flow updates to match the new pipeline semantics.
+- Scan updates:
+  - lll_scan.h adds a persistent lll_prepare_param field when advanced scheduler is enabled.
+  - lll_scan.c and lll_scan_aux.c copy timing fields into lll->prepare_param and pass that to mayfly, avoiding lifetime issues from passing a stack/local param.
+- Initialization:
+  - The pipeline memory is initialized in init_reset via mem_init; MFIFO prep init removed.
+
+Why this is a good change
+- Correctness and determinism: The prepare pipeline is now ordered by scheduling time instead of FIFO plus ad-hoc aborts. This removes the previous “abort to reorder” workaround and should reduce spurious aborts and reschedules, especially for short preemptors.
+- Simpler preemption logic: Preempt handling is cleaner; instead of scanning/aborting earlier entries to accommodate a short event, the ordered structure ensures correct sequencing.
+- Safer parameter passing in scan paths: Copying timing/param state into lll->prepare_param before scheduling mayfly avoids dangling references to transient stack data.
+- Clearer iteration semantics: Using a pointer cursor for ull_prepare_dequeue_iter is a better fit for list traversal than synthetic indices, reducing off-by-one/overflow risks.
+
+Things to double-check
+- Concurrency/atomicity: MFIFO provided a well-tested queue; the new list relies on mem_acquire/mem_release and pointer manipulation. Ensure all accesses occur under the same context/locking assumptions as before and that no ISR/LLL context can mutate the list concurrently with ULL.
+- Ordering conditions: The insertion logic relies on ticker_ticks_diff_get and MSBIT checks. These are notoriously subtle with wrap-around; unit/soak tests around boundary conditions (near wrap and equal times) would be valuable.
+- Resume event handling: The enqueue code treats resume specially (often appended). The dequeue path enqueues at most two non-resume events before switching behavior; verify this preserves prior fairness/progress guarantees and doesn’t starve resumes or normal events under load.
+- Memory footprint: Each pipeline node adds a pointer over the previous structure. The increase is small but present; confirm this fits tight controller builds.
+- API ripple: All call sites appear updated for the new iterator type in Nordic and OpenISA; ensure there are no out-of-tree or less commonly built targets relying on the old signature.
+
+Overall assessment
+- This is a solid improvement. It addresses a known limitation of the FIFO pipeline, removes complex workarounds, and makes scheduling behavior more predictable. With careful validation around concurrency and time-diff edge cases, it looks like a positive and maintainable change.
+
+*--- Copilot (2025-11-19 05:40:45+00:00)
+Missing initialization of `pipeline.head` and `pipeline.tail` to NULL. These pointers should be explicitly initialized to NULL during reset to ensure proper operation of the linked list, especially since `ull_prepare_enqueue` checks `if (pipeline.tail)` at line 2153.
+```suggestion
+		 &pipeline.mem.free);
+	pipeline.head = NULL;
+	pipeline.tail = NULL;
+```
+
+*--- Copilot (2025-11-19 05:40:46+00:00)
+Potential issue with the insertion logic when placing a new event at the head of the list. At line 2204, the check `if (!*next)` is intended to handle the case where the list becomes empty after moving to head, but this condition can never be true here. The `*next` was just set to `pipeline.head` at line 2174, and if `pipeline.head` was NULL, the outer condition at line 2153 (`if (pipeline.tail)`) would have been false. Consider removing this unreachable condition or documenting why it exists.
+```suggestion
+
+```
+
+*--- Copilot (2025-11-19 05:40:46+00:00)
+The variable `enqueued_loop` is initialized to 2U but its purpose and why it's set to 2 specifically is unclear. This magic number should be documented with a comment explaining why 2 iterations are allowed before setting `is_enqueued` flag, or defined as a named constant.
+
+*--- Copilot (2025-11-19 05:40:46+00:00)
+Inconsistent assertion macro usage: `LL_ASSERT` is used here (line 2344) while `LL_ASSERT_ERR` is used elsewhere in the same function (line 2306). Consider using the same assertion macro consistently throughout the function, or document why different macros are needed in different locations.
+```suggestion
+				LL_ASSERT_ERR(!ret);
+```
+
+*--- Copilot (2025-11-19 05:40:46+00:00)
+Inconsistent assertion macro usage: `LL_ASSERT` is used here (line 1232) while `LL_ASSERT_ERR` was used in the previous code (visible in the diff context). Consider using the same assertion macro consistently, or document why different macros are needed.
+```suggestion
+		LL_ASSERT_ERR((ret == TICKER_STATUS_SUCCESS) ||
+```
+
+*--- Copilot (2025-11-19 05:40:47+00:00)
+[nitpick] In the condition at line 2173, when `diff` is zero (i.e., `e_curr->prepare_param.ticks_at_expire == prepare_param->ticks_at_expire`), the new event will be placed at the head. This means events with the same `ticks_at_expire` will not maintain insertion order (FIFO) but will reverse order (LIFO). Consider whether this behavior is intended, or if the condition should be `(diff && ((diff & BIT(HAL_TICKER_CNTR_MSBIT)) == 0U))` to preserve insertion order for same-time events.
+
+*--- Copilot (2025-11-19 05:40:47+00:00)
+[nitpick] The comment says "Start at the head" but the logic only sets `*idx = pipeline.head` when `!*idx` is true. This means on the first call with `idx` pointing to a zeroed/NULL pointer, it correctly starts at the head. However, the comment could be clearer: "Initialize iterator to head if not already initialized" would better describe the behavior.
+```suggestion
+	/* Initialize iterator to head if not already initialized */
+```
+
+*--- Copilot (2025-11-19 05:40:47+00:00)
+Typo in comment: "peak" should be "peek". The function is inspecting/peeking at the head element, not finding a peak/maximum.
+
+*--- Copilot (2025-11-19 05:40:47+00:00)
+Typo in comment: "Peak" should be "Peek". The function is inspecting/peeking at the event, not finding a peak/maximum.
+
+*--- Copilot (2025-11-19 05:40:48+00:00)
+Inconsistent assertion macro usage: `LL_ASSERT` is used here (line 2375) while `LL_ASSERT_ERR` is used at line 2306. Consider using the same assertion macro consistently throughout the function, or document why different macros are needed in different locations.
+```suggestion
+		LL_ASSERT_ERR(!ret);
+```
+
+*--- Copilot (2025-11-19 05:40:48+00:00)
+[nitpick] Comment text update has a minor issue: "Abort any duplicate non-resume" (old) was changed to "Abort any duplicates" (new), but the old comment was grammatically incomplete. The new comment is better but could be more precise: "Abort any duplicate events so that they get dequeued" would be clearer.
+```suggestion
+		/* Abort any duplicate events so that they get dequeued */
+```
+
+*--- Copilot (2025-11-19 05:40:48+00:00)
+Critical bug in list insertion ordering: The `prev` pointer is only updated for non-aborted, non-resume events (lines 2184-2186), but the list should maintain all nodes including aborted ones until they are explicitly dequeued. If the list contains aborted events followed by a valid event that should come after the new event (e.g., [aborted1] -> [aborted2] -> [valid_event]), the loop will skip updating `prev` while traversing aborted events, leaving `prev` as NULL. When the loop exits upon finding valid_event, `prev` is still NULL, causing the new event to be incorrectly inserted at the head (lines 2202-2203) instead of before valid_event. The fix is to unconditionally update `prev = curr` before advancing `curr` at line 2188, regardless of the event's state.
+```suggestion
+					prev = curr;
+```
+
+*--- Copilot (2026-01-25 21:11:35+00:00)
+Inside the `iter_idx` traversal loop, the code resets `idx = NULL` after `abort_cb()` to restart iteration, but the iterator variable being used is `iter_idx`. As written, the loop won't actually restart from the head after the pipeline is modified. This looks like it should reset `iter_idx` instead of `idx`.
+```suggestion
+				iter_idx = NULL;
+```
+
+*--- Copilot (2026-01-25 21:11:35+00:00)
+`EVENT_PIPELINE_EVENT_SIZE` and the pipeline node layout don't account for the `mem_*` allocator's reserved header (next pointer + free-count stored at `MROUND(sizeof(void *))`, see util/mem.c). With the current layout (`lll_event` starts at `+ sizeof(void *)`), `mem_release()` will overwrite the first bytes of `struct lll_event`, corrupting event contents if the block is released while still referenced (e.g., passed to mayfly). Consider placing `struct lll_event` after `MEM_FREE_RESERVED_SIZE` (and aligning as needed) and updating `EVENT_PIPELINE_EVENT_SIZE`/offset calculations accordingly.
+
+*--- Copilot (2026-01-25 21:11:36+00:00)
+`e` is derived as `next + sizeof(void *)`, but the `mem_*` pool uses the bytes immediately after the next pointer to store the free-count (`mem_release()` writes it at `MROUND(sizeof(void *))`). If this block is released back to the pool before the consumer is done, `e->prepare_param` will be corrupted. Adjust the start offset of `lll_event` to be after the allocator's reserved header (e.g., `MEM_FREE_RESERVED_SIZE`, possibly rounded up for alignment).
+```suggestion
+	e = (void *)((uint8_t *)next + MEM_FREE_RESERVED_SIZE);
+```
+
+*--- Copilot (2026-01-25 21:11:36+00:00)
+`ull_prepare_dequeue()` passes `e` to `mayfly_enqueue()` (which may defer execution when caller/callee priorities are not equal), but then immediately `mem_release(head, ...)` frees the backing storage. Since `mem_release()` overwrites the freed block's header (and free-count), `lll_resume` can observe corrupted `struct lll_event` data if the mayfly call is not executed inline. Keep the event storage valid until `lll_resume` has run (e.g., release in/after `lll_resume`, or only release when `mayfly_enqueue` executed inline / assert on inline-only usage).
+
+*--- Copilot (2026-01-25 21:11:36+00:00)
+Same lifetime issue as above for resume prepares: the resume `lll_event` is passed to `mayfly_enqueue()` and then immediately `mem_release(head, ...)` frees/overwrites the memory. If the mayfly call is deferred, `lll_resume` may dereference invalid/corrupted data. Defer releasing the node until after `lll_resume` executes.
+```suggestion
+		/* Note: Do not release the resume event memory here.
+		 * The node must remain valid until after lll_resume has executed.
+		 * It will be released as part of the resume/done handling.
+		 */
+```
+
+*--- Copilot (2026-01-25 21:11:36+00:00)
+Typo in comment: `peak lll_event` should be `peek lll_event`.
+
+*--- Copilot (2026-01-25 21:11:37+00:00)
+Typo in comment: `Peak lll_event` should be `Peek lll_event`.

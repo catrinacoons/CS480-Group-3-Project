@@ -1,0 +1,8 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114011
+TITLE: drivers: can: xmc4xxx: Read the receive error counter
+
+*--- opening post by kartben (2026-07-19 21:04:08+00:00)
+get_state_from_status() read the transmit error counter into both
+tec and rec, so the reported RX error count mirrored the TX count
+and the error-passive state could be reported incorrectly. Use the
+receive error counter accessor for rec.

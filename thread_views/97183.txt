@@ -1,0 +1,276 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/97183
+TITLE: drivers: wifi: nrf_wifi: Add P2P discovery and Client support
+
+*--- opening post by rado17 (2025-10-08 11:39:21+00:00)
+Add P2P support and bug fixes. New Wi-Fi management API and a shell APIs are added.
+
+*--- krish2718 (2025-10-08 12:08:30+00:00)
+move to a separate commit.
+
+*--- krish2718 (2025-10-08 12:09:10+00:00)
+update commit to reflect that it's a bug as filter_ssids are meant for filtering scan results. (unrelated to P2P)
+
+*--- rado17 (2025-10-14 07:16:04+00:00)
+Done
+
+*--- rado17 (2025-10-14 07:16:11+00:00)
+Done
+
+*--- krish2718 (2025-10-14 12:46:01+00:00)
+why is this a while 1? and break only in failure?
+
+*--- krish2718 (2025-10-14 12:47:45+00:00)
+why is the response not a proper struct?  Wi-Fi management should work with any network manager not just wpa_supplicant.
+
+*--- krish2718 (2025-10-14 12:48:30+00:00)
+move this to wpa_supplicant and only keep a proper data structure in Wi-Fi mgmt and this way you don't even need the `_noprint` API.
+
+*--- krish2718 (2025-10-14 12:50:07+00:00)
+why two separate OPs, if known peer input is broadcast then it shows all peers, no?
+
+*--- kapbh (2025-10-27 12:26:36+00:00)
+Removed while 1
+
+*--- kapbh (2025-10-27 12:27:29+00:00)
+Added fields in structures and removed buffer.
+
+*--- kapbh (2025-10-27 12:30:25+00:00)
+Moved parsing of fields in api, need to use `zephyr_wpa_cli_cmd_resp_noprint` because `zephyr_wpa_cli_cmd_resp` will always prints the response with other info (not much readable format).
+
+*--- kapbh (2025-10-27 12:31:36+00:00)
+`WIFI_P2P_PEERS` will return all the peers info, `WIFI_P2P_PEER` we can specify mac address and get only one peer info.
+
+*--- krish2718 (2025-10-27 15:25:51+00:00)
+not storing null terminator for this and others?
+
+*--- krish2718 (2025-10-27 15:26:24+00:00)
+Sure, but see my comment, can't you take broadcast MAC to dump all peers?
+
+*--- krish2718 (2025-10-27 15:28:24+00:00)
+Please add some references or sources to these magic values and whether they depend on something and can be reduce, their impact to stack sizes etc...
+
+*--- krish2718 (2025-10-27 15:29:25+00:00)
+`{` can be removed
+
+*--- krish2718 (2025-10-27 15:29:39+00:00)
+we don't need unnecessary new lines
+
+*--- krish2718 (2025-10-27 15:30:32+00:00)
+`p2p_config`/`p2p_setup`/`p2p_oper`, just `p2p` doesn't convey the use.
+
+*--- krish2718 (2025-10-27 15:30:40+00:00)
+add some details here
+
+*--- krish2718 (2025-10-27 15:31:01+00:00)
+is it only find? If some please extend the naming to reflect that (both funcs and data structures)
+
+*--- krish2718 (2025-10-27 15:33:04+00:00)
+please use a helper like `extract_value` and then refactor the code.
+
+*--- krish2718 (2025-10-27 15:34:13+00:00)
+wpa_cli?
+
+*--- krish2718 (2025-10-27 15:38:04+00:00)
+you already have peer_idx don't need for a separate flag
+
+*--- krish2718 (2025-10-27 15:39:56+00:00)
+This is not ideal, blocking the shell + malloc, can't we just model the wpa_cli here? i.e., trigger find and then based on event peer found prompt use to issue peers to get details of the peers?
+
+As this is used as a reference, better to model a real world app.
+
+*--- krish2718 (2025-10-27 15:41:26+00:00)
+this doesn't belong here and should be auto-enabled by CONFIG_WIFI_NM_WPA_SUPPLICANT_P2P
+
+*--- krish2718 (2025-10-27 15:41:42+00:00)
+This is not related to p2p and is board specific
+
+*--- krish2718 (2025-10-27 15:42:00+00:00)
+why is this needed? We should encourage wifi shell not wpa_cli
+
+*--- krish2718 (2025-10-27 15:42:34+00:00)
+if you follow below comments and end up with this single line then you don't really an overlay :)
+
+*--- krish2718 (2025-10-27 15:44:47+00:00)
+Also, please update title and description to summarize the changes.
+
+*--- Copilot (2025-10-27 15:45:10+00:00)
+Using FORCE to set EXTRA_CONF_FILE unconditionally will prevent users from using other overlay configurations. This change makes P2P configuration mandatory for all builds of this sample. Consider making this conditional or removing the FORCE flag to allow users to override the configuration.
+```suggestion
+set(EXTRA_CONF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/overlay-p2p.conf" CACHE STRING "")
+```
+
+*--- Copilot (2025-10-27 15:45:10+00:00)
+The revision points to a pull request head reference instead of a stable commit hash. This creates instability as the PR branch can be force-pushed or deleted. Use a specific commit SHA once the PR is merged or stable.
+```suggestion
+      revision: 7e6b5e2e2e2b4e2e2e2b4e2e2e2b4e2e2e2b4e2e
+```
+
+*--- Copilot (2025-10-27 15:45:11+00:00)
+The buffer size is 18 bytes but strncpy copies 17 bytes without null termination if the source is 17 bytes or longer. Use strncpy(mac_addr_str, state->optarg, sizeof(mac_addr_str) - 1) to ensure proper bounds checking.
+```suggestion
+			strncpy(mac_addr_str, state->optarg, sizeof(mac_addr_str) - 1);
+			mac_addr_str[sizeof(mac_addr_str) - 1] = '\0';
+```
+
+*--- krish2718 (2025-10-30 07:32:57+00:00)
+`supplicant_p2p_oper`?
+
+*--- krish2718 (2025-10-30 07:34:44+00:00)
+a single line print per-peer is better
+
+*--- krish2718 (2025-10-30 07:36:20+00:00)
+p2p_stop_find to match wpa_supplicant?
+
+*--- krish2718 (2025-10-30 18:56:25+00:00)
+you need to modify this function to wait till there is a response from UMAC and to return cookie to the application. And application can use that for any further requests e.g., to stop RoC.
+
+*--- krish2718 (2025-10-30 18:56:36+00:00)
+cookie should be input
+
+*--- krish2718 (2025-10-30 18:58:58+00:00)
+this is not ROC complete, it's ROC ready on channel.
+
+*--- krish2718 (2025-10-30 19:00:06+00:00)
+this is really high, just a random high value or fine-tuned and understood? and as its driver dependent, maybe add specific depends on?
+
+*--- krish2718 (2025-10-30 19:01:17+00:00)
+```suggestion
+					     struct wifi_p2p_device_info *peer_info)
+```
+In general, the terminology is, device is local, peer is remote.
+
+*--- krish2718 (2025-10-30 19:01:47+00:00)
+```suggestion
+	if (!device_info || device_info->device_name[0] == '\0') {
+		return;
+	}
+```
+
+*--- krish2718 (2025-10-31 08:34:26+00:00)
+the manifest update should be separate commits
+
+*--- krish2718 (2025-11-12 16:15:15+00:00)
+log `peer->ra_addr` for debugging. and do you really want a print in the data path? If you can use the Zephyr LOG macros you can use the ratelimited ones.
+
+*--- krish2718 (2025-11-12 16:16:37+00:00)
+We are not waiting for nrf_wifi_sys_fmac_chg_sta to complete, so, there could be a race where peer is authorized in host but not in UMAC?
+
+*--- krish2718 (2025-11-12 16:19:51+00:00)
+This typically is a wpa_supplicant's decision, if this is a WAR for nRF70, please add a TODO/WAR comment.
+
+*--- krish2718 (2025-11-12 16:21:49+00:00)
+should we move it to P2P guard? basic WPS doesn't need this right?
+
+*--- krish2718 (2025-11-12 16:22:04+00:00)
+This is a fixup commit, need to be fixed up.
+
+*--- krish2718 (2025-11-12 16:23:23+00:00)
+Also we are already doing this in set_flags, do we need to do it in two places?
+
+*--- rado17 (2025-11-20 09:52:54+00:00)
+Will wait until a cookie event is received.
+
+*--- rado17 (2025-11-20 10:52:09+00:00)
+Needed by WPS.
+
+*--- rado17 (2025-11-24 18:08:27+00:00)
+Done
+
+*--- jukkar (2025-11-26 08:37:29+00:00)
+I would prefer that we do not use magic constants. So if there are no existing defines for these, we should define ones here so that it is easier for the API user to know about the maximum length.
+
+*--- jukkar (2025-11-26 08:37:41+00:00)
+same here
+
+*--- jukkar (2025-11-26 08:37:56+00:00)
+and for these too
+
+*--- jukkar (2025-11-26 08:41:35+00:00)
+We are mixing `atoi()` and `strtol()` and the atoi one cannot detect errors in the input string. I suggest we use only `strtol()` and make sure that the string is a valid one (now we ignore the errors).
+
+*--- jukkar (2025-11-26 08:45:16+00:00)
+These and `char peer_info[P2P_PEER_INFO_SIZE];` below use lot of stack (1kB with current settings). Is this really necessary or could the stack usage be lowered?
+
+*--- jukkar (2025-11-26 08:47:22+00:00)
+Could you add a block here i.e., `{` because you are defining variables.
+
+*--- jukkar (2025-11-26 08:50:23+00:00)
+please replace all `snprintf()` by `snprintk()` (it uses less resources)
+
+*--- kapbh (2025-11-26 11:37:24+00:00)
+Removed magic constants
+
+*--- kapbh (2025-11-26 11:39:38+00:00)
+Changed buffer size to somewhat lower, peer_info will require more size.
+
+*--- krish2718 (2025-11-26 22:17:39+00:00)
+This fails for STA mode when WPA3 is used, where as the port is set to `0` unauthorized before the association itself (start of auth), but peer is only added post assoc success.
+
+*--- jukkar (2025-12-02 08:10:59+00:00)
+Please use `snprintk` here. Also we are unnecessarily calling hostap functions (prefixed by `os_`) in various places in this PR without a reason (as there exists similar zephyr function). Could you go through the changes and replace the ones.
+
+*--- jukkar (2025-12-02 08:14:51+00:00)
+Yeah, this is extremely high. Can this be adjusted?
+
+*--- jukkar (2025-12-02 08:26:30+00:00)
+We should use `NET_IFNAMSIZ` instead of `CONFIG_NET_INTERFACE_NAME_LEN` as the config option might be missing. I suggest we have a separate PR that changes all the use of `CONFIG_NET_INTERFACE_NAME_LEN` in `modules/hostap` as there are many found there. @rado17 or @krish2718 are you able to send a PR for this after this one is merged?
+
+*--- kapbh (2025-12-03 08:11:16+00:00)
+Replaced os_ functions.
+
+*--- krish2718 (2025-12-18 20:28:39+00:00)
+@jukkar  Sure, will do.
+
+*--- kapbh (2025-12-18 20:31:40+00:00)
+I am running profiling test separately, will fine tune this in separate PR.
+
+*--- jukkar (2025-12-19 07:34:58+00:00)
+If we are printing MAC address, why do we need to check 8 or 2 bytes long addresses?
+You seem to have copied the contents of
+`char *net_sprint_ll_addr_buf(const uint8_t *ll, uint8_t ll_len, char *buf, int buflen)`
+from net stack here. Why not call the original function directly instead as now we have two identical functions present in the code base?
+If you want to have a dedicated function for this driver, you could do
+```
+char *nrf_wifi_sprint_ll_addr_buf(const uint8_t *mac, char *buf, int buflen)
+{
+      return net_sprint_ll_addr_buf(mac, NET_ETH_ADDR_LEN, buf, buflen);
+}
+```
+
+*--- jukkar (2025-12-19 07:43:46+00:00)
+Please make checks explicit, so `if_priv == NULL` here and all over the place
+
+*--- jukkar (2025-12-19 07:48:03+00:00)
+`mac != NULL`
+
+*--- jukkar (2025-12-19 07:48:35+00:00)
+`line != NULL && *line != '\0'`
+
+I am seeing the implicit style all over this PR, could you go through the changes are fix them all without me commenting every check.
+
+*--- rado17 (2026-01-08 09:01:33+00:00)
+Resolved now
+
+*--- rado17 (2026-01-08 10:25:49+00:00)
+Done
+
+*--- Copilot (2026-01-12 07:26:43+00:00)
+The EAP server sources are added unconditionally when CONFIG_WIFI_NM_WPA_SUPPLICANT_WPS is enabled, but the removed conditional block suggests these may only be needed for non-alternative crypto implementations. Verify that these sources are needed in all WPS configurations or restore appropriate conditionals.
+
+*--- Copilot (2026-01-12 07:26:44+00:00)
+The extra blank line appears to be unintentional and should be removed to maintain consistent code formatting.
+```suggestion
+
+```
+
+*--- Copilot (2026-01-12 07:26:44+00:00)
+The code adds handling for params->ssids without verifying that params->ssids is non-NULL before dereferencing it in the loop. Add a NULL check for params->ssids before accessing it to prevent potential dereferencing of a NULL pointer.
+
+*--- Copilot (2026-01-12 07:26:45+00:00)
+The extract_value function doesn't check if src is NULL before dereferencing it. Add a NULL check for src at the beginning of the function to prevent potential NULL pointer dereference.
+
+*--- Copilot (2026-01-12 07:26:45+00:00)
+Using a static array for peers can cause issues in multi-threaded environments or when multiple concurrent P2P operations occur. Consider using dynamic allocation or adding mutex protection if this command can be called concurrently.
+```suggestion
+	struct wifi_p2p_device_info peers[WIFI_P2P_MAX_PEERS];
+```

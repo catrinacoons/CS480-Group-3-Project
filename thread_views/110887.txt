@@ -1,0 +1,12 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/110887
+TITLE: subsys: debug: fix mipi stp unaligned access with clang
+
+*--- opening post by nashif (2026-06-09 22:24:28+00:00)
+The fast nibble-copy path in the MIPI STP decoder assumes unaligned
+multiword accesses are safe on Cortex-M.
+
+With clang on mps2/an385 this can still generate unaligned accesses in
+the optimized path, causing a UsageFault in debug.mipi_stp_decoder.
+
+Disable the fast path for clang (and when unaligned trapping is enabled),
+falling back to the existing byte-wise safe path.

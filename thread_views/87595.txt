@@ -1,0 +1,597 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/87595
+TITLE: include: devicetree: Generate defines for map property
+
+*--- opening post by soburi (2025-03-24 22:05:29+00:00)
+This change introduces generating definitions corresponding to
+`*-map` property, which was currently discarded.
+
+The `*-map` data is like a two-dimensional array, so it is difficult to
+handle with the existing APIs, so we will also provide new APIs.
+
+---
+
+Common utilities have been separated into a separate PR.
+Please take a look at this first. https://github.com/zephyrproject-rtos/zephyr/pull/84190
+
+
+---
+
+I noticed this problem while developing https://github.com/zephyrproject-rtos/gsoc-2022-arduino-core.
+
+Since map is used to associate with the physical layout, there is a need to know the "physical pin names".
+
+Since the mapping process is performed during the generation of devicetree-generated.h, I don't think there are many cases where information about the mapping source is needed. However, there are such cases, however rare, and it is not desirable for the information written in the devicetree to be discarded, so I would like to introduce this.
+
+*--- mbolivar (2025-03-27 21:20:08+00:00)
+I think, strictly speaking, that these are derived from the Linux iio bindings. The iio bindings are useful for ADCs but are not limited to ADCs. So perhaps this should be moved to dts/bindings/iio, and this "ADC specifier" portion should be changed to "channel specifier, e.g. ADC channel" or something similar?
+
+*--- soburi (2025-04-02 01:39:15+00:00)
+@mbolivar 
+
+> Thanks for the PR, @soburi . The first 5/8 patches look good to me, with one minor comment.
+> 
+> I have some concerns about the last 3/8 patches. I think I understand the goal and exposing the map properties as first-class citizens makes sense to me. However, the approach using `to_compound()` feels a little bit error-prone and I want to discuss the implementation.
+> 
+> Devicetree Specification v0.4 section 2.5, "Nexus Nodes and Specifier Mapping" is where the semantics are defined. There, it says:
+> 
+
+Thank you for your review.
+
+I was also thinking about the implementation policy here, so
+I would be happy to discuss it.
+
+Before going into the implementation details, let me discuss a design-level topic.
+
+I understand that the current implementation is designed as follows:
+
+- dtlib.py: Responsible for grammar processing
+- edtlib.py: Responsible for semantic interpretation
+
+IMO, In this division of roles, the number of parameters specified in #gpio-cells is an issue in the "semantic" domain, so I think it would be better to implement the check in edtlib.py.
+
+In that case, in the domain of dtlib.py, this is 'compound' as a syntax element, and even if string handling is left as 'not implemented', I think there should be a 'to_compound' method here.
+
+I believe that once this division of roles is made clear, the implementation will become clear naturally, so I would like to get this issue resolved first.
+
+*--- soburi (2025-04-02 01:39:50+00:00)
+That's correct. I've taken care of that.
+
+*--- mbolivar (2025-04-02 05:58:41+00:00)
+@soburi thanks for your update. I agree we should discuss this design-level issue first.
+
+The "compound" concept appears in both edtlib and dtlib:
+
+- in edtlib, we have the "compound" type in the bindings syntax, which I believe historically was added mainly to document and capture complex cases that we couldn't express in our existing syntax
+- in dtlib, the "compound" type in the DTS syntax parser exists as a catch-all for properties that we don't have special-case support for. It's important to remember that from the perspective of the DT specification, all properties are just byte arrays, and the source encoding was ignored by the consumer of the DTB as defined in chapter 5 of the specification. Zephyr is unique among operating systems in that it reads the DTS directly, of course. The dtlib parser has several special case "types" encoded in the dtlib.Type enum. For properties that don't fit in any special case, we can still access the byte array value, and the property is exposed as type dtlib.Type.COMPOUND.
+
+I will try to be clear about which case I am talking about when we think about nexus nodes:
+
+- in edtlib, our existing bindings syntax doesn't have a concept of a nexus node and so the only way we can name such properties as `<specifier>-map` in the bindings is with type 'compound' in the bindings syntax
+- in dtlib, we are specifically concerned with the properties defined in section 2.5 of the specification, whose format and syntax fits into these dtlib types:
+
+  - `<specifier>-map`: the specification describes properties of dtlib.Type.PHANDLES_AND_NUMS, not dtlib.Type.COMPOUND
+  - `<specifier>-map-mask`: dtlib.Type.NUMS
+  - `<specifier>-map-pass-thru`: dtlib.Type.NUMS
+  - `#<specifier>-cells`: dtlib.Type.NUM
+
+I think that since our dtlib parser already seems to have the right dtlib.Type special cases to handle nexus nodes, we probably don't need any dtlib changes to handle these. However, since the edtlib library doesn't have support for this pattern in its bindings syntax, I think we have two choices:
+
+1. extend the bindings syntax to add new special case types for `<specifier>-map`
+2. add special-case handling for this chapter of the devicetree specification, similarly to how we handled GPIO hogs
+
+I think choice 2 is best, because this is a special case that is defined directly in the specification. We already allow edtlib to handle these types of special cases for things like the interrupt tree (DT specification section 2.4), major properties like `reg` and `compatible` (specification section 2.3), etc.
+
+I outlined a way that I think we can implement option 2 that checks that the user's devicetree matches the requirements of specification section 2.5, Nexus Nodes and Specifier Mapping, in my previous review comment.
+
+Does it make sense? What are your thoughts?
+
+*--- soburi (2025-04-04 12:35:46+00:00)
+@mbolivar 
+
+Thank you for getting back to me.
+
+Indeed, if I do it like this, I can use dtlib.py as it is.
+
+```
+diff --git a/dts/bindings/gpio/gpio-nexus.yaml b/dts/bindings/gpio/gpio-nexus.yaml
+index de8153b0f9a..311e4cfb1cd 100644
+--- a/dts/bindings/gpio/gpio-nexus.yaml
++++ b/dts/bindings/gpio/gpio-nexus.yaml
+@@ -5,7 +5,7 @@
+
+properties:
+gpio-map:
+- type: compound
++ type: phandle-array
+required: true
+
+gpio-map-mask:
+```
+
+It seems like it would be good to follow your suggestion in general,
+but I will reconsider it based on this. Thanks.
+
+*--- soburi (2025-04-13 22:53:35+00:00)
+@mbolivar 
+
+I finally solved the problem by adding a maps @property to edtlib.
+Could you review again, please?
+
+*--- soburi (2025-04-22 22:23:08+00:00)
+@mbolivar 
+ping
+
+*--- rruuaanng (2025-06-05 14:57:21+00:00)
+```suggestion
+# Common fields for io-channel nexus
+```
+
+*--- rruuaanng (2025-06-05 15:00:10+00:00)
+```suggestion
+#define DT_MAP_BY_IDX(node_id, prop, idx) DT_CAT5(node_id, _P_, prop, _MAP_IDX_, idx)
+```
+
+Should we continue to stick with the current style? At present, most APIs that take an `idx` parameter use the `_BY_IDX` suffix and also provide a simpler version of the API where `idx` defaults to 0.
+
+*--- soburi (2025-06-05 22:07:20+00:00)
+Thank you for your review.
+Fixed it.
+
+*--- soburi (2025-06-05 22:08:35+00:00)
+I have revised the whole code to comply with these conventions.
+
+*--- soburi (2025-06-11 07:12:10+00:00)
+@rruuaanng @mbolivar 
+
+I have updated it, so please check it out again if you have time.
+
+*--- rruuaanng (2025-07-17 14:42:54+00:00)
+Try to use `is None`, it's more readable.
+
+*--- rruuaanng (2025-07-17 14:43:50+00:00)
++1
+
+https://github.com/zephyrproject-rtos/zephyr/pull/87595#discussion_r2213552087
+
+*--- rruuaanng (2025-07-17 14:52:35+00:00)
+It's recommended to move it outside the while loop. Placing the function inside the loop looks odd.
+
+*--- soburi (2025-08-02 05:11:11+00:00)
+Sorry for my late response.
+I fixed it.
+
+*--- soburi (2025-08-02 05:11:19+00:00)
+Fixed it.
+
+*--- soburi (2025-08-02 05:12:09+00:00)
+Fixed it as your suggestion.
+
+*--- soburi (2025-09-10 07:54:36+00:00)
+@rruuaanng 
+
+Is it possible to proceed with this PR? If there are any issues, please let me know and I will address them.
+
+*--- rruuaanng (2025-09-11 05:31:37+00:00)
+It would be better to add a test for the `maps()` function in `scripts\dts\python-devicetree\tests\test_edtlib.py`.
+
+*--- soburi (2025-09-20 05:02:26+00:00)
+Thank you for your comment. I’ve added the test you suggested.
+This PR has been open for quite some time, so there has been enough time for feedback.
+If there are no outstanding issues, could you please approve it?
+If anyone has objections, I’m sure they’ll raise them. 😀
+
+*--- mbolivar (2025-10-03 16:08:03+00:00)
+What is the intended behavior if `N > length(__VA_ARGS__)`?
+
+*--- mbolivar (2025-10-03 16:10:50+00:00)
+This one is adding new properties, like `interrupt-map-pass-thru`, to this binding. Is it OK?
+
+*--- mbolivar (2025-10-03 16:12:34+00:00)
+It's a requirement to update macros.bnf in the documentation when we add new generated macros. Please add it.
+
+*--- soburi (2025-10-04 12:18:57+00:00)
+Thank you for your review.
+
+This will result in a compilation error.
+Specifically, the N portion is a non-variable-length argument, so it will be detected as an argument mismatch. This allows for early error detection. (delightful!)
+
+```
+/home/crs/zephyrproject/zephyr/tests/unit/util/main.c:568:8: error: macro "Z_GET_ARGS_FIRST_4" requires 5 arguments, but only 3 given
+  568 |         uint8_t e[] = {GET_ARGS_FIRST_N(4, 1, 2, 3)};
+```
+
+*--- soburi (2025-10-04 12:20:52+00:00)
+I updated `doc/build/dts/macros.bnf`.
+
+*--- soburi (2025-10-04 12:26:35+00:00)
+This is to allow pass-through specifications to be accepted as properties in the same series as interrupt-map and interrupt-map-mask. The GPIO version of the generic binding already defines `gpio-map-pass-thru`, and this change is symmetrical with that.
+
+The edtlib has common logic to handle properties named `<prefix>-map-pass-thru`. So if declared, will also perform pass-through processing for the interrupt-map. For this reason, it's natural to have the binding to recognize the property.
+
+*--- mbolivar (2025-10-04 15:17:37+00:00)
+Nonblocking suggestion: add "see 2.5 Nexus Nodes and Specifier Mapping in the Devicetree Specification" to this comment.
+
+*--- mbolivar (2025-10-04 15:18:07+00:00)
+Nonblocking suggestion: add "See 2.4 Interrupts and Interrupt Mapping in the Devicetree Specification" to this comment.
+
+*--- mbolivar (2025-10-04 16:01:31+00:00)
+This should be impossible if the type checking is working properly. The only way `node` could be `None` is if its type annotation was `dtlib_Node | None`. The fact that the type is `dtlib_Node` already means it cannot be`None`. If that is not true, something is wrong with the type checking or the type annotation.
+
+*--- mbolivar (2025-10-04 16:05:42+00:00)
+This is adding a new user-facing API to edtlib without documenting it. Please compare this with the way other properties (like `gpio_hogs`) are written and documented and add the missing documentation.
+
+It should look like this:
+
+```py
+    @property
+    def maps(self) -> list[ControllerAndData]:
+        "See the class docstring"
+        ...
+```
+
+And then the class docstring for `Node` should be extended to document the `maps` property appropriately.
+
+It's hard for me to check if the function is working correctly if its behavior is not documented. It's also necessary to document all the public APIs so users of this python package know how they are supposed to work.
+
+*--- mbolivar (2025-10-04 16:09:22+00:00)
+This list appears to be incomplete. For example, look at this section from `write_maps()`:
+
+```
++    # DT_N_<node-id>_P_<prop-id>_FOREACH_PROP_ELEM
++    macro2val[f"{macro}_FOREACH_PROP_ELEM(fn)"] = ' \\\n\t'.join(
++        f'fn(DT_{node.z_path_id}, {prop_id}, {i})' for i in range(plen)
++    )
++
++    # DT_N_<node-id>_P_<prop-id>_FOREACH_PROP_ELEM_SEP
++    macro2val[f"{macro}_FOREACH_PROP_ELEM_SEP(fn, sep)"] = ' DT_DEBRACKET_INTERNAL sep \\\n\t'.join(
++        f'fn(DT_{node.z_path_id}, {prop_id}, {i})' for i in range(plen)
++    )
++
++    # DT_N_<node-id>_P_<prop-id>_FOREACH_PROP_ELEM_VARGS
++    macro2val[f"{macro}_FOREACH_PROP_ELEM_VARGS(fn, ...)"] = ' \\\n\t'.join(
++        f'fn(DT_{node.z_path_id}, {prop_id}, {i}, __VA_ARGS__)' for i in range(plen)
++    )
++
++    # DT_N_<node-id>_P_<prop-id>_FOREACH_PROP_ELEM_SEP_VARGS
++    macro2val[f"{macro}_FOREACH_PROP_ELEM_SEP_VARGS(fn, sep, ...)"] = (
++        ' DT_DEBRACKET_INTERNAL sep \\\n\t'.join(
++            f'fn(DT_{node.z_path_id}, {prop_id}, {i}, __VA_ARGS__)' for i in range(plen)
++        )
++    )
+```
+
+*--- soburi (2025-10-04 21:30:19+00:00)
+To avoid increasing the number of grammar rules, we've adapted this to the general-purpose FOREACH grammar. Therefore, it's covered by the existing rules:
+
+https://github.com/zephyrproject-rtos/zephyr/blob/4ef1163e39575c998af5ea00515d6efc2525a337/doc/build/dts/macros.bnf#L71-L76
+
+In actual use cases, the FOREACH syntax remains the same; however, the processing macros passed to FOREACH use the map macros (i.e., the ones added to bnf this time).
+
+*--- soburi (2025-10-05 11:53:59+00:00)
+Applied your suggestion.
+Also gpio-nexus.yaml and pwm-nexus.yaml
+
+*--- soburi (2025-10-05 11:54:07+00:00)
+Applied your suggestion.
+
+*--- soburi (2025-10-05 11:55:07+00:00)
+Admittedly, this is redundant if there is type checking.
+Removed.
+
+*--- soburi (2025-10-05 11:55:31+00:00)
+Added description. Please check it.
+
+*--- mbolivar (2025-10-05 17:11:25+00:00)
+Ah, I see. Clever. Thanks for clarifying.
+
+*--- mbolivar (2025-10-05 17:27:24+00:00)
+> I'm not sure that I think that ControllerAndData
+>
+> https://github.com/zephyrproject-rtos/zephyr/pull/87595#pullrequestreview-3302468994
+
+cc @dottspina for his perspective as a consumer of this API
+
+*--- soburi (2025-10-06 22:39:02+00:00)
+@mbolivar 
+
+> I think that neither of these types of information is really a ControllerAndData due to the additional "child -> parent" information.
+> 
+> I am currently thinking it would make more sense to introduce two new types:
+> 
+>     1. `NexusMapEntry`: for the table entries contained in a `<specifier>-map` as documented in DTSpec section 2.5.1. This would contain attributes named `child_specifier`, `parent`, `parent_specifier`.
+> 
+>     2. `InterruptMapEntry`: similar, except for the `interrupt-map` property table entries in DTSpec 2.4.3.
+> 
+> 
+> This would match the same pattern we have done with the `Range` type used to represent elements of the standard `ranges` property. Experience has shown from that case that picking type names and designing APIs to match the specification leads to future-proof work.
+> 
+> What do you think about this idea?
+
+This was possible with the current structure, so I did so, but
+as mentioned in the comments, I think it would be clearer to define a new type.
+
+There may be some room for debate as to whether to use `NexusMapEntry`/`InterruptMapEntry` or use `MapEntry` to make the interrupt property optional as needed for.
+
+I'll move forward with it, but I might not have enough time this week.
+
+*--- mbolivar (2025-10-06 23:46:00+00:00)
+> There may be some room for debate as to whether to use `NexusMapEntry`/`InterruptMapEntry` or use `MapEntry` to make the interrupt property optional as needed for.
+
+I agree there's room for debate. We could also use class inheritance to capture the specialization, perhaps. Thanks and looking forward to your next update.
+
+*--- soburi (2025-10-12 03:36:08+00:00)
+@mbolivar 
+
+Update done.
+
+> > There may be some room for debate as to whether to use `NexusMapEntry`/`InterruptMapEntry` or use `MapEntry` to make the interrupt property optional as needed for.
+
+I decided to use `MapEntry` because there are no 'behavior' differences between these, so I think no need to split into a class hierarchy.
+The difference is whether the length of the ADDRESS information is 0 or not.
+
+> I agree there's room for debate. We could also use class inheritance to capture the specialization, perhaps. Thanks and looking forward to your next update.
+
+As a result, I updated macro generation rules and the APIs. It is mainly just a cleanup, but the structure makes it simple and reduces the code.
+
+*--- rruuaanng (2025-10-12 15:10:29+00:00)
+****
+```suggestion
+    assert "interrupt" in nexus.maps
+```
+
+*--- rruuaanng (2025-10-12 15:10:52+00:00)
+```suggestion
+    assert "interrupt" in empty.maps
+```
+
+*--- rruuaanng (2025-10-12 15:12:14+00:00)
+```suggestion
+from typing import Iterable, NoReturn, Optional
+```
+(Don't use wrapper classes from the `typing` module, they have been deprecated. e.g. `Set Dict List ...`)
+
+*--- rruuaanng (2025-10-12 15:24:55+00:00)
+```suggestion
+#define DT_MAP_HAS_ENTRY_CHILD_SPECIFIER_BY_IDX(node_id, prop, entry_idx, param_idx)                  \
+```
+Use the `BY_xxx` format for certain parameters whenever possible. And, the `HAS` prefix should be applied to the target rather than placed as a suffix, e.g., use `HAS_ALIAS` and `HAS_CHOSEN` instead of `ALIAS_HAS` and `CHOSEN_HAS`.
+(for all macros.)
+
+*--- soburi (2025-10-13 05:14:19+00:00)
+Fixed.
+Thank you for your review.
+
+*--- soburi (2025-10-13 05:14:24+00:00)
+Fixed.
+
+*--- soburi (2025-10-13 05:14:29+00:00)
+Fixed.
+
+*--- soburi (2025-10-13 05:30:11+00:00)
+I made it to be aligned to `DT_MAP_ENTRY_HAS_...BY_IDX`.
+And also for the top-level container, it is changed to `DT_MAP_HAS_ENTRY_BY_IDX`.
+
+*--- rruuaanng (2025-10-13 12:44:29+00:00)
+I noticed that in this file, some macros that require `entry_idx` include `xxx_BY_IDX` in their names, while others don't. They take the same parameters, but the suffixes used are not consistent, I think it would be better to make this consistent, e.g.:
+```
+#define DT_MAP_ENTRY_CHILD_ADDRESS_LEN(node_id, prop, entry_idx)                                   \
+	DT_CAT6(node_id, _P_, prop, _MAP_ENTRY_, entry_idx, _CHILD_ADDRESS_LEN)
+
+#define DT_MAP_HAS_ENTRY_BY_IDX(node_id, prop, entry_idx)                                          \
+	IS_ENABLED(DT_CAT6(node_id, _P_, prop, _MAP_ENTRY_, entry_idx, _EXISTS))
+```
+
+And, it seems that when using these macros, you have to specify `entry_idx` even when it's `0`. Therefore, I suggest adding wrapper macros similar to the existing ones, e.g.:
+```
+#define DT_REG_SIZE(node_id) DT_REG_SIZE_BY_IDX(node_id, 0)
+
+#define DT_IRQ_HAS_CELL(node_id, cell) DT_IRQ_HAS_CELL_AT_IDX(node_id, 0, cell)
+```
+WDYT?
+
+*--- rruuaanng (2025-10-13 12:53:25+00:00)
+Looks good, let's be patient, we are almost done :)
+
+*--- soburi (2025-10-13 14:42:30+00:00)
+This is done to prevent BY_IDX for map entries and
+BY_IDX for lists of child/parent specifiers to appear simultaneously.
+IMO, since "two-dimensional arrays" have not existed in devicetree until now,
+applying the rules as is would make the code more difficult to read.
+
+*--- soburi (2025-10-14 12:38:32+00:00)
+> And, it seems that when using these macros, you have to specify entry_idx even when it's 0. Therefore, I suggest adding wrapper macros similar to the existing ones, e.g.:
+
+This has also been addressed.
+
+*--- soburi (2025-10-15 02:48:31+00:00)
+@mbolivar 
+
+Update done.
+Could you take a look, again?
+
+*--- mathieuchopstm (2025-10-29 13:01:18+00:00)
+The limit `N < 64` should be documented, as it done for (at least some) other macros.
+
+*--- soburi (2025-11-14 22:30:19+00:00)
+Fixed. Thank you for your review.
+
+*--- soburi (2025-11-14 22:31:25+00:00)
+@mbolivar @rruuaanng @mathieuchopstm 
+
+Can you take a look at it again?
+
+*--- Copilot (2025-12-03 14:01:48+00:00)
+Typo: "addrsss" should be "address" (extra 's' characters).
+```suggestion
+; The child address length, value, and existence.
+```
+
+*--- Copilot (2025-12-03 14:01:49+00:00)
+Typo: "addrsss" should be "address" (extra 's' characters).
+```suggestion
+; The length of parent address, value, and existence.
+```
+
+*--- Copilot (2025-12-03 14:01:49+00:00)
+Grammar issue: "the list of MapEntry" should be "a list of MapEntry" or "the list of MapEntry instances". The article "the" is incorrect when describing what a dictionary contains as values.
+```suggestion
+      A dictionary that contains a list of MapEntry instances associated with each string key.
+```
+
+*--- Copilot (2025-12-03 14:01:49+00:00)
+Typo: "remainings" should be "remaining" (no 's'). The word "remaining" is typically used as an adjective and doesn't take a plural form in this context.
+```suggestion
+                _err(f"unexpected prop.value remaining: {raw}")
+```
+
+*--- Copilot (2025-12-03 14:01:50+00:00)
+PEP 8 style violation: There should be no space before the colon in type annotations. Change `entries : list[MapEntry]` to `entries: list[MapEntry]`.
+```suggestion
+            entries: list[MapEntry] = []
+```
+
+*--- Copilot (2025-12-03 14:01:50+00:00)
+Typo: "grammer" should be "grammar".
+```suggestion
+        # _LEN and _EXISTS share the grammar with `prop` element.
+```
+
+*--- Copilot (2025-12-11 12:37:02+00:00)
+The documentation example has an extra closing parenthesis. The line should be:
+```
+{ DT_MAP_ENTRY_CHILD_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0),
+```
+not:
+```
+{ DT_MAP_ENTRY_CHILD_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0)),
+```
+There's an extra closing parenthesis after the first macro call.
+```suggestion
+ *         { DT_MAP_ENTRY_CHILD_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0), \
+ *           DT_MAP_ENTRY_PARENT_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0) }
+```
+
+*--- Copilot (2025-12-11 12:37:02+00:00)
+The documentation example has an extra closing parenthesis. The line should be:
+```
+DT_MAP_ENTRY_PARENT_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0) }
+```
+not:
+```
+DT_MAP_ENTRY_PARENT_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0)) }
+```
+There's an extra closing parenthesis after the second macro call.
+```suggestion
+ *         { DT_MAP_ENTRY_CHILD_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0), \
+ *           DT_MAP_ENTRY_PARENT_SPECIFIER_BY_IDX(node_id, map, entry_idx, 0) }
+```
+
+*--- Copilot (2025-12-11 12:37:03+00:00)
+When generating FOREACH macros for empty maps (plen == 0), the generated macro definitions will be empty strings, which could result in invalid macro definitions. For example, if there are no entries, `FOREACH_MAP_ENTRY(fn)` would expand to nothing instead of a valid empty expression. Consider generating an appropriate empty value or adding a check to handle the empty case explicitly, similar to how other parts of the code handle empty collections.
+```suggestion
+        if plen == 0:
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY(fn)"] = "((void)0)"
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY_SEP(fn, sep)"] = "((void)0)"
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY_VARGS(fn, ...)"] = "((void)0)"
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY_SEP_VARGS(fn, sep, ...)"] = "((void)0)"
+        else:
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY(fn)"] = ' \\\n\t'.join(
+                f'fn(DT_{node.z_path_id}, {prop_id}, {i})' for i in range(plen)
+            )
+
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY_SEP(fn, sep)"] = (
+                ' DT_DEBRACKET_INTERNAL sep \\\n\t'.join(
+                    f'fn(DT_{node.z_path_id}, {prop_id}, {i})' for i in range(plen)
+                )
+            )
+
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY_VARGS(fn, ...)"] = ' \\\n\t'.join(
+                f'fn(DT_{node.z_path_id}, {prop_id}, {i}, __VA_ARGS__)' for i in range(plen)
+            )
+
+            macro2val[f"{macro}_FOREACH_MAP_ENTRY_SEP_VARGS(fn, sep, ...)"] = (
+                ' DT_DEBRACKET_INTERNAL sep \\\n\t'.join(
+                    f'fn(DT_{node.z_path_id}, {prop_id}, {i}, __VA_ARGS__)' for i in range(plen)
+                )
+            )
+```
+
+*--- Copilot (2025-12-11 12:37:03+00:00)
+The BNF grammar is missing an underscore separator between DIGIT and "_EXISTS". The pattern should be:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_EXISTS"
+```
+not:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT "_EXISTS"
+```
+The underscore before "EXISTS" should be included in the quoted string to be consistent with the other rules and the actual generated macro names.
+```suggestion
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_EXISTS"
+```
+
+*--- Copilot (2025-12-11 12:37:04+00:00)
+The BNF grammar is missing an underscore separator between DIGIT and "_EXISTS". The pattern should be:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_CHILD_SPECIFIER_IDX_" DIGIT %s"_EXISTS"
+```
+not:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_CHILD_SPECIFIER_IDX_" DIGIT "_EXISTS"
+```
+The underscore before "EXISTS" should be included in the quoted string to be consistent with the other rules and the actual generated macro names.
+```suggestion
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_CHILD_SPECIFIER_IDX_" DIGIT %s"_EXISTS"
+```
+
+*--- Copilot (2025-12-11 12:37:04+00:00)
+The BNF grammar is missing an underscore separator between DIGIT and "_EXISTS". The pattern should be:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_PARENT_ADDRESS_IDX_" DIGIT %s"_EXISTS"
+```
+not:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_PARENT_ADDRESS_IDX_" DIGIT "_EXISTS"
+```
+The underscore before "EXISTS" should be included in the quoted string to be consistent with the other rules and the actual generated macro names.
+```suggestion
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_PARENT_ADDRESS_IDX_" DIGIT %s"_EXISTS"
+```
+
+*--- Copilot (2025-12-11 12:37:04+00:00)
+The BNF grammar is missing an underscore separator between DIGIT and "_EXISTS". The pattern should be:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_PARENT_SPECIFIER_IDX_" DIGIT %s"_EXISTS"
+```
+not:
+```
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_PARENT_SPECIFIER_IDX_" DIGIT "_EXISTS"
+```
+The underscore before "EXISTS" should be included in the quoted string to be consistent with the other rules and the actual generated macro names.
+```suggestion
+map-macro =/ %s"DT_N" path-id %s"_P_" prop-id %s"_MAP_ENTRY_" DIGIT %s"_PARENT_SPECIFIER_IDX_" DIGIT %s"_EXISTS"
+```
+
+*--- soburi (2025-12-11 22:12:56+00:00)
+If LEN=0, no entries should exist.
+
+*--- soburi (2025-12-13 00:06:23+00:00)
+@mbolivar @rruuaanng @mathieuchopstm
+
+Can you take a look at it again?
+
+*--- rruuaanng (2025-12-13 02:10:27+00:00)
+I'm thinking, is it really necessary to add a wrapper with a different name?
+
+*--- soburi (2025-12-13 04:24:04+00:00)
+Since we provide APIs named `DT_MAP_...` APIs for the same elements, 
+I think it's better to add this alias as a naming system.
+Otherwise, this case would be the only one that deviates from the `DT_MAP_...` naming convention.
+
+*--- soburi (2026-01-26 22:51:48+00:00)
+@rruuaanng 
+Could you take a look, please?
+
+*--- soburi (2026-01-27 23:25:17+00:00)
+@rruuaanng  
+Could you give a reapprove, please?

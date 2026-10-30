@@ -1,0 +1,68 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111719
+TITLE: doc: added ide-for-zephyr doc
+
+*--- opening post by rijesha (2026-06-20 22:32:30+00:00)
+This is an extension that I have developed/ actively maintained since 2024. It allows zephyr development with visual studio code. I would like to add a reference to it in the docs.
+
+*--- rijesha (2026-07-21 02:36:37+00:00)
+@kartben  could you have a look at this PR and let me know if this it is acceptable.
+
+*--- kartben (2026-07-21 03:30:42+00:00)
+> @kartben  could you have a look at this PR and let me know if this it is acceptable.
+
+Yes, but meanwhile please fix the compliance errors reported by the CI. Reviewers tend to not look at pull request until they are "green" and that's exactly what happened here. Thanks!
+
+*--- kartben (2026-07-21 04:18:22+00:00)
+Please also rebase your PR on latest `main`
+
+*--- rijesha (2026-07-28 20:12:16+00:00)
+@kartben Please let me know if there is anything else I need to do.
+
+*--- rijesha (2026-08-17 22:17:17+00:00)
+@kartben should I do another rebase?
+
+*--- kartben (2026-08-18 19:46:19+00:00)
+> @kartben should I do another rebase?
+
+Yes please fix the compliance issue reported in CI
+
+*--- Thalley (2026-08-20 11:34:56+00:00)
+`IDE for Zephyr` is very generic, and may be misleading in this context. Suggest to change it to
+
+
+```suggestion
+IDE for Zephyr (VS Code extension)
+##################################
+
+`IDE for Zephyr`_ is a Visual Studio Code (VS Code) extension for Zephyr RTOS development.
+```
+
+As this page is not a generic page for Zephyr IDEs
+
+*--- Thalley (2026-08-20 11:35:24+00:00)
+The file names and reference should probably be updated to reflect this as well
+
+*--- Copilot (2026-08-20 11:38:56+00:00)
+This sentence is indented as a fifth item in the preceding “choose a setup method” list, so the rendered guide presents it as another setup method. Remove the list marker so it renders as explanatory text for this numbered step.
+
+*--- rijesha (2026-08-21 22:08:24+00:00)
+Will do. Thanks for the review.
+
+*--- Copilot (2026-08-22 10:57:49+00:00)
+Keep this toctree alphabetized. The existing entries are ordered by file name, so appending this `ide_...` page after `workbench_...` makes the Tools and IDEs navigation inconsistent; place it between `coccinelle.rst` and `kapa_ai.rst`.
+
+*--- Copilot (2026-08-22 10:57:49+00:00)
+This continuation line is indented two spaces farther than the paragraph above, so reStructuredText treats it as an unexpected nested block rather than paragraph continuation. Align it with line 70 to keep the numbered-list item valid.
+
+*--- Copilot (2026-08-22 10:57:49+00:00)
+Use the official uppercase spelling “GCC” consistently with the other tool names in this list.
+
+This issue also appears on line 54 of the same file.
+
+*--- Copilot (2026-08-25 08:02:15+00:00)
+The extension's own requirements limit automatic host-tool installation to supported Linux distribution families and direct users of other distributions to install the tools manually. Saying “Linux” without qualification overpromises this feature; scope the claim accordingly.
+
+*--- Copilot (2026-08-25 08:02:15+00:00)
+This assigns the `runners.yaml` translation behavior to the wrong provider. The extension's launch documentation says `zephyr-ide-cortex` performs that translation, while `zephyr-ide-west` is the bridge that starts `west debugserver` for runners without a native Cortex-Debug server type.
+
+This issue also appears on line 107 of the same file.

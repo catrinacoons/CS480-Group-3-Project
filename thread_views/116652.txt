@@ -1,0 +1,97 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116652
+TITLE: net: tcp: Derive the received TCP header once per packet
+
+*--- opening post by jukkar (2026-08-18 15:13:08+00:00)
+I used the PR #116614 to verify the performance improvements.
+
+`th_get()` locates the TCP header in a received packet by rewinding the
+packet cursor to the head of the buffer chain, walking the IP header
+again, and checking the TCP header is contiguous. It caches nothing, so
+every caller pays the full walk.
+
+For one received in-order data segment it runs **five times**:
+
+| | |
+|---|---|
+| `tcp_recv()` | derives it, then discards the pointer |
+| `tcp_conn_search()` | **twice per connection examined** |
+| `tcp_in()` | derives it again, identical result |
+| `tcp_data_len()` | derives it again, to read one field |
+
+The connection lookup is the worst of the four, and worse than the call
+count suggests. `tcp_conn_cmp()` called `tcp_endpoint_cmp()` twice, and
+each of those built a temporary `union tcp_endpoint` from the packet
+before comparing it — so both the header derivation and the endpoint
+construction ran 2*N times for N connections scanned. That temporary is
+the same value every time: it depends only on the packet.
+
+This series derives the header once in `tcp_recv()` and passes it down,
+and builds the packet's two endpoints once before the lookup loop.
+Everything touched is `static`; there is no API change.
+
+Holding the pointer across calls is not a new practice in this file.
+`tcp_in()` already derives it once and uses it about 40 times across the
+whole state machine, including through `tcp_options_check()`,
+`tcp_data_get()` and `tcp_pkt_trim_data()`. The series extends that
+lifetime by one stack frame, over `tcp_conn_search()` and
+`tcp_conn_new()`, neither of which alters the buffer chain.
+
+### Result
+
+Measured on `qemu_x86` with a zperf TCP loopback transfer under QEMU
+icount, so the figures are instruction counts rather than wall clock and
+repeat exactly:
+
+| fragment size | before | after | |
+|---|---|---|---|
+| `CONFIG_NET_BUF_DATA_SIZE=1100` | 6.325 Mbps | 6.642 Mbps | **+5.01%** |
+| `CONFIG_NET_BUF_DATA_SIZE=128` (default) | 3.970 Mbps | 4.093 Mbps | **+3.10%** |
+
+Instructions per payload byte, showing where it comes from:
+
+| | before | after | |
+|---|---|---|---|
+| total | 40.276 | 38.358 | −4.76% |
+| `th_get` | 0.492 | 0.076 | **−84.6%** |
+| `tcp_endpoint_set` | 0.342 | 0.180 | −47.4% |
+| `net_pkt_skip` | 0.178 | 0.096 | −45.8% |
+| `net_pkt_cursor_init` | 0.254 | 0.154 | −39.3% |
+| `net_pkt_get_contiguous_len` | 1.228 | 0.857 | −30.2% |
+| `net_pkt_cursor_operate` | 2.346 | 1.666 | −29.0% |
+| `memcmp` | 0.214 | 0.214 | unchanged |
+
+`memcmp` staying flat is the check that the lookup still does the same
+comparisons; only the work of preparing them went away.
+
+The absolute saving is **1.92 instructions per payload byte at both
+fragment sizes**. It reads as 5% or 3% only because the totals differ
+(40.3 vs 64.5 ipb). `th_get()` skips just the IP header, which sits in
+the first fragment whatever the fragment size, so this path does not
+scale with fragment count — unlike the payload traversal, which does.
+
+### Note on the last commit
+
+`tcp_pkt_trim_data()` builds a replacement buffer chain and swaps it into
+the packet, which leaves the header pointer the state machine is holding
+pointing into freed buffers. That is already true today and already
+harmless, because the jump to the receive path does not use the header
+again. It stops being harmless as soon as anything there does, and
+nothing said so. The last commit re-derives after a trim and writes the
+lifetime rule down next to `th_get()`.
+
+*--- Copilot (2026-08-18 15:31:32+00:00)
+tcp_data_len() now dereferences th unconditionally. th_get() can return NULL (e.g. if linearization fails), and callers like tp_tcp_recv_cb pass th_get(pkt) directly, which would lead to a NULL dereference. Also, if th_off(th) < 5 the current tcp_options_len computation underflows.
+
+This issue also appears on line 385 of the same file.
+
+*--- Copilot (2026-08-18 15:31:32+00:00)
+tp_input() declares data_len twice in the same scope (once initialized from uh->len, then again a few lines later), which is a compile error. The first initialization is overwritten before it is used.
+
+*--- jukkar (2026-08-19 06:59:59+00:00)
+Fixed
+
+*--- jukkar (2026-08-19 07:00:37+00:00)
+Will be fixed in separately and not part of this PR.
+
+*--- jukkar (2026-08-24 17:40:57+00:00)
+@pdgendt would you have resources for a review, that would be much appreciated :bow:

@@ -1,0 +1,19 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107439
+TITLE: charger: Add support for Silergy SY6974B 3A single-cell Li-Ion switching battery
+
+*--- opening post by kartben (2026-04-16 21:03:30+00:00)
+Add initial/minimal support for Silergy SY6974B 3A single-cell Li-Ion switching battery charger.
+
+Tested on reTerminal E1002 (cc @blemouzy 😊)
+
+*--- fabiobaltieri (2026-04-20 16:07:34+00:00)
+would it make sense to print the masked value? that's what you are checking against after all
+
+*--- kartben (2026-04-20 20:05:44+00:00)
++1, done
+
+*--- kartben (2026-04-20 20:05:56+00:00)
+rebased and addressed @fabiobaltieri's comment
+
+*--- kartben (2026-04-23 19:36:51+00:00)
+@rriveramcrus please re-approve :)

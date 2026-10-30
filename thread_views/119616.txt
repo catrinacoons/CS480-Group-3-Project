@@ -1,0 +1,47 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/119616
+TITLE: Bluetooth: HCI: Deprecate the setup() driver API op
+
+*--- opening post by jhedberg (2026-09-18 17:52:01+00:00)
+`setup()` is Host code living in the HCI driver vtable: most implementations call `bt_hci_cmd_send_sync()`, which is why the op exists at all, and why a driver's vendor-specific initialization has nowhere to run in a build without a Host. A driver does that work inside `open()` instead, over its own transport, with the helpers of `hci_pkt.h` and `hci_lockstep.h`, and takes the public address from `bt_hci_get_public_addr()`.
+
+This deprecates the op, `bt_hci_setup()`, `struct bt_hci_setup_params` and `CONFIG_BT_HCI_SETUP`, so that an out-of-tree driver still implementing `setup()` is pointed at the replacement. The Host keeps calling the op through the deprecation window; the op, its Kconfig and the h4 vendor hook go two releases from now.
+
+No attribute is put on the op or the function, deliberately: the Host reads the member in order to call it, so an attribute would warn on the Host rather than on the drivers the deprecation is aimed at. Selecting the deprecated Kconfig symbol is what makes a build say so, and that fires for exactly the drivers that have not moved. Verified: a build for `nrf52dk/nrf52832` is clean, a build for `nucleo_wb55rg` prints `warning: Deprecated symbol BT_HCI_SETUP is enabled.`
+
+It builds on the public-address channel (#119615), which besides being the prerequisite for five of the conversions also removes a false positive here: without it, a BlueNRG build with `CONFIG_BT_HCI_RAW` would warn although that build has no `setup()` callback at all. The warning is suppressible with `CONFIG_WARN_DEPRECATED=n`, and it reports an enabled Kconfig selector rather than an implementation, so it reaches an out-of-tree driver that selects the option and stays silent for one that implements the op without selecting it.
+
+All in-tree drivers are converted, so nothing in the tree selects `CONFIG_BT_HCI_SETUP` any more and no in-tree build warns.
+
+### Conversion status
+
+| Driver | Vendor | State |
+| --- | --- | --- |
+| `hci_silabs_siwx91x` | Silicon Labs | done, #118479 |
+| `hci_infineon_psoc6_bless` | Infineon | merged, #119575 |
+| `ipm_stm32wb` | ST | merged, #119576 |
+| `hci_ambiq` + `apollox_blue` | Ambiq | merged, #119577 |
+| `hci_spi_st` (BlueNRG) | ST | merged, #119734 |
+| `hci_stm32wba` | ST | merged, #119733 |
+| `hci_nxp` | NXP | merged, #119735 |
+| `hci_infineon_cyw208xx` | Infineon | merged, #119736 |
+| `h4.c` vendor backends: `hci_nxp_setup.c`, `hci_uart_infineon.c` | NXP, Infineon | merged, #120078 |
+
+Five of those needed the public-address channel, `bt_hci_set_public_addr()` and `bt_hci_get_public_addr()` (#119615, merged), because they program the controller's public address from the value the Host passes to `setup()` today.
+
+Part of #116316, W5(c).
+
+*--- Copilot (2026-09-18 18:28:10+00:00)
+Do not enable this deprecation warning until the migration prerequisites are included in this revision. `BT_HCI_SET_PUBLIC_ADDR` still selects and documents `BT_HCI_SETUP` at lines 303–309, while BlueNRG selects the address capability even in raw builds where its `.setup` member is omitted. Those supported builds therefore emit a setup deprecation warning without implementing the deprecated callback. The documented replacement, `bt_hci_get_public_addr()`, is also not defined in this tree, several in-tree drivers still implement `.setup`, and the migration guide incorrectly says both that the symbols are decoupled and that the conversions are complete. Rebase/land the public-address channel and driver conversions before selecting `DEPRECATED`; remove the transitive selection and give any temporarily unconverted drivers an explicit `select BT_HCI_SETUP`.
+
+*--- jhedberg (2026-09-18 18:38:27+00:00)
+Agreed on all four, and all four checked out. Fixed by putting this on top of #119615, the public-address channel, rather than leaving it standalone: the getter is defined there, `BT_HCI_SET_PUBLIC_ADDR` no longer selects `BT_HCI_SETUP`, and BlueNRG selects it only when not a raw build, so that configuration stops warning without implementing the op. This PR therefore shows two commits and depends on the first one landing.
+
+The migration guide no longer says the in-tree drivers are converted; it names the smallest converted driver as an example instead. The commit message had the same overclaim and now describes the replacement rather than the state of the tree.
+
+It stays a draft until the last in-tree driver stops implementing the op; the checklist in the description tracks that. Verified after the rebase: `nrf52dk/nrf52832` builds with no deprecation warning, `nucleo_wb55rg` builds and prints one, which is the driver that has not converted yet.
+
+*--- jhedberg (2026-09-18 18:38:29+00:00)
+Pushed 374fc5c8339, now stacked on #119615.
+
+*--- jhedberg (2026-09-19 09:09:59+00:00)
+Rebased onto the updated #119615, no change of its own.

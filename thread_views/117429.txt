@@ -1,0 +1,41 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117429
+TITLE: west: blobs: verify the checksum of each downloaded URL
+
+*--- opening post by pdgendt (2026-08-26 07:18:40+00:00)
+A server can answer a blob download with a success status but a bogus payload, for example redirecting a raw file request for a missing repository to its sign-in page with a 200 status. Such a download passed the fetch step and made 'west blobs fetch' stop at the first URL, only to fail the checksum verification afterwards, without ever trying the remaining fallback URLs.
+
+Verify the SHA-256 digest of each download inside the URL loop and treat a mismatch like a failed download, so the next URL is tried. If every URL yields a mismatch the last download is kept, preserving the detailed error message of the final verification step.
+
+*--- steverae-work (2026-08-26 19:00:07+00:00)
+Thanks - this logic works much better!
+
+*--- marc-hb (2026-08-28 14:34:10+00:00)
+Is this comment mis-indented?
+
+*--- marc-hb (2026-08-28 14:37:21+00:00)
+The following logic is really painful to wrap one head's around which means it should be simplified.
+```python
+
+  if not A:
+      if not B:
+         raise ...
+  elif C:
+     ..
+```
+
+In fact is looks buggy because if there is a `valid_url` then AFAICT `has_error` cannot be true. So the `elif` looks like dead code.
+
+Maybe this choice of booleans is not good. There is an attempt to distinguish between a failed download and a failed checksum, yet `has_error` does not make such difference. Weird.
+
+Maybe there is no need to carry forward the type of failure for later. I mean just print a different error message where it happens and then only remember that there was "some" failure, does not matter which one. Should simplify things.
+
+*--- pdgendt (2026-08-28 15:07:39+00:00)
+It's not dead code, but I agree harder to read. Pushed a cleaner version that is easier to follow/read.
+
+*--- marc-hb (2026-08-28 15:49:10+00:00)
+Can you add here one very short example where the checksum failure is not a successful supply-chain attack?
+
+*--- marc-hb (2026-08-28 15:49:50+00:00)
+```suggestion
+        # verify_blob() will report the detailed checksum error later.
+```

@@ -1,0 +1,44 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109943
+TITLE: soc: silabs: siwx91x: Add "silabs fota" shell command
+
+*--- opening post by jerome-pouiller (2026-05-27 16:14:15+00:00)
+siwx91x has a platform specific bootloader. Therefore, mcuboot is not supporter and the user has to use a specific API to upgrade the firmware. This API is already available on Zephyr through
+CONFIG_SIWX91X_FIRMWARE_UPGRADE. However, no example code was provided.
+
+This patch introduces "silabs fota <URL>" shell command that can be used as an example for firmware update implementation.
+
+The TLS capability is not mandatory for this example. For the record, I have tested https capability on siwx917_rb4338a with samples/net/wifi/shell and these parameters:
+
+```
+CONFIG_SIWX91X_FIRMWARE_UPGRADE=y
+CONFIG_NET_SOCKETS_SOCKOPT_TLS=y
+CONFIG_MBEDTLS_CIPHERSUITE_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256=y
+CONFIG_NET_SOCKETS_TLS_CONNECT_TIMEOUT=30000
+CONFIG_PSA_WANT_ALG_SHA_384=y
+CONFIG_NET_BUF_RX_COUNT=80
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
+```
+
+*--- Copilot (2026-05-29 08:06:02+00:00)
+When the URL has no path, `ret` is `-EINVAL`, but the code still overwrites `ctx->path` with `bufptr` and advances `bufptr` by the negative error code. This produces an empty request path for URLs such as `http://host` and can corrupt the packed URL buffer before parsing an explicit port.
+
+*--- Copilot (2026-05-29 08:06:02+00:00)
+The help text names the command as `fota <URL>`, but the registered shell command is `silabs fota <URL>`, so users following Kconfig help will try the wrong command.
+
+*--- Copilot (2026-05-29 08:06:02+00:00)
+Fix the spelling of "responses" and the grammar/capitalization in these comments.
+
+*--- Copilot (2026-05-29 08:06:03+00:00)
+The HTTPS path disables peer verification, so `https://` firmware downloads are still vulnerable to a man-in-the-middle serving a malicious image. For a firmware update command, TLS should verify the server certificate (with configured CA/security tags) or the command should not present this as HTTPS-capable by default.
+
+*--- Copilot (2026-05-29 08:06:03+00:00)
+This option builds code that calls the BSD socket APIs (`zsock_socket`, `zsock_connect`, and `zsock_getaddrinfo`), but it does not enable `NET_SOCKETS`. `HTTP_CLIENT` only selects the HTTP parser, so a configuration with this shell option enabled can fail to link because `subsys/net/lib/CMakeLists.txt` only adds the sockets library when `CONFIG_NET_SOCKETS` is set.
+
+*--- Copilot (2026-05-29 08:06:03+00:00)
+New Zephyr files should use REUSE-style SPDX copyright metadata at the top (see `doc/contribute/guidelines.rst:104-129`). This header has the license identifier but the copyright line is not an `SPDX-FileCopyrightText` entry.
+
+*--- Copilot (2026-05-29 08:06:03+00:00)
+The callback trusts `Content-Range.total` but never verifies that the server returned the requested range start. If a server (or proxy) replies with a different `206` range that has the same total size, the command appends the wrong bytes and advances `range_start`, corrupting the image stream sent to the firmware updater.
+
+*--- jerome-pouiller (2026-05-29 11:58:39+00:00)
+This is expected. I think the comment above is sufficient.

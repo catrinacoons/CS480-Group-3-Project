@@ -1,0 +1,31 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118928
+TITLE: logging: fix lost wakeup when attaching the first backend
+
+*--- opening post by piterzhang (2026-09-13 01:43:27+00:00)
+The log processing thread does not poll periodically: when no autostart backend is pending activation it parks on log_process_thread_sem with K_FOREVER, and the first flush of the boot messages depends on the single wake token given by z_log_notify_backend_enabled().
+
+The token is given before backend_attached is set, and that flag is a plain bool the woken thread reads without synchronization. On SMP the log thread runs on another core and can observe a stale backend_attached == false, return from log_process() without claiming any message, and park again. The semaphore limit is 1, so the token is gone. Messages buffered before the log thread first ran never armed the one-shot trigger timer, and as long as their count stays below CONFIG_LOG_PROCESS_TRIGGER_THRESHOLD nothing wakes the thread again.
+
+The shell log backend opens a second window: it sets its state to SHELL_LOG_BACKEND_ENABLED only after log_backend_enable() returns, so a log thread dispatched in between finds the backend active but still in the SHELL_LOG_BACKEND_UNINIT state and process() silently discards the claimed messages.
+
+Fix both windows:
+
+- make backend_attached an atomic_t and set it before giving the semaphore, so the woken thread always observes the backend as attached;
+
+- set the shell backend state, output context and dropped count before activating the backend, so messages dispatched right after activation are processed instead of dropped.
+
+The two changes are interdependent: closing only the first window makes the woken thread hit the second.
+
+Verified on a quad-core rk3588 board, where the race is reachable at every boot with the shell as the only non-autostart log backend: without the fix, boot logs appeared late or not at all; with it, 100 consecutive boots flushed all boot logs before the first prompt. The logging test suite passes on native_sim; builds were verified in deferred and immediate modes.
+
+Fixes #118927
+
+Assisted-by: Claude:glm-5.3
+
+*--- piterzhang (2026-09-13 01:43:50+00:00)
+issue:https://github.com/zephyrproject-rtos/zephyr/issues/118927
+
+*--- piterzhang (2026-09-19 01:11:42+00:00)
+Rebased onto main. The shell_log_backend.c fix was merged upstream separately in 45ebc4ba943 (fixes #118912, same reordering) — dropped that hunk here since it's now a no-op, reverted the file to match main.
+
+Remaining fix is only in log_core.c: backend_attached needs to be atomic so the log thread can't miss the wakeup on SMP. Same fix as before, just narrowed to the one file that's still needed.

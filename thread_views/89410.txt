@@ -1,0 +1,204 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/89410
+TITLE: dtlib: add file/line information to generated DTS files
+
+*--- opening post by pillo79 (2025-05-02 14:46:36+00:00)
+The goal of this PR is to augment the auto-generated `zephyr.dts` file with comments detailing the source files that are responsible for each property or node definition. 
+
+I have continued the work made by @kartben in #80698 and added a few extra features:
+
+- generated array properties with one item per line, to avoid unreadable comment blocks after extra long lines;
+- added file:line information for the `phandle` property that refers to (one of) the actual references to the node;
+- filtered the comments in the test suite so that only actual code is compared;
+- used the West workspace dir (or the parent of ZEPHYR_BASE if West is not available) as the reference for the relative paths in comments.
+
+<details><summary>Click here for the DTS generated for reel_board by compiling samples/net/wifi/shell</summary>
+
+```c
+/dts-v1/;
+
+/* node '/' defined in zephyr/dts/common/skeleton.dtsi:9 */
+/ {
+        #address-cells = < 0x1 >;         /* in zephyr/dts/common/skeleton.dtsi:10 */
+        #size-cells = < 0x1 >;            /* in zephyr/dts/common/skeleton.dtsi:11 */
+        model = "reel board";             /* in zephyr/boards/phytec/reel_board/reel_board.dts:14 */
+        compatible = "phytec,reel_board"; /* in zephyr/boards/phytec/reel_board/reel_board.dts:15 */
+
+        /* node '/chosen' defined in zephyr/dts/common/skeleton.dtsi:12 */
+        chosen {
+                zephyr,bt-hci = &bt_hci_controller;          /* in zephyr/dts/arm/nordic/nrf52840.dtsi:10 */
+                zephyr,entropy = &rng;                       /* in zephyr/dts/arm/nordic/nrf52840.dtsi:11 */
+                zephyr,flash-controller = &flash_controller; /* in zephyr/dts/arm/nordic/nrf52840.dtsi:12 */
+                zephyr,sram = &sram0;                        /* in zephyr/boards/phytec/reel_board/reel_board.dts:23 */
+                zephyr,flash = &flash0;                      /* in zephyr/boards/phytec/reel_board/reel_board.dts:24 */
+                zephyr,code-partition = &slot0_partition;    /* in zephyr/boards/phytec/reel_board/reel_board.dts:25 */
+                zephyr,ieee802154 = &ieee802154;             /* in zephyr/boards/phytec/reel_board/dts/reel_board.dtsi:14 */
+                zephyr,console = &uart0;                     /* in zephyr/boards/phytec/reel_board/reel_board.dts:18 */
+                zephyr,shell-uart = &uart0;                  /* in zephyr/boards/phytec/reel_board/reel_board.dts:19 */
+                zephyr,uart-mcumgr = &uart0;                 /* in zephyr/boards/phytec/reel_board/reel_board.dts:20 */
+                zephyr,bt-mon-uart = &uart0;                 /* in zephyr/boards/phytec/reel_board/reel_board.dts:21 */
+                zephyr,bt-c2h-uart = &uart0;                 /* in zephyr/boards/phytec/reel_board/reel_board.dts:22 */
+                zephyr,display = &ssd16xx;                   /* in zephyr/boards/phytec/reel_board/reel_board.dts:26 */
+        };
+
+        [...]
+
+        /* node '/soc' defined in zephyr/dts/arm/armv7-m.dtsi:6 */
+        soc {
+                #address-cells = < 0x1 >;             /* in zephyr/dts/arm/armv7-m.dtsi:7 */
+                #size-cells = < 0x1 >;                /* in zephyr/dts/arm/armv7-m.dtsi:8 */
+                compatible = "nordic,nrf52840-qiaa",
+                             "nordic,nrf52840",
+                             "nordic,nrf52",
+                             "simple-bus";            /* in zephyr/dts/arm/nordic/nrf52840_qiaa.dtsi:29 */
+                interrupt-parent = < &nvic >;         /* in zephyr/dts/arm/armv7-m.dtsi:10 */
+                ranges;                               /* in zephyr/dts/arm/armv7-m.dtsi:11 */
+
+                /* node '/soc/interrupt-controller@e000e100' defined in zephyr/dts/arm/armv7-m.dtsi:13 */
+                nvic: interrupt-controller@e000e100 {
+                        #address-cells = < 0x1 >;            /* in zephyr/dts/arm/armv7-m.dtsi:14 */
+                        compatible = "arm,v7m-nvic";         /* in zephyr/dts/arm/armv7-m.dtsi:15 */
+                        reg = < 0xe000e100 0xc00 >;          /* in zephyr/dts/arm/armv7-m.dtsi:16 */
+                        interrupt-controller;                /* in zephyr/dts/arm/armv7-m.dtsi:17 */
+                        #interrupt-cells = < 0x2 >;          /* in zephyr/dts/arm/armv7-m.dtsi:18 */
+                        arm,num-irq-priority-bits = < 0x3 >; /* in zephyr/dts/arm/nordic/nrf52840.dtsi:572 */
+                        phandle = < 0x1 >;                   /* in zephyr/dts/arm/armv7-m.dtsi:10 */
+                };
+
+                [...]
+        
+                /* node '/soc/spi@4002f000' defined in zephyr/dts/arm/nordic/nrf52840.dtsi:525 */
+                spi3: arduino_spi: spi@4002f000 {
+                        compatible = "nordic,nrf-spim";    /* in zephyr/dts/arm/nordic/nrf52840.dtsi:526 */
+                        #address-cells = < 0x1 >;          /* in zephyr/dts/arm/nordic/nrf52840.dtsi:527 */
+                        #size-cells = < 0x0 >;             /* in zephyr/dts/arm/nordic/nrf52840.dtsi:528 */
+                        reg = < 0x4002f000 0x1000 >;       /* in zephyr/dts/arm/nordic/nrf52840.dtsi:529 */
+                        interrupts = < 0x2f 0x1 >;         /* in zephyr/dts/arm/nordic/nrf52840.dtsi:530 */
+                        max-frequency = < 0x1e84800 >;     /* in zephyr/dts/arm/nordic/nrf52840.dtsi:531 */
+                        easydma-maxcnt-bits = < 0x10 >;    /* in zephyr/dts/arm/nordic/nrf52840.dtsi:532 */
+                        rx-delay-supported;                /* in zephyr/dts/arm/nordic/nrf52840.dtsi:533 */
+                        rx-delay = < 0x2 >;                /* in zephyr/dts/arm/nordic/nrf52840.dtsi:534 */
+                        status = "ok";                     /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:27 */
+                        cs-gpios = < &gpio1 0x3 0x1 >;     /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:28 */
+                        pinctrl-0 = < &spi3_default_alt >; /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:29 */
+                        pinctrl-1 = < &spi3_sleep_alt >;   /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:30 */
+                        pinctrl-names = "default",
+                                        "sleep";           /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:31 */
+
+                        /* node '/soc/spi@4002f000/winc1500@0' defined in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:33 */
+                        winc1500@0 {
+                                status = "ok";                     /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:34 */
+                                compatible = "atmel,winc1500";     /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:35 */
+                                reg = < 0x0 >;                     /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:36 */
+                                spi-max-frequency = < 0x3d0900 >;  /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:37 */
+                                irq-gpios = < &gpio1 0x7 0x1 >;    /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:38 */
+                                reset-gpios = < &gpio1 0x8 0x1 >;  /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:39 */
+                                enable-gpios = < &gpio1 0xc 0x0 >; /* in zephyr/samples/net/wifi/shell/boards/reel_board.overlay:40 */
+                        };
+                };
+                
+                [...]
+        };
+
+        /* node '/connector' defined in zephyr/boards/phytec/reel_board/dts/reel_board.dtsi:55 */
+        arduino_header: connector {
+                compatible = "arduino-header-r3";          /* in zephyr/boards/phytec/reel_board/dts/reel_board.dtsi:56 */
+                #gpio-cells = < 0x2 >;                     /* in zephyr/boards/phytec/reel_board/dts/reel_board.dtsi:57 */
+                gpio-map-mask = < 0xffffffff 0xffffffc0 >; /* in zephyr/boards/phytec/reel_board/dts/reel_board.dtsi:58 */
+                gpio-map-pass-thru = < 0x0 0x3f >;         /* in zephyr/boards/phytec/reel_board/dts/reel_board.dtsi:59 */
+                gpio-map = < 0x0 0x0 &gpio0 0x3 0x0 >,
+                           < 0x1 0x0 &gpio0 0x4 0x0 >,
+                           < 0x2 0x0 &gpio0 0x1c 0x0 >,
+                           < 0x3 0x0 &gpio0 0x1d 0x0 >,
+                           < 0x4 0x0 &gpio0 0x1e 0x0 >,
+                           < 0x5 0x0 &gpio0 0x1f 0x0 >,
+                           < 0x6 0x0 &gpio1 0x1 0x0 >,
+                           < 0x7 0x0 &gpio1 0x2 0x0 >,
+                           < 0x8 0x0 &gpio1 0x3 0x0 >,
+                           < 0x9 0x0 &gpio1 0x4 0x0 >,
+                           < 0xa 0x0 &gpio1 0x5 0x0 >,
+                           < 0xb 0x0 &gpio1 0x6 0x0 >,
+                           < 0xc 0x0 &gpio1 0x7 0x0 >,
+                           < 0xd 0x0 &gpio1 0x8 0x0 >,
+                           < 0xe 0x0 &gpio1 0xa 0x0 >,
+                           < 0xf 0x0 &gpio1 0xb 0x0 >,
+                           < 0x10 0x0 &gpio1 0xc 0x0 >,
+                           < 0x11 0x0 &gpio1 0xd 0x0 >,
+                           < 0x12 0x0 &gpio1 0xe 0x0 >,
+                           < 0x13 0x0 &gpio1 0xf 0x0 >,
+                           < 0x14 0x0 &gpio0 0x1a 0x0 >,
+                           < 0x15 0x0 &gpio0 0x1b 0x0 >;   /* in zephyr/boards/phytec/reel_board/dts/reel_board.dtsi:60 */
+        };
+                
+        [...]
+};
+```
+</details> 
+
+### Review notes
+
+All commits named `dtlib:` only affect `dtlib.py` and its test suite.
+
+The `gen_edt:` commit touches several other files as it propagates the workspace path, calculated in `cmake/modules/dts.cmake`, to `gen_edt.py`, then `edtlib.py`, and finally `dtlib.py`.
+
+*--- pillo79 (2025-05-03 06:53:36+00:00)
+Minor update to fix the typo (thanks, Copilot!) and an off-by-one indent (wrapped lines included the `\n` in their length calculation, see `compatible`  in the example `/soc`).
+
+CI fails because Rust does not ignore comments in the generated DTS. DNM until the Rust module is updated with the above PR.
+
+*--- kartben (2025-05-05 11:45:31+00:00)
+> * filtered the comments in the test suite so that only actual code is compared;
+
+But it would be great if the new feature would have tests associated to it though :)
+
+*--- pillo79 (2025-05-05 15:23:21+00:00)
+> > * filtered the comments in the test suite so that only actual code is compared;
+> 
+> But it would be great if the new feature would have tests associated to it though :)
+
+Silently tried to sneak my way around that :sweat_smile: it's doable, because workspace-relative paths are stable, but it's still tricky to do it robustly in the Windows CI. GihHub places the "workspace" dir and the actual test files in separate **drives**, so a relative path is meaningless and the full absolute path is used.
+
+@kartben Should I partial match on the portion of the file path that is fixed and ignore prefixes?
+
+*--- kartben (2025-05-05 15:27:22+00:00)
+> > > * filtered the comments in the test suite so that only actual code is compared;
+> > 
+> > 
+> > But it would be great if the new feature would have tests associated to it though :)
+> 
+> Silently tried to sneak my way around that 😅 it's doable, because workspace-relative paths are stable, but it's still tricky to do it robustly in the Windows CI. GihHub places the "workspace" dir and the actual test files in separate **drives**, so a relative path is meaningless and the full absolute path is used.
+> 
+> @kartben Should I partial match on the portion of the file path that is fixed and ignore prefixes?
+
+Not sure what's the issue with Windows but would applying similar workaround as found [here](https://github.com/actions/runner-images/issues/8755) be helpful in any way?
+
+*--- pillo79 (2025-05-06 13:55:48+00:00)
+Adding a test was embarrassingly simple, given I can specify the base directory :man_facepalming: but I figured that out later. I initially thought the Github CI > Tox > Pytest chain had something to do with the error I spotted earlier when building on Windows with West.
+
+Second push is just a rebase to get GH unstuck (that happens often lately!).
+
+*--- kartben (2025-05-06 13:58:52+00:00)
+on the topic of things that are embarassingly simple to add, can you update the test so that there are string values of different length so that that alignment of the comments can be tested as well?
+
+*--- rruuaanng (2025-05-12 15:24:11+00:00)
+```suggestion
+                    s += f",{newline}"
+```
+
+They are the same, a suggestion :)
+
+*--- rruuaanng (2025-05-12 15:24:28+00:00)
++1
+
+*--- rruuaanng (2025-05-12 15:24:55+00:00)
++1
+
+*--- pillo79 (2025-05-15 12:01:06+00:00)
+Updated the `zephyr-lang-rust` module to get comment support after https://github.com/zephyrproject-rtos/zephyr-lang-rust/pull/96 was merged to the stable branch (`v4.1-branch` in the Rust repo).
+
+Review ready and CI is finally green! :partying_face:
+
+*--- rruuaanng (2025-05-16 06:31:10+00:00)
+Save a copy for use in other scenarios. Like this:
+```
+self._workspace_dir: str = workspace_dir or ''
+```

@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113415
+TITLE: Bluetooth: BAP: Shell: Use bt_bap_ep_get_info for stream_dir
+
+*--- opening post by Thalley (2026-07-13 16:02:37+00:00)
+Use the bt_bap_ep_get_info function to get the direction of the stream in a more generic way.
+
+*--- Copilot (2026-07-13 16:05:44+00:00)
+`stream_dir()` relies on `__ASSERT()` for validation. When `CONFIG_ASSERT` is disabled, a NULL `stream->ep` (or a non-zero return from `bt_bap_ep_get_info()`) will fall through and return an uninitialized `ep_info.dir`, which is undefined behavior and can misclassify stream direction.
+
+Initialize `ep_info` and add a real runtime error path (still keeping asserts for debug builds if desired), returning a deterministic invalid direction (0U) on failure.

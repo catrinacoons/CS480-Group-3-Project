@@ -1,0 +1,468 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109953
+TITLE: soc: rp2350: Support basic AMP with Snippets
+
+*--- opening post by afantino951 (2026-05-27 19:27:32+00:00)
+Continuation of #93379. Creating a new PR because cherry-picked commits needed to be squashed with some changes. Thanks to @dsseng for the support!
+
+Add support to launch the 2nd core (CPU1) of the rp2350 from the main core (CPU0) for the Cortex-M33 CPUs using the new `rp2xxx-cpu1` and `rp2xxx-cpu1-xip` snippets (naming suggestions appreciated). The `rp2xxx-cpu1[-xip]` snippets are modeled after the [`nordic-flpr`](https://docs.zephyrproject.org/latest/snippets/nordic/nordic-flpr/README.html#).
+
+Add support to launch the 2nd core (CPU1) of the rp2350 from the main core (CPU0) for the Cortex-M33 CPUs.
+
+Add the rpi_pico2/rp2350a/m33/cpu1 board target that is has 256kB SRAM, gpio controller, and uart1 by default. CPU0 is responsible for launching CPU1 in a soc late init hook. When CPU0's board dts has `&cpu1`'s node with an `enable-method = "raspberrypi,pico-pcbs";` and a `cpu_enable` node with a matching compatible.
+
+The `raspberrypi,pico-pcbs` node provides `source-memory` and `execution-memory` properties to the CPU0 board target.  
+
+If CPU0's board dts has both `source-memory` and `execution-memory` properties in `cpu1-launcher`, CPU0 will copy CPU1's image from `source-memory` into `execution-memory` and assumes that CPU1's CONFIG_XIP=n (the default). If only `execution-memory` is present, it is assumed that CPU1's CONFIG_XIP=y. This is modeled after a combination of the [Analog Devices max78002evkit](https://docs.zephyrproject.org/latest/boards/adi/max78002evkit/doc/index.html) and Nordic's [vpr launcher driver](https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/misc/nordic_vpr_launcher/nordic_vpr_launcher.c).
+
+**Note:** Running both CPU0 and CPU1 XIP is much slower than running CPU1 from SRAM because of XIP cache contention between the 2 cores. However, it may be necessary if CPU1's image does not fit in SRAM.
+
+Although CPU1 is a board variant, this PR does not yet support using it as an independent target like the `cpuflpr`. This would require some custom sysbuild.cmake magic as seen [here](https://github.com/zephyrproject-rtos/zephyr/blob/main/soc/nordic/sysbuild.cmake).
+
+---
+
+Open Questions:
+- Is it ok to have a board variant that can't be built on its own yet and leave that to some future work?
+- Right now, we would have to make a `rpi_pico2/rp2350a/m33/cpu1/mcuboot` target to support the mcuboot board target. This is the same for other boards that has a different flash size/partition layout. This looks like we will have to have a partitioning scheme similar to [how espressif does it](https://github.com/zephyrproject-rtos/zephyr/tree/main/dts/vendor/espressif).  Is that required for this PR to be merged?
+- The [board porting guide recommendations](https://docs.zephyrproject.org/latest/hardware/porting/board_porting.html#general-recommendations) says that a board should have a `zephyr,console` chosen node. Is that still required for the CPU1 board target if it's always a secondary core? I enabled &uart1, but there was previous conversation that adding the `uart1_default` pinctrl to the common pinctrl file is not acceptable. (see https://github.com/zephyrproject-rtos/zephyr/pull/93379#discussion_r2286093435). Is it ok in the cpu1 common dtsi?
+
+Future work: 
+- Support hazard3 rp2350 core launch CPU1: need to use an architecture agnostic `WFE` and `SEV` in CPU1 launch sequence and to set CPU1's architecture to the Hazard3 core.
+- Verify AMP on more rp2350-based boards
+- Support RP2040
+- Support using CPU1 as independent target like `cpuflpr` if there is desire for it.
+
+---
+
+Testing:
+
+Build the icmsg sample with: 
+
+```
+west build -p always -b rpi_pico2/rp2350a/m33 --sysbuild -S rp2xxx-cpu1 samples/subsys/ipc/ipc_service/icmsg/
+# or for CPU1 with XIP: 
+west build -p always -b rpi_pico2/rp2350a/m33 --sysbuild -S rp2xxx-cpu1-xip samples/subsys/ipc/ipc_service/icmsg/
+```
+
+Flash with west using the RaspberryPi OpenOCD fork according to [Programming and Debugging](https://docs.zephyrproject.org/latest/boards/raspberrypi/rpi_pico/doc/index.html#programming-and-debugging) section of rpi_pico's board docs.
+
+```
+west flash --openocd /usr/local/bin/openocd
+```
+
+*--- nordicjm (2026-05-28 06:56:14+00:00)
+these 2 things are opposites, not following this?
+
+*--- nordicjm (2026-05-28 06:56:34+00:00)
+this is not what reserved memory is for
+
+*--- nordicjm (2026-05-28 06:58:16+00:00)
+I don't see why zephyr needs a non-sustainable chosen node for this
+
+*--- nordicjm (2026-05-28 06:58:49+00:00)
+name correctly as per https://docs.zephyrproject.org/latest/contribute/style/kconfig.html#examples assuming this would fall under the family one
+
+*--- nordicjm (2026-05-28 06:59:35+00:00)
+this is where the use DT Kconfig should be set
+
+*--- nordicjm (2026-05-28 06:59:59+00:00)
+again, this has the same issues as the other one and should not be added
+
+*--- nordicjm (2026-05-28 07:00:33+00:00)
+use file suffix
+
+*--- nordicjm (2026-05-28 07:00:37+00:00)
+as above
+
+*--- afantino951 (2026-05-29 01:27:42+00:00)
+Hi @nordicjm, 
+
+Thank you for taking the time to review my PR. I agree that this isn't optimal, but CPU0's board target needs a way to know about CPU1's image location and address space. The rp2350 doesn't have a dedicated address space for the co-processor's launcher like the nrf54l15's `cpuflpr_vpr`. I saw the `max78002evkit/max78002/m4` board's dts file does the following:
+
+https://github.com/zephyrproject-rtos/zephyr/blob/43609419c8070c2c3f45f60d7cb3d61d38a42a47/boards/adi/max78002evkit/max78002evkit_max78002_m4.dts#L20-L27
+
+and stole it. Is another board/SoC you can point me towards for a better solution?
+
+*--- nordicjm (2026-05-29 07:26:06+00:00)
+They should both be in a common file, then both cores know about the same parts. Not sure what you mean by dedicated address space, whilst flpr is a separate CPU, it has the same memory map as the main CPU and that would be the same case here
+
+*--- soburi (2026-05-29 21:26:07+00:00)
+@afantino951 
+
+The pull request is getting a bit too large.
+Is it possible to separate the driver and snippet changes from the AMP implementation?
+
+*--- afantino951 (2026-05-30 22:03:26+00:00)
+> Is it possible to separate the driver and snippet changes from the AMP implementation?
+
+Hi @soburi, 
+
+I agree, this PR is getting pretty large.
+- [drivers: mbox: rpi_pico: factor out low-level access functions](https://github.com/zephyrproject-rtos/zephyr/pull/109953/changes/d9a43feab6c17086cf083f34c0f224b2e82a85bb) was a request from a previous PR review comment: https://github.com/zephyrproject-rtos/zephyr/pull/93379#discussion_r2856489281. Would you like for me to drop the changes in `drivers/mbox/mbox_rpi_pico.c` and leave updating that to use the new mbox driver header to a follow-up PR?
+- [soc: rp2350: skip clock initialisation for cpu1](https://github.com/zephyrproject-rtos/zephyr/pull/109953/changes/4945425e5737b09c25b6131ee2575efe61094b45) is required to prevent CPU0 from locking up after it launches CPU1, so it should be part of the initial AMP PR. 
+
+Would you be ok with splitting this PR into two by splitting after [soc: raspberrypi: rp2350: support booting CPU1](https://github.com/zephyrproject-rtos/zephyr/pull/109953/changes/943539880ff3fa87da8f17a38cac9d9b74de2330)?
+
+This leaves the snippets, samples, and tests to the 2nd PR, which will shrink the size of the PR to ~26 files changed. However,  it is a little awkward to configure the rpi_pico2 for AMP without the snippets.
+
+Would that work, or did you have something different in mind?
+
+*--- soburi (2026-05-30 22:57:25+00:00)
+> > Is it possible to separate the driver and snippet changes from the AMP implementation?
+> 
+> Hi @soburi,
+> 
+> I agree, this PR is getting pretty large.
+> 
+>     * [drivers: mbox: rpi_pico: factor out low-level access functions](https://github.com/zephyrproject-rtos/zephyr/pull/109953/changes/d9a43feab6c17086cf083f34c0f224b2e82a85bb) was a request from a previous PR review comment: [soc: raspberrypi: rp2350: support AMP builds #93379 (comment)](https://github.com/zephyrproject-rtos/zephyr/pull/93379#discussion_r2856489281). Would you like for me to drop the changes in `drivers/mbox/mbox_rpi_pico.c` and leave updating that to use the new mbox driver header to a follow-up PR?
+> 
+>     * [soc: rp2350: skip clock initialisation for cpu1](https://github.com/zephyrproject-rtos/zephyr/pull/109953/changes/4945425e5737b09c25b6131ee2575efe61094b45) is required to prevent CPU0 from locking up after it launches CPU1, so it should be part of the initial AMP PR.
+> 
+> 
+> Would you be ok with splitting this PR into two by splitting after [soc: raspberrypi: rp2350: support booting CPU1](https://github.com/zephyrproject-rtos/zephyr/pull/109953/changes/943539880ff3fa87da8f17a38cac9d9b74de2330)?
+> 
+> This leaves the snippets, samples, and tests to the 2nd PR, which will shrink the size of the PR to ~26 files changed. However, it is a little awkward to configure the rpi_pico2 for AMP without the snippets.
+> 
+> Would that work, or did you have something different in mind?
+
+My understanding is that it's composed of roughly the following parts:
+
+- Cleaning up drivers and boards as preparation
+- Adding AMP
+- Adding snippets and tests
+
+I would appreciate it if you could separate it so I can focus on the AMP addition part.
+
+*--- afantino951 (2026-05-30 23:54:06+00:00)
+> Not sure what you mean by dedicated address space
+
+I see how my previous reply was unclear. Let me try again. 
+
+The nrf54L15's has a [VPR peripheral ](https://docs.nordicsemi.com/bundle/ps_nrf54L15/page/vpr.html) at `0x5004C000` (Secure) or `0x4004C000` (non-secure). The nrf54lxx's dtsi file creates a [`cpuflpr_vpr` devicetree node](https://github.com/zephyrproject-rtos/zephyr/blob/ab92232cfcd1362ee481ba06197fda7d6613aff5/dts/vendor/nordic/nrf54l_05_10_15.dtsi#L173) with the `nordic,nrf-vpr-coprocessor` compatible string, which has the following properties in its bindings file: 
+
+https://github.com/zephyrproject-rtos/zephyr/blob/ab92232cfcd1362ee481ba06197fda7d6613aff5/dts/bindings/riscv/nordic%2Cnrf-vpr-coprocessor.yaml#L15-L27
+
+
+The `execution-memory` and `source-memory` are used by the [vpr_launcher driver](https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/misc/nordic_vpr_launcher/nordic_vpr_launcher.c) to manage the `cpuflpr`'s image location (if necessary) and launch the `cpuflpr`. The `cpuflpr_vpr` devicetree node is enabled and its execution/source memory is set in the `nordic-flpr` snippets. The `nordic-flpr` snippets are applied to the main sysbuild applications in the samples so the primary CPU (`cpuapp`) can launch the secondary CPU (`cpuflpr`) with knowledge of where the `cpuflpr` image is.
+
+The rp2350 doesn't have a CPU1 launcher peripheral with a dedicated *address range*, but CPU0 still needs to know where CPU1's image is located and where it executes from. The `zephyr,code-cpu1-partition` and `zephyr,sram-cpu1-partition` chosen properties are devicetree hacks to provide equivalent information to the `cpuflpr_vpr`'s `execution-memory` and `source-memory` properties.
+
+@dsseng did start with a binding and driver similar to the `cpuflpr_vpr`, but that was rejected since the rp2350 doesn't have a cpu1 launcher hardware device. 
+https://github.com/zephyrproject-rtos/zephyr/pull/93379#discussion_r2264822824
+
+The `zephyr,[code|sram]-cpu1-partition` chosen properties are unsustainable, especially since other boards use it (See [`lpcxpresso55s69/lpc55s69/cpu0`](https://github.com/zephyrproject-rtos/zephyr/blob/43609419c8070c2c3f45f60d7cb3d61d38a42a47/boards/nxp/lpcxpresso55s69/lpcxpresso55s69_lpc55s69_cpu0.dts#L42-L43)) and variations of it (See `zephyr,code-rv32-partition` in the [`max78002evkit/max78002/m4`](https://github.com/zephyrproject-rtos/zephyr/blob/43609419c8070c2c3f45f60d7cb3d61d38a42a47/boards/adi/max78002evkit/max78002evkit_max78002_m4.dts#L26) and `zephyr,code-m7-partition` in the [`frdm_imxrt1186/mimxrt1186/cm33`](https://github.com/zephyrproject-rtos/zephyr/blob/43609419c8070c2c3f45f60d7cb3d61d38a42a47/boards/nxp/frdm_imxrt1186/frdm_imxrt1186_mimxrt1186_cm33.dts#L25)). 
+
+I just don't know of a better alternative. Do you have a specific idea in mind?
+
+*--- nordicjm (2026-06-01 06:46:07+00:00)
+> The rp2350 doesn't have a CPU1 launcher peripheral with a dedicated address range, but CPU0 still needs to know where CPU1's image is located and where it executes from. The zephyr,code-cpu1-partition and zephyr,sram-cpu1-partition chosen properties are devicetree hacks to provide equivalent information to the cpuflpr_vpr's execution-memory and source-memory properties.
+
+But you _do_ have registers for the CPU, that is where e.g. the VTOR and other registers are set I would presume, so that is exactly like it is here with flpr which can be added and used to set from the main core. The flpr one has program counter and start execution, those are the 2 basic things you need here
+
+*--- dsseng (2026-06-01 18:18:31+00:00)
+> But you _do_ have registers for the CPU, that is where e.g. the VTOR and other registers are set
+
+
+Not really, VTOR address is passed to the CPU1 by a mailbox. At the CPU0 program entry, CPU1 is running in BootROM loader and waiting for the init data to be passed via sequential mailbox writes. No direct manipulation of CPU1 R15 and other registers to start, but rather communicating via mbox (see the implementation)
+
+*--- afantino951 (2026-06-02 06:17:06+00:00)
+AFAIK, there is no register that CPU0 has access to that contains information about CPU1's VTOR.
+
+What if we make a binding `dts/bindings/cpu/raspberrypi,rp23xx-m33-cpu1.yaml` (again, open to naming suggestions) with the `source-memory` and `execution-memory` props? Then, instead of the `zephyr,[code|sram]-cpu1-partition` chosen props, we use:
+
+```
+&cpu1 {
+        compatible = "raspberrypi,rp23xx-m33-cpu1";
+        source-memory = &cpu1_slot0_partition;
+        execution-memory = &sram0_cpu1;
+};
+```
+
+to tell CPU0 about CPU1's memory in the overlays 
+
+We would have to add another binding for the hazard3 cpu1 and another for the rp2040's Cortex-M0+ CPU1, but the idea would be the same. This is still hacky, but at least if gets rid of the zephyr chosen props.
+
+*--- dsseng (2026-06-02 16:31:53+00:00)
+IMO the naming should likely be abstract of references to both M33 (Can run second core in either M33/Hazard3, no matter what we run on CPU0) and RP23** (since RP2040 also has CPU1 operating in a similar way)
+
+I considered this approach initially, given this case is closer to VPR (CPUAPP instructs it where to start execution) than to CPURAD (which has its own dedicated flash/RAM areas and doesn't need to be pointed at them by CPUAPP but merely instructed to run).
+
+*--- afantino951 (2026-06-04 22:15:14+00:00)
+New changes implement a method similar to this. 
+
+The devicetree spec has a section on the props for `cpus/cpu*` nodes: [here](https://devicetree-specification.readthedocs.io/en/latest/chapter3-devicenodes.html#general-properties-of-cpus-cpu-nodes) that I used for reference. 
+
+Let me know what you think. I also updated the matching: #110204 so it can be ready for review when #110169 is merged.
+
+*--- nordicjm (2026-06-22 14:06:32+00:00)
+~~not sure how flash can be 0, is this for non-XIP usage only? If so why is there a chosen flash node?~~ saw later on in PR it is
+
+*--- nordicjm (2026-06-22 14:07:05+00:00)
+yep so given this, the yaml file is wrong
+
+*--- nordicjm (2026-06-22 14:08:14+00:00)
+not sure that 2 of these are needed? The point in slot0 and slot1 is for MCUboot support, and these will not work with MCUboot at all (use `slot2_partition` and `slot3_partition` if you want that)
+
+*--- nordicjm (2026-06-22 14:08:41+00:00)
+not addressed
+
+*--- nordicjm (2026-06-22 14:09:23+00:00)
+no space alignment for Kconfig
+
+*--- afantino951 (2026-06-23 05:27:25+00:00)
+Done. 
+
+Thank you for the explanation
+
+*--- afantino951 (2026-06-23 05:28:13+00:00)
+Done (?)
+
+Is the most recent changes what you meant?
+
+*--- afantino951 (2026-06-23 05:29:48+00:00)
+Done (?)
+
+*--- nordicjm (2026-07-17 09:34:08+00:00)
+```suggestion
+```
+you can do the default for this from the boards `Kconfig.defconfig` file
+
+*--- nordicjm (2026-07-17 09:36:17+00:00)
+name CPU properly with cpu cluster in soc.yml
+
+*--- nordicjm (2026-07-17 09:37:02+00:00)
+this should not be used, there should be 2 CPUs from soc.yml, they are distinct CPUs
+
+*--- nordicjm (2026-07-17 09:38:12+00:00)
+you can have CONFIG_XIP set and unset, then set the sram chosen node properly, not seeing why this is needed?
+
+*--- nordicjm (2026-07-17 09:38:25+00:00)
+right so todo needs removing from earlier commit
+
+*--- nordicjm (2026-07-17 09:38:46+00:00)
+this isn't needed since you would have an actual Kconfig for the CPU
+
+*--- afantino951 (2026-07-19 00:54:38+00:00)
+Do you mean?
+
+```
+    - name: rp2350a
+      cpuclusters:
+      - name: hazard3
+      - name: hazard3_cpu1 # Eventually
+      - name: m33
+      - name: m33_cpu1
+```
+
+So, the board target would be `rpi_pico2/rp2350a/m33_cpu1/` instead of `rpi_pico2/rp2350a/m33/cpu1`?
+
+I'm not sure how to treat the CPU clusters for the rp2350. Each core can select between the m33 and the hazard3 internal core. See the below diagram from Chapter 3 of the [rp2350 datasheet](https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-008373-DS-2-rp2350-datasheet.pdf).
+
+<img width="580" height="615" alt="image" src="https://github.com/user-attachments/assets/00f22e52-e007-4640-b704-30bdb277d994" />
+
+*--- afantino951 (2026-07-19 03:43:13+00:00)
+I don't know what you mean. Can you please give me some more information? What do you mean by set the sram chosen node properly?
+
+I am using this to bring CPU1's LMA into flash so it can be flashed by openocd. When CONFIG_XIP=y, this is done by `cmake/linker_script/arm/linker.cmake`.
+
+*--- afantino951 (2026-07-19 03:51:12+00:00)
+When we add the hazard3_cpu1 CPU or the rp2040_cpu1 CPU, we can just select `SOC_FAMILY_RPI_PICO_CPU1` and the `SOC_RPI_PICO_CPU1_ENABLE` Kconfig is correct. Otherwise, we would have to do a long `depends on` chain
+
+*--- dsseng (2026-07-19 08:33:53+00:00)
+Unsure if it makes sense for both CPUs to access the core regulator (which is apparently shared)
+
+Link: https://github.com/zephyrproject-rtos/zephyr/pull/110169#discussion_r3604157459
+
+*--- dsseng (2026-07-19 15:13:07+00:00)
+Why is this launcher configured here? I believe it is never used (the one added to CPU0 DT by the snippet is), and removing it broke nothing in my specific test setup
+
+```suggestion
+```
+
+*--- dsseng (2026-07-19 15:15:10+00:00)
+Without it the test does not build (weird it's not caught in CI), because of `sram8` being undefined
+
+```suggestion
+#include <raspberrypi/rp2350_amp_sram_partitions.dtsi>
+
+```
+
+*--- dsseng (2026-07-19 16:21:04+00:00)
+https://github.com/dsseng/zephyr/tree/dss-109953 - rebased on main if you need it. `TMP` one is a test/development patch (it'd be nice to somehow properly include this, since no-flash builds are often helpful for debugging)
+
+*--- afantino951 (2026-07-20 17:31:18+00:00)
+This works for me. What build command are you using for the test case?
+
+I am using `west build -p always -b rpi_pico2/rp2350a/m33 -T tests/subsys/ipc/ipc_sessions/ipc.ipc_sessions.rp2350`
+
+*--- nordicjm (2026-07-27 13:35:56+00:00)
+> I'm not sure how to treat the CPU clusters for the rp2350. Each core can select between the m33 and the hazard3 internal core. See the below diagram from Chapter 3 of the rp2350 datasheet.
+
+They actually can't, whilst the diagram does show that, you have to have both cores with the same type of CPU because of how they access buses and communicate and whatnot
+
+> So, the board target would be rpi_pico2/rp2350a/m33_cpu1/ instead of rpi_pico2/rp2350a/m33/cpu1
+
+More like `rpi_pico2/rp2350a/m33_0` and `rpi_pico2/rp2350a/m33_1`, then `rpi_pico2/rp2350a/hazard3_0` and `rpi_pico2/rp2350a/hazard3_1`
+
+*--- nordicjm (2026-07-27 13:38:19+00:00)
+good point
+
+*--- nordicjm (2026-07-27 13:39:17+00:00)
+`depends on SOC_RP2350_M33_0 || SOC_RP2350_HAZARD3_0` ? That looks fine, we don't need another Kconfig like this
+
+*--- nordicjm (2026-07-27 14:01:02+00:00)
+good example: https://github.com/zephyrproject-rtos/zephyr/pull/111392/commits/a19efb0c13c676f1d641e32f3b0d6c1059006b94#diff-2d3b9345666023e381aafd2186940a4f6ecf4e1f2dbcfa762b1a8c1aa588ffc9R6
+
+*--- afantino951 (2026-07-28 06:32:39+00:00)
+> They actually can't, whilst the diagram does show that, you have to have both cores with the same type of CPU because of how they access buses and communicate and whatnot
+
+See *3.9.2. Mixed architecture combinations* from the rp2350 datasheet. I don't intend to implement mixed arch myself, but it should be left open if someone wants to do it. 
+
+> More like rpi_pico2/rp2350a/m33_0 and rpi_pico2/rp2350a/m33_1, then rpi_pico2/rp2350a/hazard3_0 and rpi_pico2/rp2350a/hazard3_1
+
+I see! That makes a lot of sense. Thank you for the example. The proposed change would require changing all boards that use the rp2350. Can we deprecate `SOC_RP2350[A|B]_[M33|HAZARD3]` and select `SOC_RP2350[A|B]_[M33|HAZARD3]_0` for this PR? We can add m33_0 and m33_1 to the soc.yml without removing the m33, and update the board targets incrementally so we don't break every board and its tests all at once.
+
+*--- afantino951 (2026-07-28 06:48:43+00:00)
+The rp2350 has A/B soc's and the rp2040 would also use the same launch sequence. It would end up looking like:
+`depends on SOC_RP2350A_M33_1 || SOC_RP2350B_M33_1 || SOC_RP2350A_HAZARD3_1 || SOC_RP2350B_HAZARD3_1 || SOC_RP2040_CPU1`
+
+The `SOC_FAMILY_RPI_PICO_CPU1` Kconfig option is similar to [`CONFIG_SECOND_CORE_MCUX`](https://github.com/zephyrproject-rtos/zephyr/blob/56ab019ebf0b7e13f1ac5672a9711edc43139bc8/soc/nxp/imxrt/Kconfig#L149).
+
+*--- afantino951 (2026-07-28 08:13:49+00:00)
+See: #114751
+
+*--- nordicjm (2026-08-11 09:36:42+00:00)
+Deprecating things is fine, @soburi for comment on acceptance in this specific case
+
+*--- nordicjm (2026-08-11 09:37:05+00:00)
+fair point
+
+*--- mbolivar (2026-08-14 00:48:30+00:00)
+If it's vendor-defined, you can't require that it match the compatible string in the common cpu.yaml binding definition. DTSpec only says:
+
+```
+The required format is: "[vendor], [method]", where vendor is a string
+describing the name of the manufacturer and method is a string
+describing the vendor specific mechanism.
+```
+
+The compatible-specific addition is going beyond what the spec requires.
+
+*--- mbolivar (2026-08-14 00:48:31+00:00)
+The file is tab separated, not space separated.
+
+See the top of the file:
+
+```
+# Non-empty lines should be in this format:
+#
+# <binding-type><TAB><Description>
+```
+
+*--- mbolivar (2026-08-14 00:48:31+00:00)
+Please move the example to an examples section and update it so it's
+got the enable-method set properly.
+
+*--- mbolivar (2026-08-14 00:48:32+00:00)
+Probably a naive question and maybe it's answered by a later commit in
+the PR, but how come this commit adds a `cpu1` variant but the other
+variants are just `w` and `mcuboot`?
+
+I am expecting to see a `cpu0` variant in this PR if we're adding
+support for both. We need to be able to have a valid board target
+that distinguishes the two.
+
+*--- mbolivar (2026-08-14 00:48:32+00:00)
+Reserved status leads to undefined behavior, that can't be right, that's going on?
+
+> The devicetree specification allows this property to have values
+> "okay", "disabled", "reserved", "fail", and "fail-sss". Only the
+> values "okay" and "disabled" are currently relevant to Zephyr; use of
+> other values currently results in undefined behavior.
+
+https://docs.zephyrproject.org/latest/build/dts/intro-syntax-structure.html#important-properties
+
+*--- mbolivar (2026-08-14 00:48:32+00:00)
+Interesting ... I guess it makes it possible to keep it all in one place.
+
+Not objecting, just noticing since it is a little unusual unless this is
+standard practice now?
+
+*--- mbolivar (2026-08-14 00:48:34+00:00)
+This `vnd,mbox-consumer` looks wrong. The vnd vendor is:
+
+```
+vnd	A stand-in for a real vendor which can be used in examples and tests
+```
+
+See dts/bindings/vendor-prefixes.txt.
+
+We use it, for example, in tests/lib/devicetree/api/app.overlay. It's
+definitely not meant to be used as a real compatible for a real board
+and a real sample like it's being used as here.
+
+*--- mbolivar (2026-08-14 00:48:34+00:00)
+Same here. Is this a new problem in this PR, or a pre-existing problem in the code base?
+
+Either way, this shouldn't be here.
+
+*--- mbolivar (2026-08-14 00:48:35+00:00)
+My LLM reviewer says:
+
+```
+ This unconditionally adds `cold_reset` + `shutdown` after OpenOCD
+ verify for *every* rpi_pico2 build — not just AMP. A single-core
+ blinky flash now gets a full cold reset and OpenOCD shutdown that
+ wasn't there before. The commit message itself says "I'm sure there
+ is a better solution" — what's the plan? At minimum this should be
+ behind a CMake guard set only when building a sysbuild AMP
+ configuration.
+ ```
+ 
+Can you check?
+
+*--- afantino951 (2026-08-14 04:32:50+00:00)
+Stolen from Nordic's FLPR partition:
+
+https://github.com/zephyrproject-rtos/zephyr/blob/bfa1218a9e63a9621316178ca2c3125d16844a96/dts/vendor/nordic/nrf54l15_cpuapp_partition.dtsi#L21-L23
+
+Used in a snippet here:
+
+https://github.com/zephyrproject-rtos/zephyr/blob/bfa1218a9e63a9621316178ca2c3125d16844a96/snippets/nordic/nordic-flpr/soc/nrf54l15_cpuapp.overlay#L55-L57
+
+*--- afantino951 (2026-08-14 04:45:39+00:00)
+Every board in the mbox sample uses `vnd,mbox-consumer`. The `mbox-consumer` node holds the `tx` and `rx` mailbox channels to do the Ping Pong. I think the main purpose of the `vnd,mbox-consumer` compatible is to demonstrate the use of `MBOX_DT_SPEC_GET` and give a consistent name to the mailboxes between soc's.
+
+*--- afantino951 (2026-08-14 05:48:08+00:00)
+Rebased on main. Change from review to come.
+
+*--- afantino951 (2026-08-14 06:16:34+00:00)
+@gdengi , Moved the `PM CPU ops` related change to #116289
+
+*--- afantino951 (2026-08-14 06:26:23+00:00)
+Done
+
+*--- afantino951 (2026-08-14 06:26:51+00:00)
+Done. Thank you.
+
+*--- afantino951 (2026-08-14 06:27:23+00:00)
+Done
+
+*--- afantino951 (2026-08-14 08:12:44+00:00)
+Removed from the above file since `status = "reserved"` was never previously used in `boards/`.
+
+`status = "reserved";` is used in ~50 other files to mark nodes that are on the SoC, but are not used by the current board target (eg: multi-domain builds). Created #116295 to track documentation clarification on `"reserved"` usage.
+
+*--- kylebonnici (2026-08-14 08:44:42+00:00)
+> Reserved status leads to undefined behavior, that can't be right, that's going on?
+> 
+> > The devicetree specification allows this property to have values
+> > "okay", "disabled", "reserved", "fail", and "fail-sss". Only the
+> > values "okay" and "disabled" are currently relevant to Zephyr; use of
+> > other values currently results in undefined behavior.
+> 
+> https://docs.zephyrproject.org/latest/build/dts/intro-syntax-structure.html#important-properties
+
+I am also of this option. In other PRs I did ask for this to be given an official definition
+
+*--- afantino951 (2026-08-26 20:49:32+00:00)
+Converting to draft. Blocked by #117192. Will update once it's merged.

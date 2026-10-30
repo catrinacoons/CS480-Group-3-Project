@@ -1,0 +1,5 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/110559
+TITLE: doc: _scripts: gen_devicetree_rest: show min-len/max-len in property table
+
+*--- opening post by fabiobaltieri (2026-06-04 14:36:30+00:00)
+Render the binding 'min-len'/'max-len' constraints next to the other ones in the generated bindings documentation.

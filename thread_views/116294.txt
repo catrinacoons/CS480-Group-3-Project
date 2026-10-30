@@ -1,0 +1,15 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116294
+TITLE: bluetooth: classic: bip: add required app param tag validation
+
+*--- opening post by lylezhu2012 (2026-08-14 08:06:03+00:00)
+The `required_appl_param_tag_id` bitmask in `struct bip_function` was unused; both `bip_server_get_req_cb()` and `bip_client_get_req_cb()` contained a placeholder comment noting that application parameter tag IDs were not checked.
+
+Add `has_required_ap_tag_id()`, which iterates every set bit in the bitmask via `__builtin_ctz()` and verifies that the corresponding application parameter is present in the request buffer using `bt_obex_has_app_param()`. Invoke this helper in both the server and client request paths (GET and PUT) so BIP operations that require specific application parameters are correctly rejected when those parameters are absent, rather than being silently passed through.
+
+Also rename the struct field from `required_appl_param_tag_id` to `required_ap_tag_id` to align with the shorter naming convention used elsewhere in the file.
+
+*--- Copilot (2026-08-14 08:12:04+00:00)
+`has_required_ap_tag_id()` takes a bitmask of required application-parameter tag IDs, but the parameter name `tag_id` reads like a single tag value. Renaming it (and the internal variable uses) to `tag_mask` would make the intent clearer and reduce the chance of this being misused later.
+
+*--- lylezhu2012 (2026-08-14 08:37:12+00:00)
+Updated.

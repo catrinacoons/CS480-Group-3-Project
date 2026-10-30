@@ -1,0 +1,313 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/102430
+TITLE: Bluetooth: TBS: Add enum, move and rename TECHNOLOGY
+
+*--- opening post by Thalley (2026-01-16 20:18:53+00:00)
+The technology values defined in tbs.h are actually defined
+in assigned numbers under the HFP. They have been moved to
+the assigned_numbers.h file, and name to match the placement
+in Assigned Numbers. They have been defined in an enum instead
+of multiple #define's, to more easily refer to them.
+    
+The callback for reading technology was likewise updated to use
+the new enum.
+
+Related erratum: https://bluetooth.atlassian.net/browse/ES-28778
+
+*--- Thalley (2026-01-16 20:23:36+00:00)
+@PavelVPV I'm a bit uncertain about this change. 
+
+Assigned numbers do indeed define these under HFP (classic) in assigned numbers, but they are also used by the Telephone Bearer Service (LE Audio) and the Call Control Profile (LE Audio). It's a bit weird that a LE Audio profile refers to and uses values defined specifically for a classic profile (cc @asbjornsabo )
+
+Do you think they should be kept like this, and thus follow the assigned numbers document more directly, or should we consider something like
+
+```
+BT_BEARER_TECHNOLOGY_
+```
+or maybe have a assigned numbers (AN) namespace like 
+```
+BT_AN_BEARER_TECHNOLOGY_
+```
+?
+
+*--- Thalley (2026-01-16 20:24:36+00:00)
+Needs to be moved I guess? Do we want something like this in `assigned_numbers.h` (cc @PavelVPV )?
+
+*--- Thalley (2026-01-20 10:04:45+00:00)
+Renamed to `bt_bearer_tech`. It seems that moving it in the assigned numbers is a good idea, so we will pursue that with an erratum. `bt_bearer_tech` is generic enough that it should fit any resolution in assigner numbers (given it's the title of the section), and it's doubtful that we'll get something else with a `bt_bearer` namespace.
+
+*--- Copilot (2026-01-20 10:09:05+00:00)
+The documentation parameter name '@param technology' does not match the actual function parameter name 'value'. The parameter should either be renamed to 'technology' in the function signature, or the documentation should be updated to '@param value'.
+```suggestion
+			   enum bt_bearer_tech technology);
+```
+
+*--- Copilot (2026-01-20 10:09:05+00:00)
+Missing space after '*' in the doxygen comment. Should be '* @brief' instead of '*@brief'.
+```suggestion
+	 * @brief Bearer technology has been read
+```
+
+*--- Thalley (2026-01-20 10:19:14+00:00)
+For now, they are just placed in the Generic Audio group in Doxygen; we can easily move that later once we know where to place it
+
+*--- Copilot (2026-01-20 10:21:50+00:00)
+This TODO comment suggests uncertainty about the implementation. The current code calls technology_changed with an invalid enum value (0) when there's an error (cb_err != 0). Consider either validating the technology value before calling technology_changed, or handling the error case explicitly by not passing an uninitialized/invalid enum value to the callback.
+```suggestion
+	/* Only notify about technology changes when the read completed successfully.
+	 * This avoids passing a potentially invalid enum value to the callback on error.
+	 */
+	if (cb_err == 0U) {
+		technology_changed(conn, cb_err, inst_index, (enum bt_bearer_tech)technology);
+	}
+```
+
+*--- Copilot (2026-01-20 10:21:50+00:00)
+This change introduces a behavioral modification where the value field is now set to 0 when status is not BTP_STATUS_SUCCESS, whereas previously it would pass the value parameter regardless of status. While this may be intentional to avoid passing potentially uninitialized data on error, this change is not mentioned in the PR description and appears unrelated to the technology enum refactoring. Consider documenting this behavior change or moving it to a separate PR focused on error handling improvements.
+```suggestion
+	ev.value = value;
+```
+
+*--- Thalley (2026-01-20 10:35:03+00:00)
+I don't want to add any behavioral changes in this PR
+
+*--- cvinayak (2026-01-20 18:02:20+00:00)
+Wouldnt this be increase the storage from 8-bits to 32-bit or above to a machine word size?
+
+*--- Thalley (2026-01-20 19:49:42+00:00)
+Depends on the compiler and options, but yes, using just `gcc` it will likely be word sized. If `-fshort-enums` is added a compile option, it can/should shrink it to the minimum size that holds all the defined enum values
+
+The change in code size in this PR is 16 bytes (i.e. this PR uses 16 bytes more than `main`) for the same build
+
+*--- alwa-nordic (2026-01-29 11:55:27+00:00)
+```suggestion
+/** HFP bearer technology
+ *
+ * https://bitbucket.org/bluetooth-SIG/public/src/main/assigned_numbers/profiles_and_services/hfp/bearer_technology.yaml
+ */
+```
+
+I suggest the above, since these values are specified under the HFP profile.
+
+*--- alwa-nordic (2026-01-29 11:58:50+00:00)
+Obs that the values in the enum are not consecutive. I suggest you make an array of possible values and cycle over the array instead.
+
+*--- Thalley (2026-01-29 11:59:29+00:00)
+I see where you are coming from, and originally I did add these as part of HFP (as you can see by https://github.com/zephyrproject-rtos/zephyr/pull/102430#discussion_r2699861740). However there is a discussion going on in the Generic Audio Working Group right now, since this isn't ideal (and probably not intentional), and I suspect the result of that is that the values will be from out of HFP in the assigned numbers document. 
+
+I would prefer to keep them more generic as use the section title "Bearer Technology" rather than HFP for this reason, not to mention that it is weird to use a HFP defined value (classic) for CCP (LE Audio) :D
+
+*--- Thalley (2026-01-29 12:00:28+00:00)
+> Obs that the values in the enum are not consecutive.
+
+Which ones are not consecutive? 
+But yeah, I do agree with this otherwise
+
+*--- Thalley (2026-01-29 15:15:28+00:00)
+It's code that exists in several places, and isn't really related to the change in this PR. It is also "correct" in the sense that it will assign one of the 9 different values of `BT_BEARER_TECH`, so it doesn't _need_ to be changed, and if we do, probably makes more sense to to in a different PR?
+
+*--- alwa-nordic (2026-01-30 09:10:12+00:00)
+Sorry, I misread one of the values. They are consecutive after all.
+
+*--- alwa-nordic (2026-01-30 11:39:26+00:00)
+Sounds good. What do you think about adding the link?
+
+*--- Thalley (2026-01-30 12:23:07+00:00)
+Regarding the link, I would probably try to avoid that, and just refer to the Bluetooth Assigned Number documents. Why the BT SIG does a good job of ensuring that sections in specifications are "static", they do tend to update and change the URL of resources quite often. It is technically possible for us (and I think we've done that before @kartben ?) to check for any dead links in the documentation. If we can do that (semi)automatically, we can add the link, and just update it the next time it's changed :) 
+
+Question is also if we should link to the YAML file or the PDF file (https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Assigned_Numbers/out/en/Assigned_Numbers.pdf)
+
+*--- Thalley (2026-02-07 17:36:22+00:00)
+https://dev.to/pauljlucas/enumerations-in-c-ae7
+
+Interestingly in future versions of C (C23) it will be possible to define an underlying type for enums, which would help with this :)
+
+*--- Thalley (2026-03-02 13:12:04+00:00)
+Rebased to solve merge conflicts
+
+*--- sjanc (2026-03-12 12:59:05+00:00)
+moving this up before gtbs could reduce padding here a bit
+
+I think you could also pack enum here to keep it 1 byte
+
+*--- sjanc (2026-03-12 13:22:35+00:00)
+should this also accept enum now? (users seem to cast to enum)
+
+nitpick no related to this change but 'status' could be renamed to 'tech'
+
+*--- sjanc (2026-03-12 13:34:04+00:00)
+should this be validated now to avoid passing enum with undefined value?
+
+*--- Thalley (2026-03-12 14:00:44+00:00)
+Good question. 
+
+A downside of the enum approach is that if our implementation becomes out of date and a new bearer technology is added (e.g. 6G), do we
+1) Discard the notification because it's an unknown technology
+2) Forward the notification but with an invalid enum value
+
+This is arguably a reason to _not_ switch to an enum. What do you think?
+
+*--- Thalley (2026-03-12 14:08:30+00:00)
+> I think you could also pack enum here to keep it 1 byte
+
+Maybe. As far as I can tell, packing enums are not part of the C standard, and the behavior of doing so is up to the compiler. As mentioned above, it comes part of the C standard in C23, but until then it may be tricky to do. I couldn't find anything in Zephyr that explicitly disallows it though, and we do use it here
+
+```c
+/** Connection Type */
+enum __packed bt_conn_type {
+	/** LE Connection Type */
+	BT_CONN_TYPE_LE = BIT(0),
+	/** BR/EDR Connection Type */
+	BT_CONN_TYPE_BR = BIT(1),
+	/** SCO Connection Type */
+	BT_CONN_TYPE_SCO = BIT(2),
+	/** ISO Connection Type */
+	BT_CONN_TYPE_ISO = BIT(3),
+	/** All Connection Type */
+	BT_CONN_TYPE_ALL = BT_CONN_TYPE_LE | BT_CONN_TYPE_BR |
+			   BT_CONN_TYPE_SCO | BT_CONN_TYPE_ISO,
+};
+```
+and
+```c
+enum __packed zbus_observer_type {
+	ZBUS_OBSERVER_LISTENER_TYPE,
+	ZBUS_OBSERVER_SUBSCRIBER_TYPE,
+	ZBUS_OBSERVER_MSG_SUBSCRIBER_TYPE,
+	ZBUS_OBSERVER_ASYNC_LISTENER_TYPE,
+};
+```
+
+*--- sjanc (2026-03-12 14:49:58+00:00)
+Maybe there should be enum value for unknown/invalid  (0 or maybe 0xff) technology? like in function converting to string for logging?
+
+*--- Thalley (2026-03-12 15:07:37+00:00)
+Sure, but from an applications point of view, getting 0x00 or 0xFF as "unknown" value isn't helpful either if the application actually care about and supports 6G as a possible technology, even if the TBS client doesn't support it. 
+
+Basically we have
+1) The stack verifies the values are defined, but at the cost of either requiring the stack to be updated to support all new values or to discard unknown values
+2) The stack does not verify the values and simply forwards them
+
+The applies to all values defined by any Bluetooth specification (including assigned numbers) today to be honest. The same choice needs to be done in the host as well if the controller e.g. sends a new event that the host doesn't support, and I don't have a clue what the best option really is :)
+
+*--- sjanc (2026-03-16 14:49:26+00:00)
+it also seems to be used quite a lot in BR/EDR code
+
+*--- sjanc (2026-03-16 15:24:52+00:00)
+Maybe just comment that while `enum bt_bearer_tech` match values from assign numbers it is possible that app can get value outside of that enum in callback?
+
+But than should `bt_tbs_set_bearer_technology()` validate enum input as it does now?
+At least in core not assigned assigned number values are considered RFU and should follow rules for such...
+
+TBH I'm fine with either approach as long as it is documented
+
+
+PS Controller will not send new event unless it was enabled by host, doesn't it?
+
+*--- Thalley (2026-03-16 16:28:18+00:00)
+> PS Controller will not send new event unless it was enabled by host, doesn't it?
+
+No, that is true. Bad example :) 
+
+> But than should bt_tbs_set_bearer_technology() validate enum input as it does now?
+
+I think local operations are fine to disallow the use of RFUs, as we document the version of the specs that we support (although assigned numbers are outside the TBS spec in this case...), so I don't think we can compare local operations to remote incoming data. 
+
+> Maybe just comment that while enum bt_bearer_tech match values from assign numbers it is possible that app can get value outside of that enum in callback?
+
+That we can do :) We could also only use the enum for local operations, and then `uint8_t` for remote data? It does seem a bit weird, but so assigning invalid enum values :(
+
+*--- Copilot (2026-03-16 19:06:28+00:00)
+Grammar in the migration guide entry is off: “Application using this application…” should refer to applications using the API.
+
+*--- Copilot (2026-03-16 19:06:29+00:00)
+Minor grammar: this should be plural (“Applications can…”) since it refers to multiple downstream users.
+
+*--- Copilot (2026-03-16 19:06:29+00:00)
+`struct tbs_inst` now stores `technology` as `enum bt_bearer_tech`, but the GATT characteristic is a 1-byte assigned number and the implementation immediately casts back to `uint8_t` for read/notify. To avoid potential struct bloat/padding and extra casts, consider keeping the internal storage as `uint8_t` and only using the enum type at the API boundary/logging helpers.
+
+*--- Thalley (2026-03-16 19:14:22+00:00)
+See https://github.com/zephyrproject-rtos/zephyr/pull/102430#discussion_r2709494883
+
+If we can pack the enum (either now or later) we can optimize it while keeping the enum
+
+*--- tejlmand (2026-03-17 08:51:37+00:00)
+General packed enum discussion opened here: https://discord.com/channels/720317445772017664/883445484923011172/1483385477498409021
+
+*--- Thalley (2026-03-17 09:00:46+00:00)
+Is the change to use `enum` an overall poor choice (not just in this PR, but in general in Zephyr/Bluetooth?)?
+
+If we cannot pack enums, then we see a memory increase. 
+
+If we at some point get out of date with the specifications that define the values in the enum, then we may see values outside of the enum (which is arguably worse than seeing values outside of a list of `#define`s).
+
+*--- sjanc (2026-03-18 15:29:45+00:00)
+There is more to be considered regarding how enum being use, since you cannot just pack all of them,  there are enum (eg enum bt_audio_context) that are used as bitfields, which by definition results in values that are outside of defined enum values...
+
+not sure how strict we want to be with that, I  personally don't find enums that useful comparing to defines since C compiler is not enforcing anything there anyway...
+
+*--- Thalley (2026-03-18 20:13:51+00:00)
+> that are used as bitfields,
+
+I have some pending ideas on how to refactor that; it's not a very good design to actively define values outside of the defined values (which bitfields do). 
+
+> since C compiler is not enforcing anything there anyway...
+
+That is a current choice by Zephyr AFAIK. There are warnings in GCC and Clang like `switch-enum` and `enum-conversion` that would generate warnings if switch statements do not cover all enum values, and would warn if you assign a value not in the enum (which is one of the reasons why I want to refactor the bitfields; using enums more places and enabling `enum-conversion` could catch a lot of issues, but would likely require more refactors in Zephyr)
+
+*--- sjanc (2026-03-19 07:45:05+00:00)
+yeah, however those are not that useful in my opinion... `enum-conversion` warns only about enum-enum conversion, not from int that would result outside of enum defined values (and is enabled by -Wextra which I think is enabled already)
+
+*--- Thalley (2026-03-19 08:40:11+00:00)
+> yeah, however those are not that useful in my opinion... `enum-conversion` warns only about enum-enum conversion, not from int that would result outside of enum defined values (and is enabled by -Wextra which I think is enabled already)
+
+Fair point. Enums do indeed not have all the effects we want today. C23 enums are far better, but maybe even then we still cannot catch something like 
+
+```c
+enum my_enum {
+	A,
+	B,
+	C,
+};
+
+enum my_enum e = 5;
+```
+
+Which would be ideal. 
+
+@sjanc (and others): Should I remove the change from `uint8_t` to `enum` from this PR and just stick with the renaming and moving? I personally like `enums` when there's a subset of valid values in APIs, but it doesn't fix any issues and may be confusing when the `enum` is not always restricted to those valid value
+
+*--- Thalley (2026-03-19 15:20:24+00:00)
+I packed the enum and added a comment that values above currently defined ones are reserved for future use
+
+*--- Thalley (2026-03-23 12:02:35+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-03-23 13:13:31+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-03-23 13:16:10+00:00)
+@cvinayak please remove your requested change, or re-review :) (enum should now be packed and thus not have increased memory usage on most platforms)
+
+*--- Thalley (2026-03-26 09:40:06+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-04-02 14:58:37+00:00)
+Moved migration guide changes to 4.5
+
+*--- Thalley (2026-04-24 09:06:55+00:00)
+@cvinayak Please re-review or remove your change request :)
+
+*--- Thalley (2026-04-24 13:05:27+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-04-27 06:07:50+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-04-28 05:52:06+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-04-28 13:23:52+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-04-30 07:38:33+00:00)
+Rebased to solve merge conflicts

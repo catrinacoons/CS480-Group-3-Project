@@ -1,0 +1,23 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112306
+TITLE: include: zephyr: clock_control: Rename header file guard macros 
+
+*--- opening post by etienne-lms (2026-06-29 12:40:04+00:00)
+Update header files in **include/zephyr/** to use a `ZEPHYR_INCLUDE_` prefixed header guard macro with the macro name matching the header file path in **include/zephyr/** file tree.
+
+These changes were made using **zephyr_header_guards.py** script proposed in https://github.com/zephyrproject-rtos/zephyr/pull/111768 with a Linux shell command like the on below:
+```
+$ scripts/zephyr_header_guards.py --apply \
+    include/zephyr/drivers/clock_control* \
+    include/zephyr/dt-bindings/clock/
+
+*--- Copilot (2026-06-29 12:44:27+00:00)
+The new include guard was inserted between the comment `/* Select the IHO as the output of the path mux */` and the `#define IFX_CAT1_CLKPATH_IN_IHO 0` that it documents, leaving that comment orphaned above the guard. In the sibling files newly guarded by this PR (e.g. `ifx_clock_source_psc3xx.h`, `ifx_clock_source_common.h`), the guard is placed directly after the license header. Move the guard above the comment so it stays attached to its `#define`.
+
+*--- etienne-lms (2026-07-04 13:28:17+00:00)
+Rebased.
+
+*--- etienne-lms (2026-07-27 14:19:40+00:00)
+Rebased and updating 3 more files recently added (**mchp_clock_pic32cm_sg_gc.h**, **ch32v10x-clocks.h**, **mchp_pic32cm_sg_gc_clock.h**).
+
+*--- nandojve (2026-08-31 19:36:16+00:00)
+needs rebase

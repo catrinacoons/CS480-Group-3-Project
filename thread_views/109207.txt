@@ -1,0 +1,39 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/issues/109207
+TITLE: twister: enable custom reset sequence à la esp32 for other boards
+
+*--- opening post by luqasn (2026-05-15 10:07:32+00:00)
+### Summary
+
+I am working with a development board for realtek chips that has a single serial connection and a wiring setup similar to esp32 devboards, where DTR/RTS need to be set to `False` for normal boot.
+
+There is already hard-coded custom serial handling for the `esp32` runner that handles resetting the dev board after flashing via DTR/RTS pins: https://github.com/zephyrproject-rtos/zephyr/blob/main/scripts/pylib/twister/twisterlib/handlers.py#L766
+
+Currently, I am using a workaround via `pty_serial` where I do the reset sequence in a custom python script, but the `pty_serial` option is not supported on windows due to it using virtual com ports from pySerial that are mac/unix only.
+
+So I need a "native" solution in twister to set DTR/RTS state to make the board boot successfully after flashing.
+
+### Describe the solution you'd like
+
+While adding additional config for the serial port seems like a quick win, something does not sit right with me  regarding the current approach of wrapping a process in a virtual serial port. That looks like a workaround to begin with.
+
+It seems that an abstraction to communicate with the DUT with two implementations (`serial` and `process`) would be a cleaner approach that would fix the incompatibility with windows and allows to keep all of the flexibility that `serial_pty` offers over just being able to configure the serial parameters.
+
+### Alternatives
+
+While the proposed refactor solves the problem for now, requiring a full-blown python script that does input and output redirection just to set some serial parameters seems like it does not solve the problem fully.
+
+So it would probably still be helpful to be able to control more serial port options via the config.
+
+### Additional Context
+
+`serial_pty` "script" I am using: `rtkprog terminal` -> https://github.com/a-labs-io/rtkprog/blob/c74034576337ae4b51fe06b8068831cb452f1d18/rtkprog/cli.py#L121
+
+*--- sylvioalves (2026-05-15 13:05:11+00:00)
+@luqasn When I submitted that, I initially considered to implement some kind of abstraction layer for that. However, it went down like a workaround as you can see. Would you provide some sketch of what you are suggesting? Thanks!
+
+*--- luqasn (2026-05-15 15:08:31+00:00)
+Hi @sylvioalves
+
+I had Claude write a proof-of-concept here: https://github.com/zephyrproject-rtos/zephyr/pull/109213
+
+It matches roughly what I expected, though I would still want to critically review and rework the code - especially the tests - if you think this is the path forward.

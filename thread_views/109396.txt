@@ -1,0 +1,145 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109396
+TITLE: Add a ZMS iterator API to enumerate live entries without a predefined ID list
+
+*--- opening post by rghaddab (2026-05-19 11:47:15+00:00)
+This PR  introduces the iterator API, adds mask-based filtering support at initialization,
+and then adds the related tests, sample usage, and documentation.
+
+## Why
+
+Applications that do not maintain a separate ID index need a way to discover
+currently live entries directly from ZMS. The iterator API provides that
+capability, and optional masking allows narrowing enumeration to relevant IDs.
+
+## Behavior
+
+When using zms_iter_next:
+   - Iterator returns live entries only
+   - Header entries are skipped
+   - Deleted entries are skipped
+   - Older revisions are skipped (latest live entry is returned)
+
+When using zms_iter_next_all:
+   - Iterator returns all entries (even old entries)
+   - Deleted entries are returned as well
+   - Header entries are skipped
+
+Default initialization enumerates all live IDs
+Masked initialization enumerates only IDs matching the provided mask
+
+*--- omkar3141 (2026-05-20 11:32:30+00:00)
+zms_iter_next() : "Deleted entries are returned as well" > Perhaps give a param which can be set to skip reading deleted entries?
+
+*--- rghaddab (2026-05-20 12:24:57+00:00)
+> zms_iter_next() : "Deleted entries are returned as well" > Perhaps give a param which can be set to skip reading deleted entries?
+
+But if the function skips deleted entries then how the application is going to know if a following entry was deleted or not.
+Example : you get ATE with ID=0x3 len=0 (deleted ATE with ID=0x3)
+Then you get an ATE with ID=0x3 len=16 (older ATE but logically deleted with the previously received ATE)
+
+What is the usecase where application ignore the deleted ATEs ?
+
+*--- omkar3141 (2026-05-22 08:20:24+00:00)
+> > zms_iter_next() : "Deleted entries are returned as well" > Perhaps give a param which can be set to skip reading deleted entries?
+> 
+> But if the function skips deleted entries then how the application is going to know if a following entry was deleted or not. Example : you get ATE with ID=0x3 len=0 (deleted ATE with ID=0x3) Then you get an ATE with ID=0x3 len=16 (older ATE but logically deleted with the previously received ATE)
+> 
+> What is the usecase where application ignore the deleted ATEs ?
+
+I do not know why application would like to know deleted entries. The fact that entry got deleted, means some deliberate action happened on the application's side which caused entry to get deleted. So, application only wants to know what are valid existing entries on NVM. 
+
+But sure, application can ignore these entries when it finds len == 0, so having this is no problem.
+
+*--- Damian-Nordic (2026-05-22 09:33:01+00:00)
+Suggestion: use a predicate function instead of the mask. Mask seems to be tailored to a very particular usage pattern and sometimes libraries may be interested in getting IDs from a given range that is not aligned to powers of two.
+
+*--- Damian-Nordic (2026-05-22 09:38:57+00:00)
+This is hard to guarantee in a multi-threaded application, consisting of many independent components. Wouldn't it make sense to expose `zms_lock/zms_unlock` functions and document that `zms_iter` functions must be called with the ZMS locked?
+
+*--- rghaddab (2026-05-25 10:33:57+00:00)
+> > > zms_iter_next() : "Deleted entries are returned as well" > Perhaps give a param which can be set to skip reading deleted entries?
+> > 
+> > 
+> > But if the function skips deleted entries then how the application is going to know if a following entry was deleted or not. Example : you get ATE with ID=0x3 len=0 (deleted ATE with ID=0x3) Then you get an ATE with ID=0x3 len=16 (older ATE but logically deleted with the previously received ATE)
+> > What is the usecase where application ignore the deleted ATEs ?
+> 
+> I do not know why application would like to know deleted entries. The fact that entry got deleted, means some deliberate action happened on the application's side which caused entry to get deleted. So, application only wants to know what are valid existing entries on NVM.
+> 
+> But sure, application can ignore these entries when it finds len == 0, so having this is no problem.
+
+My point is that when iterating all entries in ZMS in one loop without searching other sectors, the iterator will return old entries with an (ID=X len=N) that were deleted with a more recent ATE (ID=X len=0).
+The only way for an application to know that a returned entry with (ID=X, len=N) is valid or not is to store previously all the deleted IDs that the iterator will return.
+
+*--- rghaddab (2026-05-25 10:35:54+00:00)
+I got request from many users to have the ability to retrieve IDs with a certain mask.
+But it is a good idea as well to add another API to get ranges
+
+*--- rghaddab (2026-05-25 10:48:01+00:00)
+@Damian-Nordic actually zms_lock/zms_unlock are already exposed in the "zms_fs" structure.
+I will add in the sample/test and documentation how to use them
+
+*--- Damian-Nordic (2026-05-25 10:52:01+00:00)
+I mean, if you use a predicate then you can do both with a single API.
+
+*--- rghaddab (2026-05-25 14:18:28+00:00)
+I added 3 options : use_mask, use_range, use_predicate
+User will choose the best option for him or a combination of them
+
+*--- ludvigsj (2026-06-16 14:45:03+00:00)
+Hi, taking over for @omkar3141 here.
+
+I'm a bit confused about the `iter_next_all` usage. This will return all historical entries for a given ID, correct? (Among entries for other IDs of course). How do we know which `len` is the most recent one? Are the entry generations iterated in order of age, or in arbitrary order? If we cannot know the correct `len` to use when reading the most recent entry (in our case, that would be either a constant length used for all live entries or 0), we'll need to do another round of reading the history, so the single-pass `next_all` is not that useful in that case.
+
+*--- rghaddab (2026-06-18 11:11:39+00:00)
+> Hi, taking over for @omkar3141 here.
+> 
+> I'm a bit confused about the `iter_next_all` usage. This will return all historical entries for a given ID, correct? (Among entries for other IDs of course). How do we know which `len` is the most recent one? Are the entry generations iterated in order of age, or in arbitrary order? If we cannot know the correct `len` to use when reading the most recent entry (in our case, that would be either a constant length used for all live entries or 0), we'll need to do another round of reading the history, so the single-pass `next_all` is not that useful in that case.
+
+No that's not correct.
+This will return all stored ATEs, whether they are fresh, old or deleted. It is decribed in the zms.h
+It will return them from the newest one to the oldest one.
+
+*--- ludvigsj (2026-06-18 11:20:05+00:00)
+> > Hi, taking over for @omkar3141 here.
+> > I'm a bit confused about the `iter_next_all` usage. This will return all historical entries for a given ID, correct? (Among entries for other IDs of course). How do we know which `len` is the most recent one? Are the entry generations iterated in order of age, or in arbitrary order? If we cannot know the correct `len` to use when reading the most recent entry (in our case, that would be either a constant length used for all live entries or 0), we'll need to do another round of reading the history, so the single-pass `next_all` is not that useful in that case.
+> 
+> No that's not correct. This will return all stored ATEs, whether they are fresh, old or deleted. It is decribed in the zms.h It will return them from the newest one to the oldest one.
+
+Okay. So, in our use case, the entries in the iterated range are always expected to have a fixed length N (or 0, if deleted), we can iterate and, when we see an ID, we can:
+  * Ignore it, if we have already seen this ID
+  * Mark this ID in RAM for loading, if len > 0
+  * Mark this ID in RAM as deleted, if len == 0
+
+And that should give us a list of all live IDs, ready to be read?
+
+*--- rghaddab (2026-06-18 12:52:23+00:00)
+> Okay. So, in our use case, the entries in the iterated range are always expected to have a fixed length N (or 0, if deleted), we can iterate and, when we see an ID, we can:
+> 
+> * Ignore it, if we have already seen this ID
+> * Mark this ID in RAM for loading, if len > 0
+> * Mark this ID in RAM as deleted, if len == 0
+> 
+> And that should give us a list of all live IDs, ready to be read?
+
+Yes, and have a look at the sample code where I show how to load entries.
+
+*--- Damian-Nordic (2026-06-19 10:04:00+00:00)
+To be honest, I don't understand this design choice :). Why support 3 different constraints if the predicate one lets you easily implement two other ones. Are you concerned about performance?
+
+*--- Damian-Nordic (2026-06-19 10:06:32+00:00)
+There are no public zms_lock/unlock APIs though.
+
+*--- carlescufi (2026-08-17 12:30:14+00:00)
+@Damian-Nordic @omkar3141 please take another look
+
+*--- Copilot (2026-08-17 12:47:50+00:00)
+Potential out-of-bounds write: found_ids[found_count] is assigned before asserting the maximum count. If the iterator ever yields more than expected, the test will corrupt memory before failing.
+
+*--- Copilot (2026-08-17 12:47:50+00:00)
+found_ids is declared as int[], but it stores zms_id_t values. This can truncate IDs (especially with CONFIG_ZMS_ID_64BIT) and may trigger warnings.
+
+*--- Copilot (2026-08-17 12:47:51+00:00)
+This line is indented, which turns it into a block quote in reStructuredText. It should be aligned with the surrounding paragraph text.
+
+*--- Copilot (2026-08-17 12:47:51+00:00)
+The zms_iter_next_all() note says to use zms_read() to retrieve stored data for entries not copied out of the ATE, but zms_read() returns only the latest value. Since _next_all can yield older revisions, the doc should also direct users to zms_read_hist() when they need historical payloads.

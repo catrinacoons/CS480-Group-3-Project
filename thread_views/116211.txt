@@ -1,0 +1,525 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116211
+TITLE: drivers: entropy: psa_crypto: Get entropy from an interrupt context
+
+*--- opening post by etienne-lms (2026-08-13 13:40:35+00:00)
+Implement `.get_entropy_isr` handler in **entropy_psa_crypto** driver using a random bytes pool filled from a workqueue whose bytes can be consumed from a interrupt handler.
+
+Configuration set the pool size, the threshold to trigger its refilling and the size of the buffer chunk use to refill it.
+
+This added support is useful for example when the entropy PSA Crypto service is implemented in TF-M which has re-entrance constraints preventing reliable calls from a Zephyr interrupt context, notably for example, considering a wireless stack execution constraints.
+
+Add a test for `entropy_get_entropy_isr()` in **tests/drivers/entropy/api/**.
+
+*--- etienne-lms (2026-08-14 15:21:21+00:00)
+Fixed CI *Compliance Checks* reported issue.
+
+*--- tomi-font (2026-08-18 07:42:25+00:00)
+```suggestion
+	bool "Get random bytes from an interrupt context"
+```
+
+*--- Copilot (2026-08-18 07:46:33+00:00)
+This option enables `k_work_submit()`, but it can currently be selected with `CONFIG_MULTITHREADING=n`. In that configuration `kernel/work.c` and `kernel/system_work_q.c` are not linked, so enabling ISR support causes unresolved workqueue symbols rather than a usable driver. Make the option depend on multithreading.
+
+This issue also appears in the following locations of the same file:
+- line 25
+- line 29
+
+*--- Copilot (2026-08-18 07:46:33+00:00)
+This submission can run before the system workqueue is started. `z_early_rand_get()` calls the ISR entropy API after PRE_KERNEL initialization (for example for stack canaries), while `k_sys_work_q` starts only in the kernel post-init hook; `k_work_submit()` therefore returns `-ENODEV`, and a small pool may be left empty for the first runtime ISR request. Arrange a post-kernel refill/submission, or otherwise defer submission until the queue is known to be running.
+
+*--- Copilot (2026-08-18 07:46:33+00:00)
+An exhausted pool can make every interrupt request emit this warning. In immediate logging mode, or under sustained wireless traffic, that creates an unbounded ISR-latency/log-flood path exactly when entropy is unavailable. Rate-limit the underflow diagnostic.
+
+*--- Copilot (2026-08-18 07:46:34+00:00)
+This declaration shadows the outer `count`, contrary to the repository rule that identifiers must not shadow outer-scope identifiers. Rename it to reflect that it is the destination offset.
+
+This issue also appears in the following locations of the same file:
+- line 59
+- line 147
+
+*--- Copilot (2026-08-18 07:46:34+00:00)
+Correct the spelling of “yielding” in this user-visible Kconfig prompt.
+
+*--- Copilot (2026-08-18 07:46:34+00:00)
+This comment is grammatically incorrect and names a nonexistent `entropy_get_isr()` API, which makes the skip behavior unclear. Refer to the actual optional API.
+
+*--- Copilot (2026-08-18 07:46:34+00:00)
+Correct the typo in this configuration comment.
+
+*--- tomi-font (2026-08-18 08:20:18+00:00)
+Remove unnecessary help text as it duplicates the prompt?
+
+*--- tomi-font (2026-08-18 08:20:46+00:00)
+```suggestion
+	int "Size of the ISR random pool in bytes"
+```
+
+*--- tomi-font (2026-08-18 08:21:34+00:00)
+```suggestion
+	  pool when the number of available bytes is equal to or lower
+	  than this threshold.
+```
+
+*--- tomi-font (2026-08-18 08:22:48+00:00)
+Find this a bit confusing, before this I thought 0 was simply to refill when it's empty. Would it be worth making -1 the special value?
+
+*--- tomi-font (2026-08-18 08:24:26+00:00)
+What I would do instead is to `#ifdef CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR` the ISR implementation based. No need for dummy values, nor `__maybe_unused`.
+
+*--- tomi-font (2026-08-18 08:25:24+00:00)
+typo
+
+*--- tomi-font (2026-08-18 08:26:06+00:00)
+Do we really need this Kconfig option? Can't we just refill the whole thing at once in all cases? I would assume we expect the ISR buffer size to be relatively small anyway.
+
+*--- tomi-font (2026-08-18 08:28:10+00:00)
+How about just calling `psa_generate_random()` directly for clarity?
+
+*--- tomi-font (2026-08-18 08:29:37+00:00)
+Is this retry mechanism really useful?
+
+*--- tomi-font (2026-08-18 08:31:37+00:00)
+How is this device data?
+
+*--- tomi-font (2026-08-18 08:35:07+00:00)
+Or return an error? not sure
+
+*--- tomi-font (2026-08-18 08:37:48+00:00)
+we don't need this if/elsery
+
+*--- tomi-font (2026-08-18 08:38:23+00:00)
+how about if `length` was `0` :stuck_out_tongue: (doesn't matter)
+
+*--- tomi-font (2026-08-18 08:39:23+00:00)
+`ret` and `ret2` are terrible names, let's rename them both? I mean we have `rand_size` anyway so what we can do is we drop `ret` and use `rand_size` instead so we can declare and use `ret` here.
+
+*--- tomi-font (2026-08-18 08:40:40+00:00)
+would definitely not call this an underflow
+
+*--- tomi-font (2026-08-18 08:43:04+00:00)
+Check `ring_buf_size_get()` and return an error if it's not full?
+
+*--- tomi-font (2026-08-18 08:45:16+00:00)
+`unlikely()` too?
+
+*--- tomi-font (2026-08-18 08:47:42+00:00)
+```suggestion
+			size = UINT32_MAX;
+```
+
+*--- tomi-font (2026-08-18 08:51:10+00:00)
+Is this quite safe to temporarily unlock the spinlock here? If an ISR gets entropy during that time, isn't the buffer gonna get messed up?
+
+*--- tomi-font (2026-08-18 08:54:21+00:00)
+yielding
+
+*--- tomi-font (2026-08-18 08:56:36+00:00)
+```suggestion
+		/* Test shall not fail if optional entropy_get_isr() is not supported */
+```
+
+*--- tomi-font (2026-08-18 08:58:53+00:00)
+The requests interrupt services?
+
+*--- tomi-font (2026-08-18 08:59:04+00:00)
+What do you mean here?
+
+*--- tomi-font (2026-08-18 08:59:56+00:00)
+```suggestion
+# Enable ISR test with a pool smaller (5 bytes) than test buffer size (9 bytes)
+```
+
+*--- tomi-font (2026-08-18 09:00:54+00:00)
+Is this a possiblity? might be preferable, more like a real scenario
+
+*--- etienne-lms (2026-08-18 12:35:38+00:00)
+Fair enough.
+
+*--- etienne-lms (2026-08-18 12:39:48+00:00)
+In case the pool is big, it may take time to be refilled. If the service is implemented in TF-M, it would stall any other TF-M services until the pool is fed. The chunk size could depend on the TF-M RNG service which may depend on the HW. I think using an option allows to better tune this value.
+
+*--- etienne-lms (2026-08-18 12:45:17+00:00)
+Makes sense, thanks.
+
+*--- etienne-lms (2026-08-18 12:50:59+00:00)
+Hmmm, indeed maybe not. I guess `psa_generate_random()` is not expected to sporadically fail.
+
+*--- etienne-lms (2026-08-18 12:58:35+00:00)
+No, the ISR won't get bytes not passed its `tail` that is updated only upon the call to `ring_buf_put_finish()` below.
+
+*--- etienne-lms (2026-08-18 13:00:16+00:00)
+I could but that would re-implement what `entropy_psa_crypto_rng_get_entropy()` does (errno code upon `psa_stats_t` code). Worth it?
+
+*--- etienne-lms (2026-08-18 13:04:12+00:00)
+You're right, `ring_buf_put_claim()` already does the job.
+
+*--- etienne-lms (2026-08-18 13:06:01+00:00)
+More bytes are request than expected, isn't that an underflow? Maybe *underrun* better applies?
+
+*--- etienne-lms (2026-08-18 13:09:04+00:00)
+Rigtht.
+
+*--- etienne-lms (2026-08-18 13:11:45+00:00)
+I was a bit unsure here. The API says *"Driver is allowed to busy-wait"*, not it *must* wait. Here, we can't wait so let's do our best and provide what's available in the pool.
+
+*--- etienne-lms (2026-08-18 13:15:48+00:00)
+For simplicity, it don't register this as device data (`DEVICE_DT_INST_DEFINE()` argument is `NULL`). Local functions straight use this structure instance. In the next version of this series, a `POST_KERNEL` handler will request a refill of the pool (to address https://github.com/zephyrproject-rtos/zephyr/pull/116211/changes/0ba7faf625cc97d15d8b817daa302bc90b142c6c#r3802036611). It's actually handy it can get this struct straight since it won't know the device reference.
+
+*--- etienne-lms (2026-08-18 13:17:01+00:00)
+I wanted the code to build even when `CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR` is disabled, to better get possible compiler warnings/errors.
+
+*--- etienne-lms (2026-08-18 15:03:48+00:00)
+I'll rephrase.
+
+*--- Copilot (2026-08-18 15:30:24+00:00)
+A zero return is valid for this non-blocking API and is produced by the new driver when its pool is empty, but it leaves `remaining` unchanged. If a refill cannot make progress, this loop never terminates and hangs the test suite. Add a bounded retry/deadline for zero-byte reads and fail after it expires.
+
+*--- Copilot (2026-08-18 15:30:24+00:00)
+This initializer is registered even when `CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR` is disabled, but in that configuration `isr_refill_work` is never initialized. `k_work_submit()` requires a non-NULL handler, so existing PSA RNG configurations that do not opt into ISR support can assert during POST_KERNEL initialization (or queue an invalid item when assertions are off). Compile both this initializer and its `SYS_INIT` registration only with ISR support.
+
+*--- Copilot (2026-08-18 15:30:25+00:00)
+This size has no range, so valid Kconfig input can be zero/negative (yielding a zero-length or invalid array), exceed the default ring buffer's 32767-byte capacity, or exceed the entropy callback's `uint16_t` length. In the last case the worker can commit more bytes than PSA filled, exposing `__noinit` contents as entropy. Constrain the pool to a nonzero size supported by both APIs, or select large ring-buffer support and explicitly chunk claims to `UINT16_MAX`.
+
+*--- etienne-lms (2026-08-18 16:40:20+00:00)
+Addressed
+
+*--- etienne-lms (2026-08-18 16:40:30+00:00)
+Addressed
+
+*--- etienne-lms (2026-08-18 16:40:35+00:00)
+Addressed
+
+*--- etienne-lms (2026-08-18 16:40:40+00:00)
+Addressed
+
+*--- etienne-lms (2026-08-18 16:40:45+00:00)
+Addressed
+
+*--- etienne-lms (2026-08-18 16:41:05+00:00)
+Addressed (comment removed, not really needed)
+
+*--- etienne-lms (2026-08-18 16:41:26+00:00)
+No more applicable.
+
+*--- etienne-lms (2026-08-18 16:44:38+00:00)
+Addressed
+
+*--- etienne-lms (2026-08-18 16:44:49+00:00)
+Addressed
+
+*--- etienne-lms (2026-08-18 16:44:56+00:00)
+Addressed
+
+*--- tomi-font (2026-08-19 10:48:59+00:00)
+Sp**a**cial value? :smile: 
+Actually, thinking about this again, do we really need this special value?
+If we just make this default to 31, it's `ENTROPY_PSA_CRYPTO_RNG_ISR_BUFFER_SIZE - 1`. And whoever would be able to reproduce this "special" behavior by just setting this threshold value to max - 1. Or we could even make the threshold value default to `ENTROPY_PSA_CRYPTO_RNG_ISR_BUFFER_SIZE` so that no matter the value given to `ENTROPY_PSA_CRYPTO_RNG_ISR_BUFFER_SIZE` this default behavior will always be the same.
+
+*--- tomi-font (2026-08-19 11:12:39+00:00)
+Well anyway we don't use the return code, we just check whether the call was successful, so I think it would be more clear to just do `if (psa_generate_random([...]) != PSA_SUCCESS)`, that way we don't have to browse to the entropy function to understand what is done.
+
+*--- tomi-font (2026-08-19 11:13:59+00:00)
+```suggestion
+	  using the biggest possible chunks.
+```
+
+*--- tomi-font (2026-08-19 11:14:39+00:00)
+So you think there can be realistic cases where it makes sense to have a big pool?
+
+*--- tomi-font (2026-08-19 11:15:18+00:00)
+I agree, let's remove it to simplify the code?
+
+*--- tomi-font (2026-08-19 11:18:56+00:00)
+To address what exactly? Link doesn't quite work.
+And my point with this comment was just why is the struct called `*_dev_data`, would it make more sense to not name it that way.
+
+*--- tomi-font (2026-08-19 11:19:42+00:00)
+But then if the caller expects to get all the requested random bytes by providing BUSYWAIT... As you want.
+
+*--- tomi-font (2026-08-19 11:21:37+00:00)
+Use `min()` for single evaluation of arguments?
+
+*--- tomi-font (2026-08-19 11:23:00+00:00)
+Actually, the following would work...
+```suggestion
+	refill = (ring_buf_size_get(&data->isr_rbuf) <= (uint32_t)ISR_REFILL_THRESHOLD);
+```
+... But maybe too clever?
+
+*--- tomi-font (2026-08-19 11:24:27+00:00)
+@copilot What do you think?
+
+*--- tomi-font (2026-08-19 11:31:26+00:00)
+Do you really still mean to fill the pool here now that you have the `POST_KERNEL` init function?
+
+*--- tomi-font (2026-08-19 11:39:16+00:00)
+```suggestion
+# Refilling entropy_psa_crypto ISR random sample pool requires a thread
+```
+
+*--- etienne-lms (2026-08-21 06:35:09+00:00)
+Ok, I'll rename to *context*.
+
+*--- etienne-lms (2026-08-21 06:37:51+00:00)
+We can't busy wait. Let's do our best. Alternatively, returning a `-EBUSY` when there are not enough samples available?
+
+*--- etienne-lms (2026-08-21 06:37:58+00:00)
+Thanks.
+
+*--- etienne-lms (2026-08-21 06:38:22+00:00)
+Ok. I've removed the -1 special value.
+
+*--- etienne-lms (2026-08-21 06:51:02+00:00)
+Ok, I'll simplify this.
+
+*--- etienne-lms (2026-08-21 07:08:55+00:00)
+It's a bit unclear. I've asked GPT-5.4-Mini *"When to use underrun and when to use underflow when a service is asked a given amount of data but not enough can be provided?"*. Answer:
+> Use **underflow** when you mean **a shortage of data available to be read** from a buffer, stream, or queue.
+>
+> Use **underrun** when you mean **a producer failed to keep up** with a consumer, so the consumer ran out of data to process or output.
+>
+> **Practical rule**
+> * **Underflow = “not enough data came from the source / available to read”**
+> * **Underrun = “the supply to a running process fell behind demand”**
+> 
+> **In your case**
+>
+> If a **service is asked for a given amount of data but cannot provide enough**, the better term is usually:
+>
+> * **underflow** if you are describing the **resulting lack of data**
+> * **underrun** if you are describing the **service failing to deliver fast enough to keep up with consumption**
+>
+> **Examples**
+>
+> * **Buffer underflow**: a decoder requested 1024 bytes, but only 200 were available.
+> * **Audio underrun**: the audio device needed data continuously, but the source could not supply it in time, causing a gap.
+>
+> **Recommendation**
+>
+> For a **service response that cannot satisfy the requested amount**, use:
+>
+> * **underflow** if you want to emphasize insufficient available data
+> * **underrun** if you want to emphasize failure to sustain output/feed rate
+
+From Wikipedia, *underrun* is sowhat related to bandwidth.
+
+*--- etienne-lms (2026-08-21 07:09:44+00:00)
+Ok, eases readibility.
+
+*--- etienne-lms (2026-08-21 07:11:58+00:00)
+I don't think using `unliely()` is worth it it. There is no big execution constraint, we're in a thread, interrupts unmasked.
+
+*--- etienne-lms (2026-08-21 07:12:12+00:00)
+Ok
+
+*--- etienne-lms (2026-08-21 07:13:26+00:00)
+In case some ISR ask for random bytes before this post kernel initcall is executed.
+
+*--- etienne-lms (2026-08-21 07:13:59+00:00)
+You're right. I'll use `ENTROPY_PSA_CRYPTO_RNG_ISR_BUFFER_SIZE` as default value.
+
+*--- etienne-lms (2026-08-21 07:34:37+00:00)
+I think yes. Big meaning a few dozen of bytes. But nothing prevents an application from calling (possibly indirectly) `psa_generate_random()` with a high `output_size` value.
+
+Also, IIUC, if a Zephyr thread calls a TF-M service like an RSA key generation, it may take a bit of time during which any other Zephyr thread calling a TF-M service will wait in the veneer handlers until the executing service exists TF-M.
+
+*--- etienne-lms (2026-08-21 11:47:51+00:00)
+Comments addressed (but https://github.com/zephyrproject-rtos/zephyr/pull/116211#discussion_r3802445498 and https://github.com/zephyrproject-rtos/zephyr/pull/116211#discussion_r3802407880).
+I've appended commits to possibly have a dedicated worqueue not to stall the system workqueue when TF-M is busy while we're refilling the pool.
+
+*--- tomi-font (2026-08-24 08:14:49+00:00)
+extraneous parentheses
+
+*--- tomi-font (2026-08-24 08:16:27+00:00)
+Yeah, returning some error code in that case could be good. Then we can also drop the log message.
+
+*--- tomi-font (2026-08-24 08:19:23+00:00)
+Move spin lock down to right before the put claim?
+
+*--- tomi-font (2026-08-24 08:23:40+00:00)
+But then why do we have the `POST_KERNEL` init in addition to this?
+
+*--- tomi-font (2026-08-24 08:28:38+00:00)
+Own workqueue rather than private one maybe? as you want
+
+*--- tomi-font (2026-08-24 08:28:51+00:00)
+is used
+
+*--- tomi-font (2026-08-24 08:29:17+00:00)
+Why are you saying this here? also sentence seems a bit incorrect
+
+*--- tomi-font (2026-08-24 08:29:36+00:00)
+```suggestion
+	  When disabled, Zephyr's system workqueue is used.
+```
+or
+```suggestion
+	  When disabled, the Zephyr system workqueue is used.
+```
+
+*--- tomi-font (2026-08-24 08:29:54+00:00)
+just use an enclosing `if` instead
+
+*--- tomi-font (2026-08-24 08:30:41+00:00)
+```suggestion
+	int "Private workqueue stack size"
+```
+
+*--- tomi-font (2026-08-24 08:32:26+00:00)
+proivate
+
+*--- tomi-font (2026-08-24 08:34:53+00:00)
+Not `_wq`?
+
+*--- tomi-font (2026-08-24 08:38:37+00:00)
+Why don't we submit in all cases to the workqueue? I would rather return an error early if `isr_wq` is not set yet rather than silently falling back to the system workqueue.
+
+Also, I think it could be nicer to just set `isr_wq` to `k_sys_work_q` when the workqueue is used to not have separate paths.
+
+*--- tomi-font (2026-08-24 08:41:33+00:00)
+Why not just have this directly in `entropy_psa_crypto_isr_refill_work_fn()`? And why would we actually need this with the private workqueue if not with the system one?
+
+*--- tomi-font (2026-08-24 08:43:13+00:00)
+prio?
+
+*--- tomi-font (2026-08-24 08:45:33+00:00)
+this sentence has weird bits
+
+*--- tomi-font (2026-08-24 08:46:50+00:00)
+So this basically means the buffer will never get fully refilled? Why do we want this? Why not just use a smaller buffer size? This is starting too feel like too much...
+
+*--- etienne-lms (2026-08-24 13:36:56+00:00)
+Entropy driver needs to be available before kernel init because some subsystem may need it, hence it's `PRE_KERNEL` stage initialization.
+But at pre-kernel, we cannot use the system work queue that is not yet ready (thanks https://github.com/zephyrproject-rtos/zephyr/pull/116211#discussion_r3802036611) so we can only fill the pool at driver initialization and, once `POST_KERNEL` is reached, try to refill the pool, in case it was consumed, before a new ISR requests random bytes.
+Did I miss something?
+
+*--- etienne-lms (2026-08-24 13:47:57+00:00)
+ok
+
+*--- etienne-lms (2026-08-24 13:49:01+00:00)
+Ok. I'll return `-EBUSY` if not enough random samples are available.
+
+*--- etienne-lms (2026-08-24 14:00:51+00:00)
+Right.
+
+*--- etienne-lms (2026-08-24 14:11:26+00:00)
+Ok, i'll rephrase that and replace
+`CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR_PRIVATE_WQ`
+with
+`CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR_WORKQUEUE`.
+
+*--- etienne-lms (2026-08-24 14:13:05+00:00)
+ok
+
+*--- etienne-lms (2026-08-24 14:27:16+00:00)
+The private workqueue is only available once `entropy_psa_crypto_init_post_kernel()` `POST_KERNEL` initcall is completed. Let's have a change to get the pool refilled earlier if possible?
+Well since the window will be quite small between our post-kernel init and the system workqueue post-kernel init, I guess you're right.
+
+> Also, I think it could be nicer to just set isr_wq to k_sys_work_q when the workqueue is used to not have separate paths.
+
+Ok, i'll do.
+
+*--- etienne-lms (2026-08-24 14:29:45+00:00)
+It was needed if we were possibly switching from the system workqueue to our own workqueue. We could have the work executing concurrently.
+Since i'll address your comment https://github.com/zephyrproject-rtos/zephyr/pull/116211/changes/0c06efbb62eabd143742fdf664be33313c7ae8ca#r3841864702 and use only either the system workqueue or our own, this mutex is now useless.
+
+*--- etienne-lms (2026-08-24 14:31:09+00:00)
+My mistake: *prior*.
+
+*--- etienne-lms (2026-08-24 14:33:40+00:00)
+Ok, indeed the related config is already described. I'll remove this sentence.
+
+*--- etienne-lms (2026-08-24 14:35:21+00:00)
+Ok
+
+*--- etienne-lms (2026-08-24 14:38:01+00:00)
+Ok, maybe it is. I'll get rid of this last commit. We'll address this case later if really needed.
+
+*--- etienne-lms (2026-08-24 14:38:49+00:00)
+My apologies for the headache :-\
+
+*--- etienne-lms (2026-08-24 14:49:19+00:00)
+~~Comments addressed.~~
+~~I've remove the last commit: *"drivers: entropy: psa_crypto: Threshold to stop refilling the pool"*.~~
+Sorry, I forgot to post the update....
+
+*--- etienne-lms (2026-08-24 15:03:20+00:00)
+Comments addressed.
+I've remove the last commit: "drivers: entropy: psa_crypto: Threshold to stop refilling the pool".
+(now it's up to date :-)
+
+*--- etienne-lms (2026-09-02 11:45:58+00:00)
+Gentle ping for review.
+
+*--- tomi-font (2026-09-03 08:16:48+00:00)
+Should return an error only if `flags & ENTROPY_BUSYWAIT`, otherwise return `rand_size`, no?
+
+*--- tomi-font (2026-09-03 08:33:28+00:00)
+```suggestion
+	if (unlikely((flags & ENTROPY_BUSYWAIT) != 0U) && rand_size < length) {
+```
+?
+
+*--- tomi-font (2026-09-03 08:35:55+00:00)
+```suggestion
+	if (likely((flags & ENTROPY_BUSYWAIT) == 0U) || rand_size >= length) {
+```
+?
+
+*--- tomi-font (2026-09-03 08:37:54+00:00)
+```suggestion
+/* Dedicated workqueue, used only when CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR_WORKQUEUE is enabled */
+```
+
+*--- tomi-font (2026-09-03 08:45:59+00:00)
+can't quite use `prior` like this :slightly_smiling_face: 
+```suggestion
+	/* Refill the pool in case it was used prior to the workqueue having been started */
+```
+or
+```suggestion
+	/* Refill the pool in case it was used before the workqueue got started */
+```
+
+*--- tomi-font (2026-09-03 08:50:21+00:00)
+Okay, makes sense.
+
+*--- etienne-lms (2026-09-07 13:19:11+00:00)
+Either are ok to me. I'll update as you suggest.
+
+*--- etienne-lms (2026-09-07 13:21:23+00:00)
+That what I intended to implemented: if `rand_size` is too small AND busy-wait flag is set, return `-EBUSY`.
+Otherwise, the return instruction below returns the number of provided random bytes.
+Did I miss something?
+
+*--- etienne-lms (2026-09-07 13:22:03+00:00)
+Thanks.
+
+*--- etienne-lms (2026-09-07 13:33:27+00:00)
+Rebased and addressed review comments ([diff here](https://github.com/zephyrproject-rtos/zephyr/compare/dfb0c73583b08eb6f075306588eaa6c038ead2b1..68441ed124010fb8080eab2d2b3fc838ea90430f)).
+
+*--- valeriosetti (2026-09-08 14:26:34+00:00)
+I suggest adding the `#ifdef CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR` and `#ifdef CONFIG_ENTROPY_PSA_CRYPTO_RNG_ISR_WORKQUEUE` guards in the code instead of `__maybe_unused` and `Dummy value to keep compiler happy` fixes.
+Wdyt?
+
+*--- tomi-font (2026-09-09 12:01:34+00:00)
+I would also lean on that, the CI test will take care of making sure the ISR implementation builds and runs fine.
+
+*--- etienne-lms (2026-09-09 12:15:21+00:00)
+Ok, makes sense if the test part of this P-R is also accepted.
+I'll update this series accordingly.
+Thanks.
+
+*--- etienne-lms (2026-09-09 15:17:20+00:00)
+Review comment addressed. [Diff here](https://github.com/zephyrproject-rtos/zephyr/compare/68441ed124010fb8080eab2d2b3fc838ea90430f..66c47cdb74ba1f1066979d2cbb5244f3186ce739). 
+Note: I moved `entropy_psa_crypto_rng_get_entropy()` definition in the source files so that it's easier to read.
+
+*--- valeriosetti (2026-09-10 08:11:45+00:00)
+why `__maybe_unused` here?
+
+*--- valeriosetti (2026-09-10 08:43:00+00:00)
+I was wondering if we could extend `tests.yaml` adding an harness that grep for `Refilled %zu bytes` (i.e. the debug string that's printed at the end of `entropy_psa_crypto_isr_refill_work_fn`). That would ensure the refill mechanism really kicked in. Wdyt?
+
+*--- valeriosetti (2026-09-10 08:46:46+00:00)
+I might be missing something, but how can it happen that `ctx->isr_wq == NULL`? It seems to me that's always assigned in `entropy_psa_crypto_init_post_kernel`

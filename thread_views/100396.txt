@@ -1,0 +1,444 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/100396
+TITLE: doc: safety: Update safety requirements documentation
+
+*--- opening post by nicpappler (2025-12-02 20:13:11+00:00)
+Reorder content: This PR gives more structure to the safety requirements section to the documentation.
+Adding more content: Adding detailed getting started guide for requirements and the requirements review checklist.
+
+*--- NelsonFerragut (2025-12-03 19:10:16+00:00)
+This line currently gives information without specifying a preferred process. It should specify the recommended practice. IMHO, using StrictDoc's ability to automatically update the UIDs is a good idea.
+
+```suggestion
+Set the UID to ``TBD`` so StrictDoc can generate it automatically in a later step.
+```
+
+*--- nicpappler (2025-12-09 14:34:31+00:00)
+Thank you Nelson, good suggestion.
+
+*--- jkey-eng (2025-12-09 21:57:40+00:00)
+Any thought on how to identify the component name to be used? A big part of the challenge of doing this work in a volunteer distributed fashion is going to be alignment across the design. Ideally it'd be a simple statement of compare to architecture, but that doesn't work based on the current documentation stage AFAIK.
+
+Part of the challenge I had when writing requirements was alignment between software component requirements, what files the component referenced, and the corresponding documentation.
+
+It definitely wasn't as easy as create component doc based on the new component. 
+
+I'm assuming the goal of this doc is just to capture the steps, so what you currently have is good but I figured I'd raise the question.
+
+*--- jkey-eng (2025-12-09 22:01:02+00:00)
+```suggestion
+  These component level requirements break down the system-level expectations into detailed specifications for individual components within the RTOS. 
+```
+
+*--- jkey-eng (2025-12-09 22:04:03+00:00)
+It'd be good to update this in the future to point to a specific component that has gone through the rigorous review and that everyone is happy with. A simple "go look" could lead to fragmentation.
+
+*--- tobiaskaestner (2026-02-04 18:31:27+00:00)
+Looking good for me, thanks @nicpappler for putting this together.
+
+*--- tobiaskaestner (2026-02-04 18:33:11+00:00)
+Looks like I can't approve though ;-) @parphane you got more luck than me?
+
+*--- nashif (2026-02-04 20:06:55+00:00)
+> Looks like I can't approve though ;-)
+
+hmmm, everyone should be able to review/approve, the question is if he approval would count! You are a member of the project and should be able to approve, please confirm what you mean with that...
+
+*--- kartben (2026-02-04 20:32:53+00:00)
+please follow the guidelines for [heading underlines](https://docs.zephyrproject.org/latest/contribute/documentation/guidelines.html#headings) and fix throughout the PR
+
+*--- kartben (2026-02-04 20:34:09+00:00)
+this is not how hyperlinks are created in ReST :)
+https://docs.zephyrproject.org/latest/contribute/documentation/guidelines.html#links-and-cross-references
+
+you can check the rendered version of this PR at https://builds.zephyrproject.io/zephyr/pr/100396/docs/index.html which will show the improper links
+
+*--- kartben (2026-02-04 22:10:37+00:00)
+```suggestion
+   :maxdepth: 1
+```
+
+*--- kartben (2026-02-04 22:11:10+00:00)
+```suggestion
+Each new or changed requirement needs to be analysed, to make sure it is suitable and to identify if it is affecting the safety of Zephyr in any kind.
+```
+
+*--- kartben (2026-02-04 22:12:52+00:00)
+i suggest to add some paragraph breaks, it's _really_ hard to read
+
+<img width="849" height="608" alt="Image" src="https://github.com/user-attachments/assets/363773e2-5e2e-40a9-828a-85c77a4a2545" />
+
+*--- kartben (2026-02-04 22:13:30+00:00)
+same here, probably
+
+*--- kartben (2026-02-04 22:14:21+00:00)
+```suggestion
+   :maxdepth: 1
+```
+
+*--- Copilot (2026-02-04 22:20:54+00:00)
+Spelling error: "Objections" should be "Objectives" - the section is about goals/objectives, not objections/complaints
+```suggestion
+Objectives of Requirements Management in the Zephyr Project
+```
+
+*--- Copilot (2026-02-04 22:20:55+00:00)
+Grammar issue: "If you set the UID to ``TBD`` so StrictDoc can generate it automatically" is grammatically incorrect. It should be either "If you set the UID to ``TBD``, StrictDoc can generate it automatically" or "Set the UID to ``TBD`` so StrictDoc can generate it automatically"
+```suggestion
+If you set the UID to ``TBD``, StrictDoc can generate it automatically.
+```
+
+*--- Copilot (2026-02-04 22:20:55+00:00)
+Spelling error: "verifieable" should be "verifiable"
+```suggestion
+     - Each requirement must be verifiable. If you cannot define acceptance criteria for your requirement, the requirement needs to be reconsidered and maybe defined differently. Acceptance critieria must at least be derivable from how the requirement is written.
+```
+
+*--- Copilot (2026-02-04 22:20:56+00:00)
+Spelling error: "desgin" should be "design"
+```suggestion
+     - Requirements must describe the "what" not the "how" something is done. There are corner cases where the requirement intentionally restricts the implementation variants, usually for some design reasons, these reasons then must be stated in the requirement rational or comment (whatever is used)
+```
+
+*--- Copilot (2026-02-04 22:20:56+00:00)
+Spelling error: "havinig" should be "having"
+```suggestion
+     - Consider having two requirements: **Requirement A: The RTOS shall support a maximum of 10 concurrent tasks. Requirement B: The RTOS shall support up to 20 concurrent tasks for high-performance applications.** - These two requirements clearly contradict each other, but might both be correct for the persons writing each one of them. Usually having requirements like this needs communication between the authors of the requirements, and a possible solution might be the following: **The RTOS shall support up to 20 concurrent tasks, with a default configuration of 10 tasks for standard applications.**
+```
+
+*--- Copilot (2026-02-04 22:20:56+00:00)
+Spelling error: "clearify" should be "clarify"
+```suggestion
+     - Requirements must not be dublicated. If you need a requirement to clarify things in multiple locations, make sure one is the "main requirement" and the others are just linked information.
+```
+
+*--- Copilot (2026-02-04 22:20:57+00:00)
+Spelling error: "emphazises" should be "emphasizes"
+```suggestion
+already emphasizes implementation details, from kernel functionality, to API configuration options and specific module behaviour. While this is essential for developers,
+```
+
+*--- Copilot (2026-02-04 22:20:57+00:00)
+Spelling error: "idendifiable" should be "identifiable"
+```suggestion
+The requirements that are created, modified or updated need to be suitable. This means they need to be unambiguous, uniquely identifiable, feasible, testable etc.
+```
+
+*--- Copilot (2026-02-04 22:20:57+00:00)
+Grammar error: "he requirements" should be "The requirements" (missing 'T')
+```suggestion
+     - The requirements must not conflict or contradict each other.
+```
+
+*--- Copilot (2026-02-04 22:20:57+00:00)
+Spelling error: "wisiwig" should be "WYSIWYG" (What You See Is What You Get)
+```suggestion
+For those that prefer editing in a WYSIWYG fashion, the .html exports of StrictDoc can also be edited using StrictDoc's local server.
+```
+
+*--- Copilot (2026-02-04 22:20:58+00:00)
+Spelling error: "critieria" should be "criteria"
+```suggestion
+     - Each requirement must be verifieable. If you cannot define acceptance criteria for your requirement, the requirement needs to be reconsidered and maybe defined differently. Acceptance criteria must at least be derivable from how the requirement is written.
+```
+
+*--- Copilot (2026-02-04 22:20:58+00:00)
+Spelling error: "componeent" should be "component"
+```suggestion
+  These component level requirements break down the system-level expectations into detailed specifications for individual components within the RTOS.
+```
+
+*--- Copilot (2026-02-04 22:20:58+00:00)
+Spacing issue: There should be a space after the comma in "document ,e.g." - it should be "document, e.g."
+```suggestion
+  - a list of :file:`.sdoc` snippet files that compile together to a big software requirements document, e.g.
+```
+
+*--- Copilot (2026-02-04 22:20:58+00:00)
+Spelling error: "dublicated" should be "duplicated"
+```suggestion
+     - Requirements must not be duplicated. If you need a requirement to clearify things in multiple locations, make sure one is the "main requirement" and the others are just linked information.
+```
+
+*--- Copilot (2026-02-04 22:20:59+00:00)
+Spelling error: "specifictations" should be "specifications"
+```suggestion
+capabilities of the Zephyr RTOS as a whole, and Software Requirements to break down the System Requirements' expectations into detailed specifications for individual components within the RTOS.
+```
+
+*--- Copilot (2026-02-04 22:20:59+00:00)
+The link syntax is incorrect for reStructuredText. The text uses Markdown link syntax [StrictDoc](...) but should use RST syntax with backticks and angle brackets. This should be formatted as a proper RST link.
+```suggestion
+The Zephyr requirements are managed in the ``reqmgmt`` repository using `StrictDoc <https://github.com/strictdoc-project/strictdoc>`_. The repo includes:
+```
+
+*--- Copilot (2026-02-04 22:20:59+00:00)
+Spelling error: "needsto" should be "needs to" (missing space)
+```suggestion
+Each new or changed requirement needs to be analysed, to make sure it is suitable and to identify if it is affecting the safety of Zephyr in any kind.
+```
+
+*--- Copilot (2026-02-04 22:20:59+00:00)
+Spelling error: "funtionality" should be "functionality"
+```suggestion
+     - Avoid vague statements such as **some, sufficient, typical, many, several, few, ...**. Statements like **The Zephyr Kernel should provide functionaliy xyz where possible** are not accurate enough and leave room for interpretation. Also **should** must be replaced with the unambigous **shall**. The **where possible** must be replaced with a definition where the author of the requiremement wants the functionality to be provided. This can be a list of cases, system states or other conditions. As long as they are clearly defined.
+```
+
+*--- Copilot (2026-02-04 22:21:00+00:00)
+Spelling error: "unambigous" should be "unambiguous"
+```suggestion
+     - Avoid vague statements such as **some, sufficient, typical, many, several, few, ...**. Statements like **The Zephyr Kernel should provide functionaliy xyz where possible** are not accurate enough and leave room for interpretation. Also **should** must be replaced with the unambiguous **shall**. The **where possible** must be replaced with a definition where the author of the requiremement wants the funtionality to be provided. This can be a list of cases, system states or other conditions. As long as they are clearly defined.
+```
+
+*--- Copilot (2026-02-04 22:21:00+00:00)
+Spelling error: "suplemented" should be "supplemented"
+```suggestion
+     - Statements like **The signal a shall switch on and off the yellow LED and the error state shall be indicated by switching on the red LED** are not atomic. This needs to go into two requirements: **REQ1: The signal a shall switch on and off the yellow LED.**and **REQ2: The error state shall be indicated by switching on the red LED.** This also can be supplemented by a **REQ3(variant a): Yellow LED and the red Error LED must be separate** or **REQ3(varianb b): Yellow LED and red Error LED can be combined in case of TBD**.
+```
+
+*--- Copilot (2026-02-04 22:21:01+00:00)
+Spelling error: "preemtive" should be "preemptive"
+```suggestion
+     - Statements like **The system shall use a preemptive RTOS to guarantee deterministic task scheduling. The system also need to ensure that all tasks, including low-priority background logging tasks, complete without preemption to preserve data integrity.** are contradicting. Stuff like this must be avoided. If both options shall be available, you must define the conditions for these options and how to configure the options.
+```
+
+*--- Copilot (2026-02-04 22:21:01+00:00)
+Spelling error: "desciptive" should be "descriptive"
+```suggestion
+     - A descriptive title of the requirement. Use short and concise requirement titles.
+```
+
+*--- Copilot (2026-02-04 22:21:01+00:00)
+Spelling error: "varianb" should be "variant"
+```suggestion
+     - Statements like **The signal a shall switch on and off the yellow LED and the error state shall be indicated by switching on the red LED** are not atomic. This needs to go into two requirements: **REQ1: The signal a shall switch on and off the yellow LED.**and **REQ2: The error state shall be indicated by switching on the red LED.** This also can be suplemented by a **REQ3(variant a): Yellow LED and the red Error LED must be separate** or **REQ3(variant b): Yellow LED and red Error LED can be combined in case of TBD**.
+```
+
+*--- Copilot (2026-02-04 22:21:01+00:00)
+Spelling error: "reagrding" should be "regarding"
+```suggestion
+Consistency regarding language and choice of words shall be maintained across all requirements.
+```
+
+*--- Copilot (2026-02-04 22:21:02+00:00)
+Spelling error: "functionaliy" should be "functionality"
+```suggestion
+     - Avoid vague statements such as **some, sufficient, typical, many, several, few, ...**. Statements like **The Zephyr Kernel should provide functionality xyz where possible** are not accurate enough and leave room for interpretation. Also **should** must be replaced with the unambigous **shall**. The **where possible** must be replaced with a definition where the author of the requiremement wants the funtionality to be provided. This can be a list of cases, system states or other conditions. As long as they are clearly defined.
+```
+
+*--- Copilot (2026-02-04 22:21:02+00:00)
+Spelling error: "requiremement" should be "requirement"
+```suggestion
+     - Avoid vague statements such as **some, sufficient, typical, many, several, few, ...**. Statements like **The Zephyr Kernel should provide functionaliy xyz where possible** are not accurate enough and leave room for interpretation. Also **should** must be replaced with the unambigous **shall**. The **where possible** must be replaced with a definition where the author of the requirement wants the funtionality to be provided. This can be a list of cases, system states or other conditions. As long as they are clearly defined.
+```
+
+*--- Copilot (2026-02-04 22:21:02+00:00)
+Spelling error: "appraoch" should be "approach"
+```suggestion
+represents Zephyr's structured approach to requirements management, currently focusing on the creation of requirements within the scope of
+```
+
+*--- Copilot (2026-02-04 22:21:03+00:00)
+Spelling error: "caputured" should be "captured"
+```suggestion
+.. list-table:: Structure for requirements captured in StrictDoc
+```
+
+*--- Copilot (2026-02-04 22:21:03+00:00)
+Spelling error: "requireents" should be "requirements"
+```suggestion
+     - A user story describing the requirement (optional, only add if it adds additional value to the requirements statement)
+```
+
+*--- Copilot (2026-02-04 22:21:03+00:00)
+Spelling error: "litterally" should be "literally"
+```suggestion
+     - A bad example is e.g. **The RTOS shall guarantee zero‑latency interrupt handling for all devices under all conditions.**, which is physically impossible, as no hardware can respond in literally zero time. Better would be something more concrete like **The RTOS shall guarantee an interrupt latency of ≤ 5 µs on the target HW architecture at 80 MHz under maximum system load.**
+```
+
+*--- nicpappler (2026-02-18 18:18:13+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:18:21+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:18:28+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:18:35+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:18:47+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:18:54+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:00+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:11+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:18+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:25+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:30+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:38+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:47+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:19:53+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:20:02+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:20:08+00:00)
+done
+
+*--- nicpappler (2026-02-18 18:20:17+00:00)
+done
+
+*--- Copilot (2026-02-18 18:27:14+00:00)
+Grammar: "Is the requirements internally consistent?" should be "Is the requirement internally consistent?".
+```suggestion
+     - Is the requirement internally consistent?
+```
+
+*--- Copilot (2026-02-18 18:27:15+00:00)
+Typo/grammar: "the actually outcome" should be "the actual outcome".
+```suggestion
+The review outcome must be documented in the PR review, in a way that it is clear that this checklist has been used and the actual outcome of the review regarding
+```
+
+*--- Copilot (2026-02-18 18:27:15+00:00)
+The second list-table sets `:header-rows: 0` but then includes an ID/Question/Explanation/Example header row. With header-rows set to 0, Sphinx will treat this as data rather than a header. Set `:header-rows: 1` (or remove the header row).
+
+*--- Copilot (2026-02-18 18:27:15+00:00)
+Typo: "Zephyrproject" should be "Zephyr Project".
+```suggestion
+In the tests of the Zephyr Project adherence of the implementation to the functionality described in the requirements must be evaluated.
+```
+
+*--- Copilot (2026-02-18 18:27:16+00:00)
+The StrictDoc link is missing the opening backtick, so the external link markup will not render correctly in reStructuredText. Wrap it as an inline link (e.g., `StrictDoc <...>`_).
+```suggestion
+The Zephyr requirements are managed in the ``reqmgmt`` repository using `StrictDoc <https://github.com/strictdoc-project/strictdoc>`_. The repo includes:
+```
+
+*--- Copilot (2026-02-18 18:27:16+00:00)
+This guide instructs contributors to set `UID: TBD` for new requirements, but `safety_requirements.rst` says to not add a UID/UID field for new requirements. Please reconcile these instructions (either document both supported workflows, or make both pages recommend the same approach) to avoid confusing new contributors.
+
+*--- Copilot (2026-02-18 18:27:16+00:00)
+The command uses `strictDoc`, but elsewhere in these docs the CLI is referenced as `strictdoc` (lowercase). Since users will copy/paste this, please make the executable name consistent/correct.
+```suggestion
+#. After completing work on the new requirements execute: ``strictdoc manage auto-uid .``
+```
+
+*--- Copilot (2026-02-18 18:27:17+00:00)
+Typo: "verifibility" should be "verifiability".
+```suggestion
+     - The requirement really must only describe one thing that needs to be fulfilled. Otherwise things like safety analysis, unique linking to architectural components and implementation and verifiability can be impaired.
+```
+
+*--- Copilot (2026-02-18 19:51:01+00:00)
+The second list-table declares ":header-rows: 0" but the first row is clearly a header (ID/Question/Explanation/Example). This will render the header as a normal row; set ":header-rows:" to 1 (or remove the header row if you truly want no header).
+```suggestion
+   :header-rows: 1
+```
+
+*--- Copilot (2026-02-18 19:51:01+00:00)
+The UID guidance is internally inconsistent: this says to not add a UID field for new requirements, but the getting-started doc (and later bullets) describe using "UID: TBD" and auto-uid generation. Please align the instructions, and also fix the command to use the correct executable name/casing ("strictdoc", matching the other docs).
+```suggestion
+#. For new requirements, set the UID field to ``TBD`` (or leave it empty if it already exists). Do not invent permanent UIDs manually.
+#. After completing work on the new requirements execute: ``strictdoc manage auto-uid .``
+#. Establish links between the requirements using the newly assigned UIDs, if needed.
+```
+
+*--- kartben (2026-02-19 15:08:38+00:00)
+@nicpappler can you please check you've actually pushed the changes you wanted to? All the typos and grammar issues are still there as far as I can see. It looks like you did multiple pushes but all of them are "void" so you might have forgotten to stage your changes?
+
+*--- Copilot (2026-02-20 22:17:05+00:00)
+Grammar issue: "If is not sufficient" is missing the subject "it". Should be "If it is not sufficient".
+```suggestion
+       If it is not sufficient, contact the Safety Working Group or Testing Working group to get this addressed.
+```
+
+*--- Copilot (2026-02-20 22:17:05+00:00)
+Inconsistency in wording: The old file used "succinct" in the list "Clear (concise, succinct, simple, precise)" but the new file changes it to "brief". For consistency with the original documentation, consider keeping "succinct" instead of "brief".
+```suggestion
+* Clear (concise, succinct, simple, precise)
+```
+
+*--- Copilot (2026-02-20 22:17:06+00:00)
+American vs British English inconsistency: The word "behaviour" should be "behavior" to match Zephyr's American English documentation standard (see doc/contribute/contributor_expectations.rst line 191).
+```suggestion
+already emphasizes implementation details, from kernel functionality, to API configuration options and specific module behavior. While this is essential for developers,
+```
+
+*--- Copilot (2026-02-20 22:17:06+00:00)
+Spelling error: "functionaliy" should be "functionality".
+```suggestion
+       Statements like **The Zephyr Kernel should provide functionality xyz where possible** are not accurate enough and leave room for interpretation.
+```
+
+*--- Copilot (2026-02-20 22:17:06+00:00)
+Spelling error: "preemtpive" should be "preemptive".
+```suggestion
+     - Statements like **The system shall use a preemptive RTOS to guarantee deterministic task scheduling.
+```
+
+*--- Copilot (2026-02-20 22:17:06+00:00)
+American vs British English inconsistency: The word "behaviour" should be "behavior". Zephyr documentation uses American English consistently (as noted in doc/contribute/contributor_expectations.rst line 191: "must be written in American English"). The codebase uses "behavior" throughout (see examples in doc/kernel/services/interrupts.rst, doc/develop/test/twister.rst, and many other files).
+```suggestion
+  System requirements describe the behavior of the Zephyr RTOS (= the system here).
+```
+
+*--- Copilot (2026-02-23 16:53:36+00:00)
+Grammar issue: Missing period at the end of sentence. The sentence starting with "Beneath the System Requirements layer" should end with a period
+```suggestion
+  Beneath the System Requirements layer, Software requirements refine the system-level requirements to a more granular level.
+```
+
+*--- Copilot (2026-02-23 16:53:36+00:00)
+Inconsistent naming: "Zephyrproject" should be "Zephyr Project" (with a space) to match the naming convention used consistently throughout the documentation
+```suggestion
+In the tests of the Zephyr Project adherence of the implementation to the functionality described in the requirements must be evaluated.
+```
+
+*--- Copilot (2026-02-23 16:53:37+00:00)
+Grammar issue: This sentence is missing a period after "checklist". The sentence should be two sentences or the period should be added after "safety_requirements_checklist`"
+```suggestion
+More details regarding the checklist and the formal expectations can be found in the :ref:`safety_requirements_checklist`.
+```
+
+*--- Copilot (2026-02-23 16:53:37+00:00)
+Grammar issue: There's an unnecessary comma after "requirements". The sentence would read better as "For this a two level structure of requirements has been created on top of the existing documentation structure" (remove the comma after "requirements")
+```suggestion
+For this a two level structure of requirements has been created on top of the existing documentation structure, System Requirements at the highest level to define overarching
+```
+
+*--- nicpappler (2026-02-24 14:40:57+00:00)
+wontfix
+
+*--- nicpappler (2026-02-24 16:35:49+00:00)
+@kartben and @kestewart - I think I now caught all comments from you guys and from copilot. Learning a lot how GitHub plays hide and display comments... Can you please have one more look at the current state?
+
+*--- jkey-eng (2026-02-24 19:08:33+00:00)
+Your list is broken in the wiki view - Likely needs a line break between the upper bullet.
+
+*--- jkey-eng (2026-02-24 19:08:46+00:00)
+Your list is broken in the wiki view - Likely needs a line break between the upper bullet.
+
+*--- kartben (2026-03-17 13:24:10+00:00)
+@tobiaskaestner @parphane please review
+
+*--- tobiaskaestner (2026-04-07 14:06:34+00:00)
+LGTM, thanks @nicpappler for your patience with the somewhat slow review process

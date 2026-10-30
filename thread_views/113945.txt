@@ -1,0 +1,9 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113945
+TITLE: drivers: sensor: si7210: Fix 2000G scale coefficient OTP addresses
+
+*--- opening post by kartben (2026-07-19 11:47:08+00:00)
+The 2000G A3-A5 OTP addresses jumped from 0x29 to 0x30-0x32 instead
+of continuing at 0x2A-0x2C, pointing at the wrong registers.
+
+<img width="1123" height="105" alt="image" src="https://github.com/user-attachments/assets/1de52948-474e-4dd6-8437-ef2537fd7696" />
+https://www.silabs.com/documents/public/data-sheets/si7210-datasheet.pdf

@@ -1,0 +1,253 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109650
+TITLE: sample: drivers: dali: add a logger sample
+
+*--- opening post by markushx (2026-05-22 09:05:50+00:00)
+A sample that logs frames on a DALI bus to UART/RTT.
+
+https://github.com/zephyrproject-rtos/zephyr/pull/88128 which added the DALI API has been merged now.
+
+This PR is an update of stale PR https://github.com/zephyrproject-rtos/zephyr/pull/100632, which cannot be reopened.
+
+This PR moves the DALI sample from samples/drivers/dali/ to samples/drivers/dali/blinky/ and adds samples/drivers/dali/logger.
+
+This updated PR adapts to the changes during the review of #88128 and adapts the output format as suggested in https://github.com/zephyrproject-rtos/zephyr/pull/100632#issuecomment-3649549994. 
+
+@SvenHaedrich please check https://github.com/SvenHaedrich/dali_mon/blob/main/source/tests/sample.txt against https://github.com/SvenHaedrich/dali_mon/blob/main/docs/serial.md, the output currently does not have
+```
+<error>     : either a 
+            "-" (minus) indicating normal state, or 
+            "*" (asteriks) inidcating an error
+```
+
+Tested on a nRF52840DK with a DALI shield.
+
+dali_mon reacts to start-up and alive log messages with e.g. `0.000 |  -63.009 | value error`, thus I disabled several logs and boot banner.
+
+*--- markushx (2026-05-22 14:21:28+00:00)
+The Doc build error / timeout seems unrelated to this PR.
+
+*--- kartben (2026-05-26 12:37:42+00:00)
+mmm that's a lot of customization that just seems to be for the sake of aligning with your own personal preferences? is this really needed?
+
+*--- kartben (2026-05-26 12:38:30+00:00)
+i am not sure i understand why we need a dedicated sample for this .. can't you just add logging to the existing sample?..
+
+*--- SvenHaedrich (2026-05-27 07:50:50+00:00)
+Tested with the nRF52840dk hardware. 
+Result looks fine:
+
+```shell
+$ west build --board nrf52840dk/nrf52840 samples/drivers/dali/logger/
+$ west flash 
+$ stty -F /dev/ttyACM0 115200
+$ dali_mon --echo < /dev/ttyACM0
+*** Booting Zephyr OS build v4.4.0-3258-g9b8a333e32a4 ***
+[00008300] D: DALI Logger
+[00008300] D: Target board: nrf52840dk/nrf52840
+[00330045] D: {00002758-10 0000ff06}
+10.072 |    0.000 |     FF06 | BC GEAR              RECALL MIN LEVEL
+[00446983] D: {00003548-10 0000ff05}
+13.640 |    3.568 |     FF05 | BC GEAR              RECALL MAX LEVEL
+[00745156] D: {000058d4-10 00000100}
+22.740 |    9.100 |     0100 | G00                  OFF
+[01974384] D: ALIVE
+```
+
+*--- SvenHaedrich (2026-05-27 07:55:07+00:00)
+I agree with @kartben. And I understand @markushx, personal configurations sneak easily into the PR. Strictly speaking you just require `CONFIG_LOG=y` and `CONFIG_LOG_DEFAULT_LEVEL=3` to run the sample.
+
+I am still not sure about using the logging system to present the result. Logging is intended for debugging activities. This sample is an application where the purpose is  _printing_ DALI frame information. Consider to use `printk` for output.
+
+*--- SvenHaedrich (2026-05-27 08:06:57+00:00)
+Actually, I would like to see two separate code samples. My reasons are:
+ - Keep examples simple. Merging two example codes into one makes it harder to understand how the API is used.
+ - Each of the sample demonstrates a _classic_ function. One is your all time favourite `blinky` the other a sniffer.
+
+*--- SvenHaedrich (2026-05-27 08:08:32+00:00)
+(personal preference) I prefer blinking `LED0` to indicate that the device is still alive.
+
+*--- kartben (2026-05-28 13:23:09+00:00)
+please setup your code editor to wrap at 100 columns, and fix across PR
+
+*--- markushx (2026-06-02 09:33:28+00:00)
+I was trying to be nice to dali_mon, but it is very forgiving.
+
+I will change to
+```
+CONFIG_DALI=y
+
+CONFIG_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# disable boot banner to avoid value error in dali_mon
+CONFIG_BOOT_BANNER=n
+```
+
+I will also remove the LOG_s on start-up.
+
+*--- markushx (2026-06-02 09:33:41+00:00)
+will change.
+
+*--- markushx (2026-06-02 09:49:09+00:00)
+OK, I did so manually. Interestingly editorconfig extension did not help and there's not rst formatter for VScode (even with https://docs.zephyrproject.org/latest/develop/tools/vscode.html#documentation-languages-extensions)?
+
+*--- markushx (2026-06-02 15:51:59+00:00)
+done.
+
+*--- SvenHaedrich (2026-06-03 06:58:23+00:00)
+This is not required by `dali_mon`. Please remove this configuration as well to keep the example as lean and clear as possible.
+
+*--- SvenHaedrich (2026-06-03 06:59:40+00:00)
+With the latest hardware model this should be:
+
+```
+:board: nrf52840dk/nrf52840
+```
+
+*--- markushx (2026-06-15 12:47:13+00:00)
+You mean 
+
+```
+CONFIG_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+```
+
+or 
+
+```
+# disable boot banner to avoid value error in dali_mon
+CONFIG_BOOT_BANNER=n
+```
+
+If the boot banner is on (which was on on nrf52840), dali_mon reports an error, which can be removed, with this setting.
+
+*--- markushx (2026-06-15 12:52:55+00:00)
+Changed.
+
+*--- SvenHaedrich (2026-06-16 17:45:28+00:00)
+I am sorry about the ambigeous marking from my review. I was only addressing the `CONFIG_BOOT_BANNER` setting. Logging is necessary, otherwise there would be no output at all from the sample.
+
+I could not reproduce the error from the boot-banner, see my earlier comment:
+https://github.com/zephyrproject-rtos/zephyr/pull/109650#issuecomment-4552555956
+
+I would like to see how `dali_mon` fails. Anyhow, I believe it is nice when the logger output can be feed into the `dali_mon` tools but primary goal should be lean and clean Zephyr sample code.
+
+*--- markushx (2026-06-22 12:37:31+00:00)
+Whenever I press the reboot button on the nRF52840 DK, I get a value error:
+
+```
+58.996 |    0.000 |     FF00 | BC GEAR              OFF
+61.002 |    2.006 |     FF05 | BC GEAR              RECALL MAX LEVEL
+63.009 |    2.007 |     FF00 | BC GEAR              OFF
+0.000 |  -63.009 | value error
+2.143 |    0.000 |     FF00 | BC GEAR              OFF
+4.147 |    2.004 |     FF05 | BC GEAR              RECALL MAX LEVEL
+```
+
+Due to the boot banner:
+
+```
+[00:00:07.715,423] <inf> D: {00001e23:10 0000ff00}
+[00:00:09.721,984] <inf> D: {000025f9:10 0000ff05}
+[00:00:11.727,386] <inf> D: {00002dcf:10 0000ff00}
+*** Booting Zephyr OS build v4.4.0-5197-g6f49860fc7a2 ***
+[00:00:01.995,330] <inf> D: {000007cb:10 0000ff00}
+[00:00:03.998,840] <inf> D: {00000f9e:10 0000ff05}
+```
+
+*--- Copilot (2026-06-22 12:50:17+00:00)
+`k_uptime_get()` returns a signed 64-bit value (int64_t). Passing it to `%llx` without casting is a printf-format type mismatch (undefined behavior). Cast to `unsigned long long` (or use PRI macros) before logging.
+
+*--- Copilot (2026-06-22 12:50:18+00:00)
+This callback is only used within this translation unit; make it `static` to avoid exporting an unnecessary global symbol.
+
+*--- Copilot (2026-06-22 12:50:18+00:00)
+The logger sample's test harness looks for a "Target board:" line, but the app never prints it. Also, `dali_set_receive_callback()` returns an error code that should be checked so setup failures don't go unnoticed.
+
+*--- Copilot (2026-06-22 12:50:18+00:00)
+`gpio_pin_configure_dt()` and `gpio_pin_toggle_dt()` return status codes; the configure error loses the reason and the toggle result is ignored entirely. Checking/propagating these errors makes the sample fail fast on misconfiguration.
+
+*--- Copilot (2026-06-22 12:50:19+00:00)
+The sample uses `DT_ALIAS(led0)` unconditionally, so it will fail to build on boards that have `dali0` but no `led0` alias. Gate the test with an additional `dt_alias_exists("led0")` condition.
+
+*--- Copilot (2026-06-22 12:50:19+00:00)
+Zephyr CMakeLists.txt files are expected to carry an SPDX license identifier header (e.g. many samples use `# SPDX-License-Identifier: Apache-2.0` as the first line). Add it here to satisfy licensing/compliance tooling.
+
+*--- Copilot (2026-06-22 12:50:19+00:00)
+This sample doesn't enable or use the USB device stack, but it unconditionally includes the USB sample common CMake snippet. This adds an unnecessary include path and can make it look like the sample depends on USB. Consider dropping it (or gating it behind a USB-related Kconfig/option).
+
+*--- Copilot (2026-06-22 12:50:19+00:00)
+Grammar: "can be build" should be "can be built".
+
+*--- SvenHaedrich (2026-06-26 07:47:13+00:00)
+Suppression of the Boot-Banner is still configured. 
+
+In the meantime I found out that the desired behaviour of `dali_mon` was only on _my machine_. Sorry about that. I pushed and deployed the desired behaviour of `dali_mon` here: https://github.com/SvenHaedrich/dali_mon. In return, please remove it here.
+
+*--- markushx (2026-06-29 12:38:27+00:00)
+> Suppression of the Boot-Banner is still configured.
+> 
+> In the meantime I found out that the desired behaviour of `dali_mon` was only on _my machine_. Sorry about that. I pushed and deployed the desired behaviour of `dali_mon` here: https://github.com/SvenHaedrich/dali_mon. In return, please remove it here.
+
+Removed and successfully tested against dali_mon v1.7.0.
+
+*--- SvenHaedrich (2026-06-30 09:01:11+00:00)
+@kartben can you please review your change request?
+
+*--- kartben (2026-07-02 08:11:54+00:00)
+the readme mentions the sample requires a shield attached to nrf52840dk - the tests.yaml (yes, btw, please rename this file to `tests.yaml`) file seems wrong as it's missing the shield? I guess this hasn't been tested?
+
+*--- kartben (2026-07-02 08:14:34+00:00)
+mmmh wait, looks like you forgot to add the shield definition for MIKROE-2672? Please add one
+
+*--- markushx (2026-07-02 09:21:49+00:00)
+dali/blinky needs a shield as well.
+
+https://github.com/zephyrproject-rtos/zephyr/pull/100631 has the shield, but I wanted to land this one before the shield.
+
+*--- SvenHaedrich (2026-07-02 09:34:16+00:00)
+Adding and using a shield definition is on the road-map for the subsystem: https://github.com/zephyrproject-rtos/zephyr/issues/108823. So,everyone agrees it is a useful addition. I am not sure to place the burden to do this on this PR.
+
+*--- markushx (2026-07-10 11:33:50+00:00)
+@kartben ^ have you seen the message of @SvenHaedrich?
+
+*--- SvenHaedrich (2026-08-26 08:22:12+00:00)
+@markushx Now we have the click-shield merged, do you want another shot on this PR?
+
+*--- markushx (2026-08-27 09:44:57+00:00)
+> @markushx Now we have the click-shield merged, do you want another shot on this PR?
+
+Updated. PTAL. Tested on nrf52840dk fine. Untested on nucleo.
+
+*--- SvenHaedrich (2026-09-01 18:36:37+00:00)
+Tested the PR against the nucleo_f091rc board. Works as intended:
+```
+$ west build --pristine always --board nucleo_f091rc --shield arduino_uno_click --shield mikroe_dali_2_click samples/drivers/dali/logger
+$ west flash
+$ stty -F /dev/ttyACM1 115200
+$ dali_mon --echo < /dev/ttyACM1
+*** Booting Zephyr OS build v4.4.0-13212-g63b527cca8a7 ***
+[00:00:12.782,000] <inf> dali_logger: {000031ee:10 0000ff05}
+12.782 | -116.391 |     FF05 | BC GEAR              RECALL MAX LEVEL
+[00:00:14.845,000] <inf> dali_logger: {000039fd:10 0000ff06}
+14.845 |    2.063 |     FF06 | BC GEAR              RECALL MIN LEVEL
+[00:00:16.813,000] <inf> dali_logger: {000041ad:10 0000ff00}
+16.813 |    1.968 |     FF00 | BC GEAR              OFF
+```
+
+*--- SvenHaedrich (2026-09-03 12:59:47+00:00)
+@kartben can you approve that your request is addressed?
+
+*--- kartben (2026-09-03 13:25:48+00:00)
+what are these overlays? It looks like they belong to the shield?
+
+*--- kartben (2026-09-03 13:26:46+00:00)
+i know nothing about dali but it feels weird that each board would need to have different settings here?
+
+*--- kartben (2026-09-03 13:29:40+00:00)
+it's really not ideal to have a sample that just assumes that a shield will be there... This would typically be a sample that lives in `samples/shields/` in this case. As per my earlier comment, ideally these overlays just go and become board overlays at the shield level
+
+*--- SvenHaedrich (2026-09-09 14:29:57+00:00)
+I agree. Right now the device tree settings are randomly placed into overlay files. Some are depending on the driver implementation, other on the board (shield) and its configuration.
+It is just that right now we only have one driver, two boards, and a single DALI peripheral. This means I can make some educated assumptions which device tree settings belong where but it will not be based on experience.
+Finally, the DT overlays are basically a copy of these for the existing `blinky`-sample. Meaning, these should be touched as well. Surely, the Zephyr-DALI implementation would benefit from the work. But it will also widen the scope of this PR. I suggest to merge this PR now and tackle the structural changes in a seperate PR.

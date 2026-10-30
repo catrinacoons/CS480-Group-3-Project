@@ -1,0 +1,145 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117131
+TITLE: tests: bsim: host: security: cover unreachable security levels
+
+*--- opening post by TheArkadiuszGrzelka (2026-08-23 09:03:21+00:00)
+Nothing in the tree checks what happens when an application asks for a security
+level the link's pairing method cannot deliver. The host refuses it in
+`smp_send_security_req()` and `smp_send_pairing_req()` through
+`sec_level_reachable()`, and that refusal is the only signal the caller gets: a
+host that instead paired anyway and reported a lower level as success would
+leave an application believing it has authentication the link does not carry.
+
+This adds a two-device bsim scenario pinning both halves of that behaviour.
+Neither peer registers authentication callbacks, so both are NoInputNoOutput and
+Just Works is the only method available. The peripheral asks for L4, which is
+unreachable on such a link, and asserts that the request is refused, that no
+pairing happened, and that the reported level did not move. It then asks for L2
+and asserts that one is granted, so the test cannot pass on a build that simply
+never pairs.
+
+Testing: `nrf52_bsim`, both devices report `Test end: PASS`. Watched it fail as
+well: removing the `sec_level_reachable()` guard in `smp_send_security_req()`
+makes the scenario fail on its first assertion, and it passes again once the
+guard is restored.
+
+*--- aescolar (2026-08-24 08:16:50+00:00)
+```suggestion
+```
+Please move the shell script to test**s**_scripts/ so this is not needed.
+
+*--- Copilot (2026-08-24 08:18:25+00:00)
+This assertion allows `BT_SECURITY_L2`, although the connection starts at L1 and the scenario is intended to prove that the refused request does not move the link's security level. A regression that silently changes the link to L2 could therefore pass this check. Assert the unchanged L1 level explicitly.
+
+*--- Copilot (2026-08-24 08:18:26+00:00)
+Quote the Zephyr base path so CMake treats it as one path value rather than a list if the environment value contains separators.
+
+This issue also appears on line 10 of the same file.
+
+*--- Copilot (2026-08-24 08:18:26+00:00)
+The unreachable request is only made by the peripheral. `bt_smp_start_security()` dispatches peripheral requests to `smp_send_security_req()` but central requests to `smp_send_pairing_req()` (`subsys/bluetooth/host/smp.c:6305-6350`), so removing the reachability guard from the central path still leaves this test passing. Add a central-requesting scenario that verifies the same L4 refusal and a reachable L2 control.
+
+*--- Copilot (2026-08-24 08:18:27+00:00)
+These expanded include paths should be quoted so each remains a single CMake path argument.
+
+*--- Copilot (2026-08-24 08:18:27+00:00)
+`pairing_complete()` runs from the Bluetooth callback context while the test thread reads this plain `bool` after sleeping. That is an unsynchronized cross-thread access, so the test can miss the event. Use a BabbleKit atomic flag here, as the neighboring connection/security events and existing bsim pairing tests do.
+
+*--- aescolar (2026-08-24 08:19:12+00:00)
+Nit: I'd ask to not add so many copyright lines, for a file that is effectively copypasted by an AI agent from another file with 2 trivial changes. There is nothing here to justify a copyright claim.
+(I'm not blocking on this)
+
+*--- Thalley (2026-08-24 08:30:37+00:00)
+```suggestion
+	TEST_ASSERT(g_conn == NULL || conn == g_conn, "Unexpected new connection.");
+
+	if (g_conn == ) {
+```
+
+*--- Thalley (2026-08-24 08:31:09+00:00)
+```suggestion
+	TEST_ASSERT(err == 0, "bt_enable failed (err %d)", err);
+
+	err = bt_conn_auth_info_cb_register(&auth_info_cb);
+	TEST_ASSERT(err == 0, "bt_conn_auth_info_cb_register failed (err %d)", err);
+```
+
+*--- Thalley (2026-08-24 08:31:26+00:00)
+```suggestion
+	TEST_ASSERT(err == 0, "bt_le_scan_stop failed (err %d)", err);
+
+	err = bt_conn_le_create(addr, BT_CONN_LE_CREATE_CONN, BT_LE_CONN_PARAM_DEFAULT, &g_conn);
+	TEST_ASSERT(err == 0, "bt_conn_le_create failed (err %d)", err);
+```
+
+*--- Thalley (2026-08-24 08:31:36+00:00)
+```suggestion
+	TEST_ASSERT(err == 0, "bt_le_scan_start failed (err %d)", err);
+```
+
+*--- Thalley (2026-08-24 08:31:48+00:00)
+```suggestion
+	TEST_ASSERT(err == 0, "bt_le_adv_start failed (err %d)", err);
+```
+
+*--- Thalley (2026-08-24 08:32:25+00:00)
+```suggestion
+	int err;
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, NULL, 0, NULL, 0);
+```
+
+Suggest to just use one of the pre-defined adv parameters
+
+*--- Thalley (2026-08-24 08:34:14+00:00)
+Suggest to replace this `bool` with a `DECLARE_FLAG`
+
+*--- Thalley (2026-08-24 08:34:33+00:00)
+```suggestion
+	TEST_ASSERT(err == 0, "Elevation to a reachable L2 was refused (err %d)", err);
+```
+
+*--- Thalley (2026-08-24 08:34:58+00:00)
+```suggestion
+	TEST_ASSERT(err == 0, "bt_conn_disconnect failed (err %d)", err);
+```
+
+*--- Thalley (2026-08-24 08:36:03+00:00)
+For completeness, suggest to also try and verify that `BT_SECURITY_L3` would fail
+
+*--- Thalley (2026-08-24 08:36:46+00:00)
+For completeness, suggest to also attempt to set security to Level 3 and 4 on the central side
+
+*--- TheArkadiuszGrzelka (2026-08-24 08:55:19+00:00)
+Removing the `sec_level_reachable()` guard from `smp_send_pairing_req()` makes the central round fail on its first assertion, `Elevation to an unreachable L4 was accepted (err 0)`; restoring it passes again. Scenario is green on nrf52_bsim, both devices reporting Test end.
+
+*--- aescolar (2026-08-24 09:05:29+00:00)
+The same about the .sh and cmake file.
+
+*--- TheArkadiuszGrzelka (2026-08-24 10:22:13+00:00)
+Covered as of d788404: `central.c` runs the same three attempts from the central side, after the bond from the peripheral round is dropped. L4 and L3 are refused with the link still at L1, L2 is granted. Removing `sec_level_reachable()` from `smp_send_pairing_req()` makes that round fail on its first assertion.
+
+*--- TheArkadiuszGrzelka (2026-08-24 10:22:15+00:00)
+Dropped from `tests.yaml`, `run_test.sh` and `CMakeLists.txt` in d788404. The C sources and `prj.conf` still carry it; say the word if you want those trimmed too.
+
+*--- jhedberg (2026-08-24 14:21:35+00:00)
+Shouldn't all of these variables be static, since you provide public accessor function for them?
+
+*--- jhedberg (2026-08-24 14:22:47+00:00)
+`struct bt_conn *conn = bt_conn_take(&g_conn);`
+
+*--- Thalley (2026-08-24 14:56:22+00:00)
+I was thinking the same, but they are in `common.c` and used by the other files as `extern`. 
+
+We could possible move the verification checks to `common.c`, or add a getter/setter function instead if we want these to be `static`. 
+
+In either case, some comments wouldn't hurt :D
+
+*--- TheArkadiuszGrzelka (2026-08-24 19:46:41+00:00)
+Done in 1a96493: `clear_g_conn()` takes the reference with `bt_conn_take(&g_conn)` instead of clearing the pointer by hand.
+
+*--- TheArkadiuszGrzelka (2026-08-24 20:09:36+00:00)
+Done in 6f34633. `g_conn`, the three flags, and the reported level/error are `static` in `common.c` now; `common.h` only declares functions.
+
+They were public because the central inlined its assertion on the peripheral-driven round. That check now lives in `common.c` as `expect_observed_elevation()`, which `expect_granted_elevation()` also calls, so both paths assert the same definition of a granted elevation.
+
+bsim run is green, and still fails if `sec_level_reachable()` is dropped from either send path.

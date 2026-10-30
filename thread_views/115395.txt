@@ -1,0 +1,13 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115395
+TITLE: cmake: modules: Support application shield-specific config files
+
+*--- opening post by kapbh (2026-08-05 08:13:32+00:00)
+Add auto-discovery of application-provided shield-specific files from a dedicated 'shields' directory, matched by shield name:
+  <app>/shields/<shield>.conf
+  <app>/shields/<shield>.overlay
+The files are picked up automatically whenever the matching shield is selected via SHIELD, in the order the shields are given. They are applied after prj.conf and the SoC files but before the board files, so board-specific settings take precedence over shield-specific ones.
+
+This lets a single application-level file cover a shield across all the host boards it can be mounted on, instead of duplicating the settings into every boards/<board>.conf or repeating them as manual overlays per test.
+
+
+Assisted-by: Cursor:Opus 4.8

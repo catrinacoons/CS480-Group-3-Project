@@ -1,0 +1,59 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/105800
+TITLE: drivers: regulator: common: apply startup_delay when enabled at boot
+
+*--- opening post by mohittalwar23 (2026-03-19 05:34:23+00:00)
+When a regulator is configured with regulator-boot-on, commit e572a6f7c6f
+changed regulator_fixed and regulator_gpio to configure the GPIO pin as
+GPIO_OUTPUT_ACTIVE during init, then pass is_enabled=true to
+regulator_common_init().
+
+This causes the startup_delay_us to be silently skipped since the delay
+only exists in the else-if branch, never reached when is_enabled=true.
+
+Fixes #102508
+
+*--- seov-nordic (2026-03-20 08:12:16+00:00)
+This is a neat fix for the issue this PR addresses, but I am unsure if it is generally good 🤔 
+You see, the regulator might already be enabled before any of the init code (both common and the specific regulator above it) is executed, whether by a bootloader or in hardware on startup. In that case, adding delay here wouldn't make sense.
+
+I am unsure though how else #102508 could be solved other than forcing a delay whenever the regulator stays/gets enabled. But since it affects only `regulator-fixed` and `regulator-gpio` (stemming from not knowing the current regulator state due to GPIO limitations) I think we'd be better off adding that delay to those only?
+
+```c
+if (should_enable && cfg->common.startup_delay_us > 0U) {
+	k_usleep(cfg->common.startup_delay_us);
+}
+```
+
+*--- mohittalwar23 (2026-03-20 13:36:38+00:00)
+Thanks for the review @seov-nordic.
+
+You raise a valid concern about the general case. However in the current 
+codebase, `is_enabled=true` is only passed by `regulator_fixed` and 
+`regulator_gpio` after they themselves configure the GPIO as 
+`GPIO_OUTPUT_ACTIVE` — so the delay is relevant there.
+
+That said, I understand the concern about future drivers. I can move the 
+delay to `regulator_fixed.c` and `regulator_gpio.c` directly as you 
+suggested:
+```c
+if (should_enable && cfg->common.startup_delay_us > 0U) {
+    k_usleep(cfg->common.startup_delay_us);
+}
+```
+
+Would you prefer that approach? Happy to update the PR.
+
+*--- seov-nordic (2026-03-27 14:46:13+00:00)
+> However in the current codebase, `is_enabled=true` is only passed by `regulator_fixed` and `regulator_gpio`
+
+This isn't true. See, for example, https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/regulator/regulator_npm13xx.c#L718, where `enabled` might be true (already enabled in HW on startup, by bootloader, etc.). In this case the delay you added in `regulator_common` is redundant.
+
+I'd prefer you do the changes in the affected drivers (fixed, gpio) rather than common, yes, thanks :)
+
+*--- mohittalwar23 (2026-04-02 04:47:52+00:00)
+Moved the startup delay from regulator_common.c into
+regulator_fixed.c and regulator_gpio.c directly.
+
+ The delay now applies only where we know the GPIO
+was just actively configured, not in the shared common path where
+the regulator may already have been enabled by hardware or a bootloader.

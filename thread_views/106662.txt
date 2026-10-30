@@ -1,0 +1,24 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/106662
+TITLE: boards: infineon: kit_psc3m5_evk: Add SPI NOR FLASH board variant
+
+*--- opening post by jsbatch (2026-03-31 23:30:24+00:00)
+Adds a board variant that utilizes the onboard NOR FLASH chip.  The flash chip is only available after a board modification has been made. 
+
+See the board documentation for details.
+
+Depends on https://github.com/zephyrproject-rtos/zephyr/pull/106729 to fix a twister build error.
+
+*--- teburd (2026-04-07 17:33:57+00:00)
+@ClarkJ-Infineon please take a look as this changes board docs and I know you've been looking at these
+
+*--- sreeramIfx (2026-04-15 18:03:51+00:00)
+Can we create a common dtsi file that can be shared between the variants?
+
+*--- sreeramIfx (2026-04-15 19:53:52+00:00)
+Can we use Kconfig.defconfig for the common configuration across the variants?
+
+*--- jsbatch (2026-04-16 18:54:51+00:00)
+Good idea, done.
+
+*--- jsbatch (2026-04-16 18:54:58+00:00)
+Good idea, done.

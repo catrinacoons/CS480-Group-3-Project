@@ -1,0 +1,25 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112923
+TITLE: tests: mem_protect: userspace: enable switching tests on Infineon boards
+
+*--- opening post by billwatersiii (2026-07-07 18:07:25+00:00)
+tests: mem_protect: userspace: enable switching tests on Infineon boards
+
+CONFIG_USERSPACE_SWITCHING_TESTS is opt-in and, per its Kconfig help text,
+must be turned on through a board overlay. Add overlays enabling it for
+the Infineon PSOC Control PSC3 (kit_psc3m5_evk) and the PSOC Edge PSE84
+Cortex-M55 targets (kit_pse84_eval, kit_pse84_ai). These parts support
+userspace and pass the thread switching tests; without the overlay the
+user_only_switching, kernel_only_switching and kernel_user_mix_switching
+subtests silently skip on these boards.
+
+Verified on hardware: the three switching cases pass on kit_psc3m5_evk and
+kit_pse84_eval/pse846gps2dbzc4a/m55.
+
+Assisted-by: AI (GitHub Copilot)
+Signed-off-by: Bill Waters <bill.waters@infineon.com>
+
+*--- nashif (2026-07-09 22:10:48+00:00)
+disliking the fact we need overlays for something like this.... This will just opens the gate for everyone adding their board overlay now, this is just not sustainable anymore :(
+
+*--- billwatersiii (2026-07-15 22:30:58+00:00)
+@nashif , is there another way to address this?

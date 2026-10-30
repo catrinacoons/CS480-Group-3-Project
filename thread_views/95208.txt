@@ -1,0 +1,83 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/95208
+TITLE: boards: shields: Add Adafruit INA219 current sensor shield
+
+*--- opening post by pyhys (2025-08-30 19:10:41+00:00)
+Product photo from https://learn.adafruit.com/assets/104390 which has the license CC BY-SA 3.0
+
+Tested with the command mentioned in the index.rst file.
+
+*--- Copilot (2025-08-30 19:16:40+00:00)
+There should be a comma after 'devicetree file' to separate the main clause from the example clause.
+```suggestion
+devicetree file to, for example, adjust the gain.
+```
+
+*--- Copilot (2025-08-30 19:16:41+00:00)
+The referenced image file 'adafruit_ina219.webp' appears to be missing from the repository. This will cause documentation build issues.
+```suggestion
+.. figure:: adafruit_ina219.png
+```
+
+*--- kartben (2025-08-30 19:16:44+00:00)
+```suggestion
+devicetree file, for example to adjust the gain.
+```
+
+*--- kartben (2025-08-30 19:17:29+00:00)
+```suggestion
+```
+
+*--- pyhys (2025-08-30 19:28:46+00:00)
+Done
+
+*--- pyhys (2025-08-30 19:28:53+00:00)
+Done
+
+*--- jeppenodgaard (2025-09-02 05:20:30+00:00)
+I do not understand why `122` is not used here instead of round up?
+
+*--- kartben (2025-09-02 19:26:23+00:00)
+It's a very good point, @ubieda. We tend to have a few of such "generic" shields in the tree, see for example https://docs.zephyrproject.org/latest/boards/shields/ssd1306/doc/index.html, but I agree that there might be some terminology issue if we call "shield" something that's _almost_ just an overlay
+
+*--- pyhys (2025-09-02 20:26:01+00:00)
+That is how it is done in the INA219 datasheet: https://www.ti.com/lit/ds/symlink/ina219.pdf See section 8.5.1 "While this value yields the highest resolution, it is common to select a value for
+the Current_LSB to the nearest round number above this value to simplify the conversion of the Current Register
+(04h) and Power Register (03h) to amperes and watts respectively."
+
+Of course I can change the value, if that is the consensus here.
+
+*--- pyhys (2025-09-02 21:05:27+00:00)
+Thanks for your valid concerns, @ubieda! I fully agree that we should not add random breakout boards.
+
+However this INA219 shield fulfills the definition perfectly fine, and the reason is the I2C connectors (NOT the pin header). These connectors are intended exactly to "attach to a board to extend its features and services for easier and modularized prototyping." The I2C connectors have four pins; GND, +3.3 Volt, I2C data and I2C clock (in that order). The physical connector is the 1.0 mm pitch JST-SH.
+
+Adafruit calls these "Stemma QT", and has more than 50 boards supporting this interface and more than 100 sensor or actuator shields supporting this connector standard.
+See https://www.adafruit.com/category/1018
+
+Other manufacturers use other brand names for the same connector, for example Sparkfun calls it "Qwiic". https://www.sparkfun.com/special-categories/qwiic.html
+
+Support for this shield interface was recently introduced to Zephyr. Due to the different brand names, the interface was named "zephyr_i2c", and there are already quite a few boards with this connector having that label in their devicetree files. For more details see the 4.2 release notes: https://docs.zephyrproject.org/latest/releases/release-notes-4.2.html#other-notable-changes
+
+I think it would be great with some summary in the documentation about the supported shield interfaces (Arduino, Feather, zephyr_i2c, Microbus, Pico etc). I can take a stab at writing a few sentences for each interface, and maybe add a link to the technical requirements for each.   
+
+Further it would be really helpful if the boards page could filter on the shield interface, so it would be possible to find shields or boards with for example the Arduino interface. For a board is the necessary information available in the device tree file, and correspondingly in the overlay file for the shield.
+
+Any suggestion on documentation update for this particular PR?
+
+*--- kartben (2025-09-02 21:12:57+00:00)
+> I think it would be great with some summary in the documentation about the supported shield interfaces (Arduino, Feather, zephyr_i2c, Microbus, Pico etc). I can take a stab at writing a few sentences for each interface, and maybe add a link to the technical requirements for each.
+
+That would be awesome :)
+
+> Further it would be really helpful if the boards page could filter on the shield interface, so it would be possible to find shields or boards with for example the Arduino interface. For a board is the necessary information available in the device tree file, and correspondingly in the overlay file for the shield.
+
+Yes agreed it would be nice. The shield side of things might not be trivial since we don't really "parse" the overlays when building the docs but we could probably add the information in shield.yml.
+
+*--- kartben (2025-09-02 21:53:03+00:00)
+> > Further it would be really helpful if the boards page could filter on the shield interface, so it would be possible to find shields or boards with for example the Arduino interface. For a board is the necessary information available in the device tree file, and correspondingly in the overlay file for the shield.
+> 
+> Yes agreed it would be nice. The shield side of things might not be trivial since we don't really "parse" the overlays when building the docs but we could probably add the information in shield.yml.
+
+Will need to find a better UX since right now, out of laziness, I just added the name of the GPIO nexus compatible(s) to the list of "supported features" for each board. This prob needs to be a search field of its own,  but it's cool nevertheless, eh? :)
+
+<img width="830" height="485" alt="image" src="https://github.com/user-attachments/assets/00c132d0-1e1f-4076-997f-bafae6407959" />

@@ -1,0 +1,33 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111235
+TITLE: boards: others: add JZ-F407VET6 board
+
+*--- opening post by tpambor (2026-06-14 13:08:10+00:00)
+Add support for JZ-F407VET6 industrial control board based on STM32F407VE MCU.
+
+*--- etienne-lms (2026-06-23 16:49:19+00:00)
+Several GPIOs are used according to the board DTS file. Consider enabling `CONFIG_GPIO_STM32`.
+
+*--- tpambor (2026-06-24 07:22:20+00:00)
+@kartben Could you take a look?
+
+*--- etienne-lms (2026-06-24 07:47:00+00:00)
+```suggestion
+The JZ-F407VET6 is an industrial control board featuring an Arm® Cortex®‑M4
+```
+FYI, placed here once (at 1st occurrence, per registered trademark) is enough to cover other occurrences in this document.
+
+*--- kartben (2026-06-24 08:09:13+00:00)
+```suggestion
+```
+
+*--- kartben (2026-06-24 08:10:55+00:00)
+Forgot `aliases` node? For main LED, button, ...
+
+*--- kartben (2026-06-24 09:30:35+00:00)
+you probably mean `CONFIG_GPIO`? :)
+
+*--- etienne-lms (2026-06-24 10:29:17+00:00)
+Sorry, of course! Thanks for the clarification.
+
+*--- kartben (2026-06-24 14:45:46+00:00)
+please check https://docs.zephyrproject.org/latest/contribute/documentation/guidelines.html#recommended-image-formats-based-on-content

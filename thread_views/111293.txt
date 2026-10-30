@@ -1,0 +1,35 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111293
+TITLE: bluetooth: host: Update address handling in per adv sync established event
+
+*--- opening post by Yagoor (2026-06-15 11:44:00+00:00)
+* Resolve both addresses before comparison to prevent comparing RPA with Identity
+
+*--- Copilot (2026-06-15 14:46:45+00:00)
+The multi-line `bt_addr_le_copy()` call formatting here is inconsistent with the surrounding kernel/Zephyr style (continuation lines are typically aligned under the opening parenthesis as seen elsewhere in this file, e.g. `scan.c:1032-1034`). Reformatting improves readability and keeps indentation consistent.
+
+*--- Thalley (2026-06-15 14:55:19+00:00)
+You can consider storing `&pending_per_adv_sync->addr` in a local variable or do the `bt_lookup_id_addr(BT_ID_DEFAULT, &pending_per_adv_sync->addr)` and store the result in a variable to reduce line length and increase readability
+
+*--- Thalley (2026-06-15 14:55:27+00:00)
+```suggestion
+	if (pending_per_adv_sync != NULL) {
+```
+
+*--- Yagoor (2026-06-16 07:45:18+00:00)
+> bt_le_per_adv_sync_lookup_addr
+
+I couldn't trigger that on target or in BSIM, so I didn't add it there.
+
+*--- Yagoor (2026-06-16 07:45:24+00:00)
+Done
+
+*--- Yagoor (2026-06-16 07:45:41+00:00)
+Done, I stored it in a local variable.
+
+*--- Copilot (2026-06-16 10:04:46+00:00)
+The multiline `bt_addr_le_copy()` call breaks after the opening parenthesis, which is inconsistent with the surrounding style in this file (e.g. `net_buf_simple_init_with_data(...` around scan.c:1032-1033). Consider formatting as a single line or aligning the continuation under the first argument for readability.
+
+*--- Thalley (2026-06-16 10:16:10+00:00)
+```suggestion
+		const bt_addr_le_t *addr_to_check = &pending_per_adv_sync->addr;
+```

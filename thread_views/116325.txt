@@ -1,0 +1,31 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116325
+TITLE: tests: kernel: memorty protection: overhaul documentation
+
+*--- opening post by nashif (2026-08-14 15:02:52+00:00)
+- **tests: kernel: mem_protect: stack_random: document the test case**
+- **tests: kernel: mem_protect: ondemand_section: document the test case**
+- **tests: kernel: mem_protect: protection: document the test cases**
+- **tests: kernel: mem_protect: obj_validation: document the test cases**
+- **tests: kernel: mem_protect: stackprot: document the test cases**
+- **tests: kernel: mem_protect: syscalls: document the test cases**
+- **tests: kernel: mem_protect: mem_map: document the test cases**
+- **tests: kernel: mem_protect: demand_paging: document the test cases**
+- **tests: kernel: mem_protect: futex: document the test cases**
+- **tests: kernel: mem_protect: userspace: document the test cases**
+- **tests: kernel: mem_protect: document the test cases**
+
+*--- Copilot (2026-08-14 18:00:12+00:00)
+The Doxygen comment line ends with a stray "*", which reads like a formatting typo and makes the sentence/paragraph awkward.
+
+This issue also appears in the following locations of the same file:
+- line 135
+- line 165
+- line 195
+
+*--- Copilot (2026-08-14 18:00:12+00:00)
+This continuation line is missing the leading "*" of the block comment, so it breaks the Doxygen formatting of the bullet list.
+
+This issue also appears in the following locations of the same file:
+- line 1493
+- line 1531
+- line 1579

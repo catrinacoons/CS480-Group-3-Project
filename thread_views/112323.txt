@@ -1,0 +1,7 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112323
+TITLE: net: lib: coap: client: Wake poll() when a request is scheduled
+
+*--- opening post by pdgendt (2026-06-29 15:09:10+00:00)
+`coap_client_schedule_poll()` only gives the `recv` semaphore, which wakes the `recv` thread when it is idle but does not interrupt a `poll()` that is already blocked. A request submitted mid-poll - in particular one whose socket changed after a reconnect - is then not watched until the current `poll()` returns, up to `COAP_PERIODIC_TIMEOUT` later, so its response is invisible for that window.
+
+Write the recv-thread wakeup `eventfd` from `schedule_poll()` so a blocked `poll()` returns at once and the `recv` loop rebuilds `fds[]` with the current socket set. The `eventfd` is the same channel cancellation already uses; the resulting ack-sem pulse is harmless since the cancel path resets it under the cancel mutex before waiting. Update the eventfd documentation to cover the dual use.

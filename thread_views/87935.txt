@@ -1,0 +1,523 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/87935
+TITLE: drivers: video: common: introduce CCI utilities
+
+*--- opening post by josuah (2025-04-01 00:32:12+00:00)
+No dependency. Split out of:
+
+- https://github.com/zephyrproject-rtos/zephyr/pull/87004
+
+Downstream:
+
+- https://github.com/zephyrproject-rtos/zephyr/pull/87937
+- https://github.com/zephyrproject-rtos/zephyr/pull/88825
+- https://github.com/zephyrproject-rtos/zephyr/pull/89764
+
+Add a library for the Camera Common Interface, part of the MIPI CSI protocol standard defining methods to configure a camera device over I2C, such as which size for the register address/data.
+
+This is applied to the GC2145 image sensor. Ping @uLipe @iabdalkader who last worked with it.
+Also tested with an IMX219 and the emulated video imager, not part of this PR.
+
+*--- josuah (2025-04-02 13:38:18+00:00)
+Force-push:
+- Rebase on main after #87872
+
+*--- ngphibang (2025-04-12 19:35:13+00:00)
+Thanks ! It will help drivers not need to define their own read / write register functions. Each drivers has different type of register address and value:
+
+- Some are 16-bit address registers and need to read/write 8-bits data
+- Some are 16-bit address registers and need to read/write 16-bit data
+
+Does the CCI library will work in all these cases ? Per my observation, Linux also has CCI library but I don't know why (video) drivers still define and use their own read / write function (?).
+
+Will we have also modify register functions (to modify only some bit through a mask) ?
+
+*--- josuah (2025-04-13 13:17:54+00:00)
+Yes the goal is to offer a replacement for all the custom write functions for compatible sensors.
+
+Supported address sizes:
+
+- 8-bit address
+- 16-bit address
+
+Supported Data sizes:
+
+- 8-bit data
+- 16-bit data (big/little endian) sent one byte at a time
+- 24-bit data (big/little endian) sent one byte at a time (sensors define arbitrary size for their register)
+- 32-bit data (big/little endian) sent one byte at a time (the max supported, 64-bit registers needs to be split)
+
+Supported operations:
+
+- Read one register into a 32-bit variable (32-bit, 24-bit, 16-bit, 8-bit alike, like in Linux)
+- Write one register from a 32-bit variable (32-bit, 24-bit, 16-bit, 8-bit alike, like in Linux)
+- Write multiple registers using a `struct video_reg` table
+- **Write one bitfield** described by a value and a mask. Should it be named `video_modify_cci_reg()` instead of `video_write_cci_field()`?
+
+*--- ngphibang (2025-04-20 16:38:25+00:00)
+I am not sure why the 2nd parameter is named `flags` but not `reg_addr` as in the function prototype ?
+
+`int video_write_cci_reg(const struct i2c_dt_spec *i2c, uint32_t reg_addr, uint32_t reg_value);`
+
+*--- ngphibang (2025-04-20 16:39:12+00:00)
+Same here. I am not sure why the 2nd parameter is named `flags` but not `reg_addr` as in the function prototype ?
+
+*--- ngphibang (2025-04-20 16:40:36+00:00)
+nit: It's better to organize the headers in an alphabetic order.
+
+*--- ngphibang (2025-04-20 16:41:46+00:00)
+"as well as" what ? :-)
+
+*--- ngphibang (2025-04-20 16:42:15+00:00)
+`/** Value to write to this address */`
+
+*--- ngphibang (2025-04-20 16:43:19+00:00)
+nit: It's better to organize the headers in an alphabetic order.
+
+*--- ngphibang (2025-04-20 16:46:16+00:00)
+`video_write_cci_multiregs` is better ?
+
+*--- ngphibang (2025-04-20 16:47:54+00:00)
+Yes, I think `video_modify_cci_reg()` is better as we are familiar with this in both Linux and Zephyr
+
+*--- josuah (2025-04-20 18:09:04+00:00)
+It was a hint that just passing an address like `0x1234` would fail because it lacks all the address size, data size, endianness flags.
+
+Let's turn that confusing naming in an `__ASSERT()` instead!
+
+*--- josuah (2025-04-20 18:18:25+00:00)
+`addr`essed in latest commit
+
+*--- ngphibang (2025-04-22 07:30:59+00:00)
+BTW, in order to use the CCI read/write/modify functions, we need to convert all the register addresses to 32-bit:
+
+```
+#define IMX335_REG8(addr)  ((addr) | VIDEO_REG_ADDR16_DATA8)
+#define IMX335_REG16(addr)  ((addr) | VIDEO_REG_ADDR16_DATA16_LE)
+#define IMX335_REG24(addr)  ((addr) | VIDEO_REG_ADDR16_DATA24_LE)
+```
+
+For drivers that uses dozens or hundreds of registers, it seems rather a significant amount of memory. Should it be better if we take these additional information as function parameters (maybe separate functions for 8bit, 16bit, 24 bit registers) and/or as a config (LE or BE does not change on a platform) instead of encoding all of them in the address parameter ?
+
+*--- josuah (2025-04-22 10:44:27+00:00)
+> we need to convert all the register addresses to 32-bit
+
+The flags are forced o be 32-bit here but good to clear any doubt through an obvious syntax.
+
+> dozens or hundreds of registers
+
+For instance, for the `galaxycore,gc2145` driver, I skipped the CCI functions for this purpose. On Linux, it is always 32-bit address and 32-bit data fields, but ROM is typically more abundant on a Linux-capable chip than a microcontroller.
+
+The first implementation (unpublished) used 7 variants (write8, write16le, write16be, write24le, write24be, write32le, write32le), although this does not permit to define table of registers with many .
+
+Switching to another strategy that  implementation was wrapping the "table" declaration like this:
+```c
+#define VIDEO_REG_ADDR16_DATA24(addr, reg) \
+        { (addr) + 0, (reg) >> 16 }, \
+        { (addr) + 1, (reg) >> 8 }, \
+        { (addr) + 2, (reg) >> 0 }
+
+struct { uint16_t addr; uint8_t data; } init_regs[] = {
+        VIDEO_REG_ADDR16_DATA24(0x3008, 0xaabbcc),
+        IMX335_REG8(0x3016, 0),
+        IMX335_REG16(0x3014, 8),
+        {0},
+};
+```
+
+## For 16-bit addresses and 24-bit registers:
+
+before: 8 bytes
+
+```python
+[ addr0 | addr1 |      |      | data0 | data1 | data2 |       ]  4 + 4
+```
+
+after: 16 bytes:
+
+```python
+[ addr0 | addr1 | data0 |      ]  2 + 2
+[ addr0 | addr1 | data1 |      ]  2 + 2
+[ addr0 | addr1 | data2 |      ]  2 + 2
+[ addr0 | addr1 | data3 |      ]  2 + 2
+```
+
+## For 8-bit addresses and 8-bit registers
+
+A frequent pathological case for small image sensors (8-bit address) with big tables of undocumented register...
+
+before: 8 bytes:
+
+```python
+[ addr0 | addr1 |      |      | data0 |      |      |      ]  4 + 4
+```
+
+after: 2 bytes:
+
+```python
+[ addr0 | data0 ]  1 + 1
+```
+
+*--- josuah (2025-04-22 10:53:52+00:00)
+Currently, the `struct video_reg` is `uint32_t addr; uint32_t data;`.
+
+There could be variants to cover the compromises to wrap these frequent "big data tables" use-cases, this is only 2 extra types to add:
+
+**`struct video_reg16 { uint16_t addr; uint8_t data; };`** -> 4 bytes, 2× better
+for 16-bit addresses (same as `uint16_t addr; uint16_t data;` in practice due to alignment)
+
+**`struct video_reg8 { uint8_t addr; uint8_t data; };`** -> 2 bytes, 4× better
+for 8-bit addresses
+
+*--- josuah (2025-04-22 11:19:38+00:00)
+> config (LE or BE does not change on a platform) instead of encoding all of them in the address parameter
+
+It was a compromise to reduce the API size non-V4L2 embedded developers need to face to avoid too much domain-specific knowledge required for writing video drivers:
+
+1. In `#define SENSORNAME_REG16(addr) (addr | FLAGS_THEY_DECIDE)`, the addition of the "type flags" is defined by the developer themselves. A trick to actively push the undestanding of "CCI magic" to non-V4L2 developers.
+2. By having only one flag, there is no room for mistake, only valid flags are defined, and not so many to maintain.
+3. A 16-bit address that encodes a 2-bit "address size" flag becomes a 32-bit variable, with 14-bit unused anyway.
+
+If another compromise is possible, glad to hear about it, I probably did not think about it.
+I tried to find an 'OK' balance but I do not know what the best answer is!
+
+*--- josuah (2025-04-22 11:59:45+00:00)
+force-push:
+- fix merge conflict
+- cast addresses to `(uint32_t)` explicitly
+
+I did test this change with UVC before the merge of the control PR (:tada:), I will test again as soon as I finish rebasing UVC.
+
+*--- ngphibang (2025-04-23 09:38:51+00:00)
+> The first implementation (unpublished) used 7 variants (write8, write16le, write16be, write24le, write24be, write32le, write32le),
+
+Maybe we can reduce to 4 variants (write8, write16, write24, write32) with le/be as a parameters ?
+
+It seems difficult to find a trade-off between saving memory and reducing the number of function APIs. I think it's ok to keep it as-is (I am not fan of too much APIs neither). If a driver has too much registers, it can define its own read/write/modify register functions and not use CCI (as in Linux, there's still a number of drivers does this way).
+
+*--- josuah (2025-04-23 13:49:28+00:00)
+> Maybe we can reduce to 4 variants (write8, write16, write24, write32) with le/be as a parameters ?
+
+Could this be boiled down to this?
+
+=> `video_write_cci_multireg()` like now, variable endinanness/address size/data size
+=> [`video_write_cci_multireg8()`](https://github.com/zephyrproject-rtos/zephyr/pull/87935/files#diff-83d2e8ab89cc9ed3403bffe5472f4c642b331b0d887612c3bdc8696089e82b3aR735-L794) 8-bit address, 8-bit data
+=> `video_write_cci_multireg16()` 16-bit address, 8-bit data
+
+No need for a `video_{read,write,modify}_cci_reg{8,16}(addr, ...)`,
+as [`video_{read,write,modify}_cci_reg(SENSOR_REG8(addr), ...)`](https://github.com/zephyrproject-rtos/zephyr/pull/87935/files#diff-83d2e8ab89cc9ed3403bffe5472f4c642b331b0d887612c3bdc8696089e82b3aR743) can do it?
+
+The assumption is that big blob tables where all registers are 16-bit data are rare, so the write16() variant is 16-bit address but 8-bit data.
+
+I can propose a PR for this in a few days, this would address the frequent edge cases where CCI is using too much storage.
+
+*--- ngphibang (2025-04-24 05:58:23+00:00)
+I think it's a good trade-off.
+
+> No need for a video_{read,write,modify}_cci_reg{8,16}(addr, ...),
+> as [video_{read,write,modify}_cci_reg(SENSOR_REG8(addr), ...)](https://github.com/zephyrproject-rtos/zephyr/pull/87935/files#diff-83d2e8ab89cc9ed3403bffe5472f4c642b331b0d887612c3bdc8696089e82b3aR743) can do it?
+
+So, does it mean there will be SENSOR_REG8 / SENSOR_REG16 that encode the address together with other fields ? but where do we get the other fields LE/BE, etc. ?
+
+*--- josuah (2025-04-24 16:18:22+00:00)
+I just pushed a proposed [implementation](https://github.com/zephyrproject-rtos/zephyr/pull/87935/files#diff-9a8e049fb23f33dd7c698348bc1fe78488d473047952f3c05f5fddfe02b9f579R18-R51) and extended the doc.
+
+> <@ngphibang> does it mean there will be SENSOR_REG8 / SENSOR_REG16 that encode the address together with other fields?
+
+Yes, that is the proposal, to `#define SENSOR_REG8(addr)`, etc so that it is not required to manually repeat the address size and endinaness mask every time. This is for the `video_reg` and most CCI API.
+
+> <@ngphibang> where do we get the other fields LE/BE, etc. ?
+
+For `struct video_reg8` and `struct video_reg16`, this would be `uint8_t` data only, like frequent on big tables of binary registers, so that skips the question of register value size and endianess, so `VIDEO_REG_ADDR16_DATA8` and `VIDEO_REG_ADDR8_DATA8` are used.
+
+For `struct video_reg`, all fields including endianness can be encoded in the register address itself. There is plenty of room in the 16-bit unused bits of the `uint32_t addr`.
+
+Did I understand your question well?
+
+I will complete the UVC rebase and test the GC2145 driver again.
+
+*--- avolmat-st (2025-04-29 07:39:20+00:00)
+nice to have, those *data = 0 line could be outside of the if statement since it is not related to the endianness.
+
+*--- avolmat-st (2025-04-29 07:42:55+00:00)
+What about simply ?
+if (ret) {
+
+*--- avolmat-st (2025-04-29 07:43:16+00:00)
+what about
+
+if (!ret) {
+
+*--- avolmat-st (2025-04-29 07:49:37+00:00)
+CONFIG_VIDEO_I2C_RETRY_NUM mentions the number of retry, aka the number of time it will RETRY. My understanding is that in such case, having 3 retry means there is a maximum of 4 times, aka the first write then 3 REtry afterwards. I think it could happen that someone want to absolutely avoid retry and then mention 0 within the CONFIG, leading to actually no write at all.
+
+*--- avolmat-st (2025-04-29 07:50:36+00:00)
+ret don't won't have to be initialized to 0 here if the retry doesn't count first write. cf below.
+
+*--- avolmat-st (2025-04-29 07:51:49+00:00)
+what about if (ret) {
+
+*--- avolmat-st (2025-04-29 07:52:25+00:00)
+itto
+
+*--- avolmat-st (2025-04-29 07:52:54+00:00)
+itto
+
+*--- josuah (2025-04-29 10:19:43+00:00)
+Before I used `if (err)` that help avoid confusion about what `ret` means once turned as a boolean (checking for success? checking for error?) also present through Zephyr, then after a review received on a different are I went with [zephyr rule 85](https://docs.zephyrproject.org/latest/contribute/coding_guidelines/index.html).
+
+The [Coding Style Guidelines](https://docs.zephyrproject.org/latest/contribute/style/index.html) has one set of rules (Linux+extras).
+The [Coding Guidelines](https://docs.zephyrproject.org/latest/contribute/coding_guidelines/index.html)  has a different set of rule. ^_^
+
+But the Video system seems like [not in scope](https://www.zephyrproject.org/introduction-of-coding-guidelines-for-zephyr-rtos/) for MISRA enforcement.
+
+Personally I do not mind either!
+
+*--- josuah (2025-04-29 10:20:02+00:00)
+Good catch, I missed that altogether.
+
+*--- ngphibang (2025-04-29 16:33:36+00:00)
+Would it be simpler like this ?
+
+```
+for (int i = 0; i <= CONFIG_VIDEO_I2C_RETRY_NUM; i++) {
+    ret = i2c_write_dt(i2c, buf_w, size);
+    if (!ret) {
+        return 0;
+    }
+    k_sleep(K_MSEC(1));
+}
+
+LOG_HEXDUMP_ERR(buf_w, size, "failed to write to I2C register");
+return ret;
+
+```
+
+*--- josuah (2025-04-30 10:07:54+00:00)
+I tried it at first but @avolmat-st pointed a minor issue: `k_sleep(K_MSEC(1));` would still be called after the last attempt, instead of returning the error immediately.
+
+*--- Copilot (2025-05-02 08:26:27+00:00)
+In video_read_cci_reg, using sizeof(data) calculates the size of the pointer instead of the 32-bit data container. Consider using sizeof(*data) to correctly align the data pointer for big-endian processing.
+```suggestion
+		data_ptr = (uint8_t *)data + sizeof(*data) - data_size;
+```
+
+*--- Copilot (2025-05-02 08:26:28+00:00)
+The loop condition incorrectly uses 'num_regs' instead of comparing with the loop index. This causes a non-terminating loop; update the condition to 'i < num_regs'.
+```suggestion
+	for (int i = 0; i < num_regs; i++) {
+```
+
+*--- Copilot (2025-05-02 08:26:28+00:00)
+The gc2145_set_window function appears to swap the x and y offset parameters; the function signature expects (x_offset, y_offset, window_width, window_height) but the implementation writes y_offset first. Verify the intended register mapping and adjust the parameter usage accordingly.
+
+*--- kartben (2025-05-02 08:27:15+00:00)
+woops
+
+*--- loicpoulain (2025-05-02 08:55:14+00:00)
+@josuah is that retry procedure/delay part of the CCI spec?
+
+*--- josuah (2025-05-02 10:07:58+00:00)
+> @josuah is that retry procedure/delay part of the CCI spec?
+
+It is not you are correct! I was tempted to add it because a "delay + retry" was present in some image sensor drivers, so the newly introduced CCI library cannot be a replacement for these without a retry.
+
+Should I remove it? Make a variant? Turn the retry count into a parameter? The current approach is to make it a Kconfig so that someone who i.e. has a bit too much capacitance or EMI on the I2C bus can decide to retry a few time.
+
+*--- josuah (2025-05-02 10:09:31+00:00)
+This worked only by luck on platforms where pointers are 32-bit.
+
+*--- josuah (2025-05-02 10:10:49+00:00)
+This means it was not properly tested after the latest modifications, I tested in hardware again:
+
+<img src="https://github.com/user-attachments/assets/15e1d57a-55b8-4ca6-94e7-377efb7925fc"></img>
+
+<details>
+<summary>
+</summary>
+<pre><code>git remote add  tvai https://github.com/tinyvision-ai-inc/zephyr
+git fetch tvai
+git checkout tvai/pr-video-reg
+git cherry-pick tvai/pr-usb-uvc~3..tvai/pr-usb-uvc
+west build -b arduino_nicla_vision/stm32h747xx/m7 samples/subsys/usb/uvc/
+west flash
+ffmpeg -i /dev/video4 output.jpg
+</code></pre>
+</details>
+
+*--- josuah (2025-05-02 10:14:28+00:00)
+Copilot got confused by the fact that the diff hunks are out of alignment.
+This can be helped by turning the offsets into defines modeled after the datasheet.
+
+*--- josuah (2025-05-02 11:46:27+00:00)
+> The AI gods would like you to have another look :)
+
+I had another look and gave it proper testing this time.
+
+*--- avolmat-st (2025-05-04 20:21:53+00:00)
+This should be GC2145_REG16(0xF0) instead of GC2145_REG8(0xF0) since here we want to read 16bit value (either 0x2145 or 0x2155).
+Update tested using GC2145 on STM32MP135F_DK and confirmed this correct issue.
+
+*--- josuah (2025-05-04 23:11:58+00:00)
+Good catch that is right. Thank you for reporting here!
+
+*--- avolmat-st (2025-05-05 10:23:42+00:00)
+This is not a register, this is simply a mask
+
+*--- avolmat-st (2025-05-05 10:24:16+00:00)
+This is a value to be written into the OUTPUT_FMT register, hence should not have the GC2145_REG8 prefix
+
+*--- avolmat-st (2025-05-05 10:24:23+00:00)
+This is a value to be written into the OUTPUT_FMT register, hence should not have the GC2145_REG8 prefix
+
+*--- avolmat-st (2025-05-05 10:24:58+00:00)
+Not a register addr
+
+*--- avolmat-st (2025-05-05 10:25:04+00:00)
+Not a register addr
+
+*--- avolmat-st (2025-05-05 10:25:09+00:00)
+Not a register addr
+
+*--- avolmat-st (2025-05-05 10:26:19+00:00)
+Might be only used once and cast in uint8_t hence prefixing it might not be necessary
+
+*--- avolmat-st (2025-05-05 10:26:56+00:00)
+Not a register addr
+
+*--- avolmat-st (2025-05-05 10:27:35+00:00)
+itto
+
+*--- avolmat-st (2025-05-05 10:31:44+00:00)
+Unrelated modification, if necessary should be part of another patch I think.
+
+*--- josuah (2025-05-05 12:42:40+00:00)
+I wanted to get changes as superficial as possible to keep the changes as easy to review as possible but I fooled myself in the process. I should not optimize my PRs for review scarcity or I might provoke it. Sorry for the fuss and let me reverse the steam! :)
+
+*--- josuah (2025-05-05 12:52:17+00:00)
+The HFLIP/VFLIP was not tested as the UVC standard does not support HFLIP/VFLIP.
+This involves a number of challenges as this can altern the pixel format like reversing two color channels, and GC2145 is even affected by this.
+
+Solutions to test it anyway:
+
+- Map all V4L2 controls to UVC extended controls:
+  https://github.com/zephyrproject-rtos/zephyr/issues/86943
+- Use the Zephyr Video Shell:
+  https://github.com/zephyrproject-rtos/zephyr/pull/88566 (rebase needed and then can be merged)
+
+*--- josuah (2025-05-05 13:08:09+00:00)
+force-push:
+
+- Take all the GC2145 modifications away to allow it to get it out of the way. In compensation, a new PR for converting GC2145 (and all others I can test) will be open.
+
+It might be easier to spend a bit of time on making all sensors similar before converting them to an uniform API.
+First step: acquire hardware that permits to test them all!
+
+*--- josuah (2025-05-05 13:09:07+00:00)
+I this was now moved to the single commit of this PR.
+
+*--- josuah (2025-05-05 13:10:03+00:00)
+For this entry as well as all subsequent, all will be duely checked and applied in the upcoming PR.
+Much grateful for the precious review effort!
+
+*--- avolmat-st (2025-05-05 13:57:40+00:00)
+What is the reason for doing differently between the multiregs and multiregs8/16 ? In case of multiregs, this mandate to have a last null entry then iterate until reaching it while in case of multiregs8/16 an ARRAY_SIZE  has to be provided.
+
+*--- josuah (2025-05-05 14:19:23+00:00)
+`multireg` can have a `{0, 0}` terminator as there is always at some flag that prevents the last field to be zero.
+`multireg8`/`multireg16` do not.
+
+It is true that this can be confusing and lead to bug if there are different APIs... I will update it so that `ARRAY_SIZE()` can be used in both case...
+
+*--- josuah (2025-05-05 15:17:23+00:00)
+Force-push:
+- Move to `num_regs` everywhere (https://github.com/zephyrproject-rtos/zephyr/pull/87935#discussion_r2073503220)
+- Use 0 retry by default (this requirement for GC2145 was coming from one particular board with a lot of I2C devices, this retry number can be moved to a board-specific configuration file when `gc2145.c` is converted)
+
+*--- loicpoulain (2025-05-05 18:14:39+00:00)
+I guess, that's ok since it default to one try. But why don't we apply the same for cci_read?
+
+*--- ngphibang (2025-05-09 22:48:34+00:00)
+@josuah It seems you forgot to address @loicpoulain 's comment ?
+
+*--- josuah (2025-05-10 13:20:17+00:00)
+Yes, thank you for the reminder!
+
+*--- josuah (2025-05-10 16:08:35+00:00)
+Tested again using the [Video patch soup](https://github.com/zephyrproject-rtos/zephyr/discussions/89691) on top of a converted (PR coming) GC2145 and it still works:
+```
+git remote add tvai https://github.com/tinyvision-ai-inc/zephyr
+git fetch tvai
+git cherry-pick tvai/pr-usb-uvc~9..tvai/pr-usb-uvc
+git cherry-pick tvai/pr-gc2145~2..tvai/pr-gc2145
+west build -b arduino_nicla_vision/stm32h747xx/m7 samples/subsys/usb/uvc/
+west flash
+ffplay /dev/video2
+```
+
+*--- uLipe (2025-05-10 22:29:43+00:00)
+What is the reason for not retry as default?
+
+I2C usage on video is synchronous so a retry presence here would add a level of robustness.
+
+*--- josuah (2025-05-10 23:27:46+00:00)
+For me this does not matter much, as it can be overridden easily by boards and users.
+
+@avolmat-st I remember you discussing about the RETRY, do you have more insights on that topic?
+
+*--- avolmat-st (2025-05-11 08:42:37+00:00)
+Well I agree that this is the good place to put the retry feature but so far I have actually seen no case where such retry is necessary. It is really board dependent I think so what would be the reason for introducing such retry by default ? If there is a HW issue or so leading to those transmit failure, better first notice them and add a retry only if necessary no ?
+
+*--- uLipe (2025-05-11 19:02:15+00:00)
+Makes sense for me now, there is no point to put a retry without undestand the potential source of failure which is hardware dependent.
+
+Feel free to resolve that @josuah :)
+
+*--- uLipe (2025-05-11 19:02:16+00:00)
+Makes sense for me now, there is no point to put a retry without undestand the potential source of failure which is hardware dependent.
+
+Feel free to resolve that @josuah :)
+
+*--- josuah (2025-05-11 19:33:41+00:00)
+If putting it the default, then it might be better to put a warning when a retry happens or something to raise awareness of the user that a retry happened (i.e. something else could be going wrong).
+
+It might be possible to start at zero and let the boards decide as they are contributed. If most ends-up wanting a retry, the default better be increased to reduce the amount of config in boards.
+
+*--- josuah (2025-05-11 19:43:28+00:00)
+Maybe the strategy of users would be different during development (notice the slightest issue, hardware or software related, with `CONFIG_ASSERT=y`) and production builds (take some margin to cover for unexpected EMI that might happen in the field far from the engineer supervision)... That sounds like a broader topic than this PR though (i.e. I2C-wise?) as if image sensor I2C communication fails, so might other sensors.
+
+*--- avolmat-st (2025-05-17 20:15:33+00:00)
+@kartben could you have a look at this PR so that we could merge it if ok since it is a dependency of several other PR. Thanks ;)
+
+*--- Copilot (2025-05-20 12:21:39+00:00)
+Consider inserting a space to read 'the value' instead of 'thevalue' for improved readability in the comment.
+```suggestion
+ * the value.
+```
+
+*--- josuah (2025-05-20 12:22:00+00:00)
+The blocking PR was about a copilot review, which we can trigger independently, so let's go with it then dismiss the stale change request once Copilot review is addressed. :)
+
+> If no progress is made, the assignee (maintainer) has the right to dismiss stale, unrelated or irrelevant change requests by reviewers giving the reviewers a minimum of 1 business day to respond and revisit their initial change requests or start the escalation process.
+> -- https://docs.zephyrproject.org/latest/contribute/contributor_expectations.html#pr-technical-escalation
+
+![scrot_20250520_141131_576x362](https://github.com/user-attachments/assets/e76487f8-113d-4017-b2f6-e80071a3127c)
+
+*--- josuah (2025-05-20 12:23:33+00:00)
+Force-push:
+- Just rebasing on latest `main` for now.
+
+*--- josuah (2025-05-20 15:15:35+00:00)
+Force-push:
+
+- Apply Copilot proposed typo-fixes
+
+Tested via #87937 just rebased on top of it.
+Politely dismissing kartben review as I assume this is addressed by now.
+
+*--- avolmat-st (2025-05-20 19:08:07+00:00)
+Very very minor typo, spotted while checking the very last update via the compare.
+
+endinaness -> endianness
+
+*--- josuah (2025-05-20 19:15:02+00:00)
+Thank you, much easier to fix now than in subsequent PRs.

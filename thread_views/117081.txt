@@ -1,0 +1,42 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117081
+TITLE: soc: adi: max32: compute NUM_IRQS from devicetree
+
+*--- opening post by MaureenHelm (2026-08-21 19:37:14+00:00)
+Every MAX32 SoC carried a hardcoded CONFIG_NUM_IRQS sized to the full
+hardware IRQ line count: 18 values spread over 14 Kconfig files in three
+different syntactic styles. Each one had to be maintained by hand, was
+easy to get wrong when a peripheral was added, and forced applications
+to carry an ISR table sized for peripherals they never enable.
+ 
+Replace them with a single family-level default derived from the
+devicetree via dt_highest_controller_irq_number(). The helper only
+considers nodes with status = "okay", so the table is now sized to what
+the application actually uses. Both cores are covered: Cortex-M4 and
+Cortex-M33 through the NVIC node, RV32 through the MAX32 RISC-V core
+interrupt controller. Only one of those controllers is ever present in a
+given build's devicetree, so the default for the other core is inert.
+
+The default is declared with configdefault and placed after the per-SoC
+rsource statements, so a SoC or a board can still pin an explicit value.
+
+Measured with samples/hello_world, the derived values are at or below
+the previous constants on all 32 buildable MAX32 board targets, for
+example max78002/m4 105 -> 57, max32657 54 -> 26 and max32655/rv32
+64 -> 28.
+
+This mirrors the equivalent change made for STM32 in #104819
+
+Assisted-by: Claude:claude-opus-5
+Signed-off-by: Maureen Helm <maureen.helm@analog.com>
+
+*--- mathieuchopstm (2026-08-25 11:40:42+00:00)
+Off-topic: wish I had thought about this for the STM32 migration note. Too late now 🥲
+
+*--- mathieuchopstm (2026-08-25 11:45:52+00:00)
+You *could* obtain the node by looking at `/soc` property `interrupt-parent` and avoid duplicate code, something like:
+```
+DT_INTC_PATH := $(dt_node_ph_prop_path,/soc,interrupt-parent)
+DT_INTC_MAX_IRQN := $(dt_highest_controller_irq_number,$(DT_INTC_PATH),irq)
+```
+
+This works thanks to NVIC and RISC-V intc having the same cell name `irq`. But I don't mind the duplication and it is more explicit, this is just an idea - choice up to you.

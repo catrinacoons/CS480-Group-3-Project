@@ -1,0 +1,13 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118345
+TITLE: modem: cellular: make the PDP context identifier configurable
+
+*--- opening post by wkhadgar (2026-09-04 18:10:35+00:00)
+The driver defined, deactivated and dialled PDP context 1 unconditionally, hardcoded in the core APN script and in every vendor dial script.
+
+Add `CONFIG_MODEM_CELLULAR_PDP_CONTEXT_ID` and thread it through `AT+CGDCONT`, `AT+CGACT` and `ATD`. Vendors that dial without a context, deactivate every context, or configure the APN through a connection profile are left alone. The default of 1 keeps the emitted commands byte-identical.
+
+*--- Copilot (2026-09-04 22:06:08+00:00)
+CONFIG_MODEM_CELLULAR_PDP_CONTEXT_ID is now used to build the AT+CGDCONT command, but at least one vendor dial script still hardcodes context 1 (drivers/modem/vendor_modem_cellular/cellular_swir_hl7800.c uses "ATD*99***1#"). If a user sets CONFIG_MODEM_CELLULAR_PDP_CONTEXT_ID != 1, the APN will be configured for the new CID while the HL7800 dial still attempts CID 1, which is likely to fail or use the wrong PDP context. Please thread the new config through the HL7800 dial script (and any other remaining hardcoded dial/deactivate commands) or explicitly document/guard that those drivers ignore this setting.
+
+*--- wkhadgar (2026-09-04 23:05:25+00:00)
+Added to the scope

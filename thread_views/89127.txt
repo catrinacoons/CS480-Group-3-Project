@@ -1,0 +1,816 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/89127
+TITLE: drivers: counter: introduce counter capture api
+
+*--- opening post by XenuIsWatching (2025-04-26 05:47:30+00:00)
+This introduces apis for input capture on the STM32. This is something
+agnostic enough that is seen on other vendors such as Atmel's SAM line
+and others.
+
+A use case for this would be time stamping a rising and/or falling edge
+where precision and lack of jitter is important. The only way to currently
+do this in zephyr is to set up a GPIO interrupt and then read the counter
+or kernel time... but this can have limitations of software such as the
+processor may have a lot going on and can be subject to interrupt latencies.
+Having a hardware 'latch' done of the rising and/or falling edge with
+respect to a timer can eliminate these imprecisions.
+
+How this is to be used, is that an application is to call
+`capture_callback_set` with the configuration of the channel number, flags
+(such as falling, rising, or both edges), and then a callback function. Then
+the `capture_enable` function is to be called to enable this. The callback
+has the timestamp of the edge in ticks and the edge that it captured (rising
+or falling).
+
+----
+
+~~This also introduces an api for set the counter time.~~
+
+~~Also, this set frequency to be 64 bits rather than 32 bits, as counters, 
+such as those that use fractional adders, tick at resolutions
+greater than 4294967295Hz. This changes the freq in the common info
+to a uint64_t. This retains the existing `counter_get_freq` function which
+will still return a 32bit value. This also adds a `counter_get_freq_64`
+function to get a 64bit value for the frequency.~~
+
+~~Add inline helper functions for converting ticks to nanoseconds.~~
+
+~~Also implement an inline helper for converting microseconds or
+nanoseconds with a 64bit tick value.~~
+
+split in to https://github.com/zephyrproject-rtos/zephyr/pull/94189
+
+*--- henrikbrixandersen (2025-04-26 22:09:35+00:00)
+How is this functionally different from what is offered by the PWM capture API?
+
+*--- XenuIsWatching (2025-04-26 23:08:55+00:00)
+> How is this functionally different from what is offered by the PWM capture API?
+
+That PWM capture measures the period and duty cycle of a pulse. This counter capture captures the exact time of a rising and/or falling edge when it happens.
+
+*--- carlescufi (2025-06-02 16:12:03+00:00)
+@XenuIsWatching when would it be a good time for you to present this in the Architecture WG meeting on Tuesdays?
+
+*--- XenuIsWatching (2025-06-10 05:42:05+00:00)
+> @XenuIsWatching when would it be a good time for you to present this in the Architecture WG meeting on Tuesdays?
+
+Hey @carlescufi , sorry for getting back to a bit late, I do plan on getting back to this, but right now I"m dealing with other priorities. I'll ping you went I can get around to making some slides
+
+*--- nordic-krch (2025-08-05 06:49:31+00:00)
+I am not sure if I understand correctly but this API assumes that:
+- it captures pin event (what about other possible capture sources?)
+- there is a known pin associated with the channel (is it setup in DT or fixed in the peripheral?)
+
+At least for Nordic peripheral capture can be used with any pin and any event in the system (e.g. end of SPI transfer, start of UART RX, etc.). It might be too generic to have "any event" approach so it can be narrowed down to pin only but then it would be good to include pin configuration.
+
+Maybe similar to `struct counter_alarm_cfg`:
+```
+struct counter_captrure_cfg {
+   gpio_dt_spec gpio;
+   uint32_t flags; //may contain flags like one_shot vs all pin events
+   counter_capture_cb_t cb;
+   void *user_data;
+}
+int counter_set_channel_capture(const struct device *dev, uint8_t chan_id,
+                                  const struct counter_capture_cfg *cfg);
+int counter_cancel_channel_capture(const struct device *dev, uint8_t chan_id);
+uint32_t counter_get_channel_capture(const struct device *dev, uint8_t chan_id);
+uint64_t counter_get_channel_capture_64(const struct device *dev, uint8_t chan_id);
+```
+Callback can be null as there would be also an option to read the captured value using `get_capture()` (it is not always needed to get the interrupt on capture).
+
+*--- carlescufi (2025-08-05 15:30:32+00:00)
+Architecture WG meeting:
+
+- Most of the conversation revolves around the fact that the API here relies on pinmux/pinctrl to cofigure the trigger, which means that the application needs to set up via those the trigger/signal that will then make the timer capture. But different vendors use different mechanisms to configure the trigger for capturing, which raises the question of whether we should address https://github.com/zephyrproject-rtos/zephyr/issues/88660 first
+- @decsny suggests taking a look at the mux bindings in Linux to see if we can reuse some of this: https://www.kernel.org/doc/Documentation/devicetree/bindings/mux/mux-controller.yaml and  https://www.kernel.org/doc/Documentation/devicetree/bindings/mux/mux-consumer.yaml
+- @henrikbrixandersen likes the idea and would like to collaborate to move it forward
+
+*--- XenuIsWatching (2025-08-06 18:17:59+00:00)
+I'm not sure this makes much sense, there should be no need to have a `gpio_dt_spec` within there. A lot of these "input capture" or "event capture" (depending on which term the implementer uses for their SoC) implementations make NO USE of the GPIO peripheral and just have an internal wire to a mux which can go directly to the counter peripheral to the 'pad' which is used as the event signal to latch a timestamp. For at least the STM32 implementation here, just the pinctrl is used to handle the pad muxing. Example of the dts overlay is showing below.  
+```dts
+#include <st/h5/stm32h503rbtx-pinctrl.dtsi>
+
+&timers2 {
+        st,prescaler = <239>;
+        status = "okay";
+
+        capture: counter {
+                status = "okay";
+                pinctrl-0 = <&tim2_ch1_pa0 &tim2_ch2_pa1>;
+                pinctrl-names = "default";
+        };
+};
+```
+
+I'm not super familiar with Nordic, but perhaps that driver implementation could have that gpio defined in the dts to be  with it's dts (and may need to have some sort of PPI defined using that driver @carlescufi mentioned)
+
+for the events, most implementations i've seen at least for the Atmel's SAM and STM32 line, the only useful event that can latch a time on is off a pad (which is typically connect to a sensor (or whatever)). I suppose, peripherals an SoC could provide a Header with some SoC specific event flags on which 'event' (be it UART, SPI, GPIO, etc) they want to have that counter event on.. but that make already make use of that `uint32_t flags` with in there. (already only 2 bits are already used)
+
+For being similiar to `struct counter_alarm_cfg`, I was aiming to be similar to the apis implemented with `CONFIG_PWM_CAPTURE`.
+
+*--- XenuIsWatching (2025-08-06 18:24:52+00:00)
+> Architecture WG meeting:
+> 
+> * Most of the conversation revolves around the fact that the API here relies on pinmux/pinctrl to cofigure the trigger, which means that the application needs to set up via those the trigger/signal that will then make the timer capture. But different vendors use different mechanisms to configure the trigger for capturing, which raises the question of whether we should address [drivers: Peripheral to peripheral interconnect API #88660](https://github.com/zephyrproject-rtos/zephyr/issues/88660) first
+
+I'm not sure that is totally blocking this implementation, likely that would only need to be implemented for the Nordic implementation, and if there are any needs of gaps found in this api I'm sure as this could be 'experimental' I'm sure those changes (if any) could come when that comes, but I'm happy to mostly certainly consider those now, I'm just not sure what those would need to be.
+
+> * @decsny suggests taking a look at the mux bindings in Linux to see if we can reuse some of this: https://www.kernel.org/doc/Documentation/devicetree/bindings/mux/mux-controller.yaml and  https://www.kernel.org/doc/Documentation/devicetree/bindings/mux/mux-consumer.yaml
+
+Thinking more about this, I'm not sure where this fits in, as the pinctrl is used in this implementation to select the mux on the "pad" to be routed to the counter.
+
+> * @henrikbrixandersen likes the idea and would like to collaborate to move it forward
+
+@henrikbrixandersen Sounds great!!! We can discuss your comments and proposes over Discord if thats best.
+
+------
+
+On other note :musical_note: , I'm thinking about splitting this PR, there appears to be a lot more discussion on the 'input capture' part of this... and the other changes I had to make such as changing some `uint32_t` to a `uint64_t` as well as adding some additional simple api and inline line helpers there is not much discussion on and could easily be separated from this counter capture api work.
+
+*--- decsny (2025-08-06 18:59:04+00:00)
+> Thinking more about this, I'm not sure where this fits in, as the pinctrl is used in this implementation to select the mux on the "pad" to be routed to the counter.
+
+The point is related to the fact that other people brought up this recurring topic about on chip triggers. There intention was to suggest expanding the scope of this implementation to consider more than just external ios as capture triggers.
+
+*--- etienne-lms (2025-08-20 11:31:24+00:00)
+```suggestion
+			uint32_t pol = LL_TIM_IC_GetPolarity(timer, LL_TIM_CHANNEL_CH1 << (4 * id));
+
+*--- etienne-lms (2025-08-20 11:33:01+00:00)
+Could you add an empty line below local variable definition?
+
+*--- etienne-lms (2025-08-20 11:35:15+00:00)
+```suggestion
+		}
+
+		return;
+	}
+```
+To get rid of the conditioned closing braces around line 636.
+
+*--- etienne-lms (2025-08-20 11:36:02+00:00)
+Could you add an empty line before `#ifdef CONFIG_COUNTER_CAPTURE`
+
+*--- etienne-lms (2025-08-20 11:37:11+00:00)
+```suggestion
+	LL_TIM_CC_EnableChannel(timer, LL_TIM_CHANNEL_CH1 << (4 * chan));
+```
+Ditto in `counter_stm32_capture_disable()` and `counter_stm32_capture_callback_set()`.
+
+*--- SynchronicIT (2025-09-03 07:23:08+00:00)
+We would be interested in such an generic interface too. We use the same functionality on different chipsets. (NXP, Nordic, STM, ..) and had to make chip specific low level (work-around) drivers for them. Loosing the ease of use of the DTS for instance as the counter drivers do not support pinctrl. 
+The interlink options which e.g. Nordic can offer could be a bit more difficult to map, although I can imagine to have something like virtual pins for events to react upon, as that has proven to be very useful in the past.
+
+*--- etienne-lms (2025-09-03 08:00:53+00:00)
+Could you remove this extra empty line?
+
+*--- etienne-lms (2025-09-03 08:01:10+00:00)
+Could you add an empty line above?
+
+*--- etienne-lms (2025-09-03 08:10:12+00:00)
+Suggestion:
+```c
+/**
+ * @brief Set callback function for a counter timestamp capture
+ *
+ * @param dev  Pointer to the device structure for the driver instance
+ * @param chan Channel ID
+ * @param flags Configuration flags (COUNTER_CAPTURE_*)
+ * @param cb Callback function reference
+ * @param user_data Argument passed to the callback function
+ *
+ * @retval 0 If successful.
+ * @retval Negative error code on failure
+ */
+
+*--- etienne-lms (2025-09-03 08:12:38+00:00)
+Nitpicking: fit is single lines:
+```c
+typedef int (*counter_api_capture_enable)(const struct device *dev, uint8_t chan);
+typedef int (*counter_api_capture_disable)(const struct device *dev, uint8_t chan);
+
+*--- etienne-lms (2025-09-03 08:16:26+00:00)
+```suggestion
+	IF_ENABLED(CONFIG_COUNTER_CAPTURE, (PINCTRL_DT_INST_DEFINE(idx);))	  \
+										  \
+```
+(with an escaped empty line below)
+
+*--- bjarki-andreasen (2025-09-03 16:23:45+00:00)
+To get this going, we could agree to a similar approach to what we do for comparators, let vendors define the capture inputs in whatever way makes sense using the devicetree, where its all vendor specific and flexible, and add vendor specific APIs for runtime configuration of mux or other hardware options to be used optionally.
+
+It seems the API itself is portable, store tick at event, as long as the chan is the counter, not some vendor specific input index, so if its just the event routing, I think the static approach may be sufficient for many cases
+
+For reference https://docs.zephyrproject.org/latest/hardware/peripherals/comparator.html#configuration
+
+*--- bjarki-andreasen (2025-09-03 16:28:01+00:00)
+other APIs use `chan_id` for the channel
+
+*--- XenuIsWatching (2025-09-08 21:13:32+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:13:36+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:14:34+00:00)
+i could... but imo putting a return in the middle could make it a bit harder to read
+
+*--- XenuIsWatching (2025-09-08 21:14:52+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:15:42+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:16:01+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:16:13+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:16:33+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:17:01+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:17:56+00:00)
+done
+
+*--- XenuIsWatching (2025-09-08 21:20:42+00:00)
+done... renamed
+
+*--- etienne-lms (2025-09-09 12:30:48+00:00)
+An empty line above is welcome.
+
+*--- etienne-lms (2025-09-09 12:33:56+00:00)
+I seems a matter of taste. At you will :-)
+
+*--- etienne-lms (2025-09-09 12:34:32+00:00)
+Can remove the parentheses pair.
+
+*--- etienne-lms (2025-09-09 12:35:05+00:00)
+Could you add an extra tab?
+
+*--- etienne-lms (2025-09-09 12:42:20+00:00)
+```c
+/** Channel to timestamp capture function mapping. */
+```
+Could you add an empty line before `#ifdef ...` above and after `#endif` below?
+
+*--- etienne-lms (2025-09-09 12:44:11+00:00)
+```suggestion
+		counter_capture_cb_t cb = chdata->capture;
+
+*--- etienne-lms (2025-09-09 12:47:06+00:00)
+I think it would be worth the call `disable_it[chan](timer);` here.
+
+*--- etienne-lms (2025-09-09 12:50:04+00:00)
+Suggestion
+```
+/** @brief Counter capture callback
+ *
+ * @param dev       Pointer to the device structure for the driver instance
+ * @param chan_id   Channel ID
+ * @param flags     Configuration flags (COUNTER_CAPTURE_*)
+ * @param ticks     Counter value that triggered the capture
+ * @param user_data User data
+ */
+
+*--- etienne-lms (2025-09-09 12:51:20+00:00)
+```suggestion
+	if (api->capture_callback_set == NULL) {
+```
+Ditto for `z_impl_counter_capture_enable()` and `z_impl_counter_capture_disable()`.
+
+*--- XenuIsWatching (2025-09-17 16:29:45+00:00)
+I prefer the other way, it's also more defensive (misra) so you can avoid doing the single `=`, it's also consistent with the rest of the file doing it the way it's done.
+
+*--- XenuIsWatching (2025-09-17 16:30:55+00:00)
+done
+
+*--- XenuIsWatching (2025-09-17 16:32:54+00:00)
+done
+
+*--- XenuIsWatching (2025-09-17 16:33:46+00:00)
+done
+
+*--- XenuIsWatching (2025-09-17 16:34:12+00:00)
+done
+
+*--- XenuIsWatching (2025-09-17 16:34:26+00:00)
+done
+
+*--- XenuIsWatching (2025-09-17 16:34:52+00:00)
+done
+
+*--- XenuIsWatching (2025-09-17 16:37:34+00:00)
+it shouldn't be disabling the interrupt in the case where it's being used as a counter capture, the alarm is a one-shot alarm just disables it in that case.
+
+*--- etienne-lms (2025-09-18 09:29:30+00:00)
+I was thinking of preventing the interrupt to trigger in between `chdata->capture` and `chdata->user_data` update right below.
+
+*--- etienne-lms (2025-09-18 09:31:16+00:00)
+CI compliance check taints on the space char missing before `*` characters above.
+
+*--- etienne-lms (2025-09-18 09:33:09+00:00)
+Well, the whole file should be updated. Zephyr coding guideline explicitly requires comparison against NULL here.
+
+*--- etienne-lms (2025-09-18 09:43:01+00:00)
+Since there is an *anchor* for flags:
+```suggestion
+ * @param flags     Configuration flags (@ref COUNTER_CAPTURE_FLAGS)
+```
+Ditto for `counter_capture_callback_set()` inline description comment.
+
+*--- XenuIsWatching (2025-09-18 17:27:13+00:00)
+done
+
+*--- XenuIsWatching (2025-09-18 17:27:17+00:00)
+done
+
+*--- teburd (2026-01-14 15:42:55+00:00)
+Correct, this cannot be a syscall
+
+*--- XenuIsWatching (2026-01-27 18:05:41+00:00)
+I was holding off on this PR until https://github.com/zephyrproject-rtos/zephyr/pull/94189 was merged, as that was more of a priority for me over this. Now that is merged, I'm more focused on this PR. There was also a change in this commit, which added a 64 bit version of the capture callback ticks.
+
+*--- XenuIsWatching (2026-01-28 20:59:29+00:00)
+I'm not sure what these errors about missing doxygen comments are about... the other typedefs in `counter.h` don't have them either.
+
+*--- XenuIsWatching (2026-02-02 17:23:02+00:00)
+@teburd sorry for all the churn that happened after your review, there was a few final touches I had to put on it with wraping up a todo and with making a typedef for the `flags` for potential future use. Please take a look again 😄
+
+*--- Copilot (2026-02-04 05:51:04+00:00)
+The documentation states these flags can be used 'in the upper 24 bits' at line 26, but the actual bit positions used are 8-13 (PRESCALER_DIV at bits 8-9 and FILTER at bits 10-13), which fall within the lower 16 bits. This is inconsistent with the claim that 'The upper 24 bits are reserved for SoC specific flags' in counter.h line 148. Either the documentation should be corrected to say 'bits 8-31' or 'upper 24 bits of uint32_t', or the bit positions should be shifted to actually use the upper 24 bits (starting at bit 8 as they currently do is correct, but the phrasing is misleading).
+```suggestion
+ * These flags occupy bits 8–31 (the upper 24 bits of the underlying uint32_t) of counter_capture_flags_t
+ * when used with the counter API. They allow the usage of the filter and prescaler settings of the
+ * STM32 timers.
+```
+
+*--- Copilot (2026-02-04 05:51:04+00:00)
+The polarity detection logic at lines 564-569 reads the current polarity from hardware to determine which edge triggered the interrupt, but when COUNTER_CAPTURE_BOTH_EDGES is configured, LL_TIM_IC_GetPolarity returns LL_TIM_IC_POLARITY_BOTHEDGE. This means the callback will be invoked with COUNTER_CAPTURE_BOTH_EDGES flag, making it impossible for the callback to distinguish whether it was triggered by a rising or falling edge. For both-edge capture, the STM32 hardware doesn't provide information about which edge caused the trigger. This limitation should be documented, or an alternative approach should be used (such as reading the current pin state to infer the edge direction).
+
+*--- Copilot (2026-02-04 05:51:04+00:00)
+Missing channel ID validation in counter_capture_callback_set. This function should validate that chan_id is within the valid range (less than counter_get_num_of_channels(dev)), similar to how counter_set_channel_alarm and counter_cancel_channel_alarm validate the channel ID at lines 852 and 877. Without this validation, out-of-bounds channel IDs could lead to buffer overruns when accessing the ch_data array in driver implementations.
+
+*--- Copilot (2026-02-04 05:51:05+00:00)
+Missing syscall handlers for counter_capture_enable and counter_capture_disable. These functions are marked as __syscall, but no corresponding handlers are present in drivers/counter/counter_handlers.c. All other syscalls in the counter API have handlers (z_vrfy_counter_*) that perform user-mode validation checks using K_SYSCALL_OBJ and K_SYSCALL_DRIVER_COUNTER. Without these handlers, these syscalls cannot be used from user mode. The handlers should be added to counter_handlers.c following the pattern of existing handlers like z_vrfy_counter_cancel_channel_alarm.
+
+*--- Copilot (2026-02-04 05:51:05+00:00)
+Inconsistency in parameter type for flags. The counter_capture_callback_set_64 function parameter 'flags' is declared as uint32_t, but it should be counter_capture_flags_t to match the typedef and improve type safety, consistent with the counter_api_capture_callback_set_64 typedef at line 416.
+```suggestion
+						  counter_capture_flags_t flags, counter_capture_cb_64_t cb,
+```
+
+*--- Copilot (2026-02-04 05:51:05+00:00)
+The callback is invoked with translated polarity flags, but the original flags parameter from counter_capture_callback_set may contain additional STM32-specific flags (prescaler and filter settings from bits 8-13). These STM32-specific flags are lost and not passed back to the callback. While the current implementation only translates edge polarity, consider whether the callback should receive the complete original flags or if this is intentional. If intentional, document that only edge polarity flags are passed to the callback.
+
+*--- Copilot (2026-02-04 05:51:05+00:00)
+Missing validation for channel ID in counter_stm32_capture_enable. The function should validate that 'chan' is within valid range before using it to compute the channel mask. An invalid channel ID could lead to incorrect channel being enabled or hardware register corruption.
+
+*--- Copilot (2026-02-04 05:51:05+00:00)
+The comment states 'Alarm is One-Shot, so disable the Interrupt' which is accurate for alarm mode, but this code path is now shared between alarm and capture modes due to the #ifdef structure. The comment could be misleading when reading the capture code path. Consider clarifying the comment to note this is the alarm-specific path, or restructure to make the distinction clearer.
+```suggestion
+		/* In alarm (one-shot) mode, disable the interrupt after it fires */
+```
+
+*--- Copilot (2026-02-04 05:51:06+00:00)
+The prescaler configuration switch statement has a default case that returns -EINVAL, but there's no handling for when no prescaler flags are provided (i.e., when (flags & COUNTER_CAPTURE_STM32_PRESCALER_DIV_MSK) equals 0). If a user doesn't explicitly set prescaler flags, this will match case 0 which is COUNTER_CAPTURE_STM32_PRESCALER_DIV1, so DIV1 becomes the implicit default. While this is probably the desired behavior, it should be documented that DIV1 is the default if no prescaler flag is specified, or the code should explicitly handle the zero case for clarity.
+```suggestion
+	{
+		uint32_t prescaler_flags = flags & COUNTER_CAPTURE_STM32_PRESCALER_DIV_MSK;
+
+		if (prescaler_flags == 0U) {
+			/* No prescaler flag specified: use DIV1 as the default */
+			config_flags |= LL_TIM_ICPSC_DIV1;
+		} else {
+			switch (prescaler_flags) {
+			case COUNTER_CAPTURE_STM32_PRESCALER_DIV1:
+				config_flags |= LL_TIM_ICPSC_DIV1;
+				break;
+			case COUNTER_CAPTURE_STM32_PRESCALER_DIV2:
+				config_flags |= LL_TIM_ICPSC_DIV2;
+				break;
+			case COUNTER_CAPTURE_STM32_PRESCALER_DIV4:
+				config_flags |= LL_TIM_ICPSC_DIV4;
+				break;
+			case COUNTER_CAPTURE_STM32_PRESCALER_DIV8:
+				config_flags |= LL_TIM_ICPSC_DIV8;
+				break;
+			default:
+				return -EINVAL;
+			}
+		}
+```
+
+*--- Copilot (2026-02-04 05:51:06+00:00)
+Missing channel ID validation in counter_capture_callback_set_64. This function should validate that chan_id is within the valid range (less than counter_get_num_of_channels(dev)), similar to other channel-based counter APIs. Without this validation, out-of-bounds channel IDs could lead to buffer overruns when accessing the ch_data array in driver implementations.
+
+*--- Copilot (2026-02-04 05:51:06+00:00)
+Missing channel ID validation in capture_disable syscall implementation. This function should validate that chan_id is within the valid range (less than counter_get_num_of_channels(dev)), similar to how counter_cancel_channel_alarm validates at line 877. Without this validation, out-of-bounds channel IDs could lead to buffer overruns in driver implementations.
+
+*--- Copilot (2026-02-04 05:51:06+00:00)
+The STM32 driver allows the same channel to be configured for both alarm and capture modes, but there's no check to prevent conflicts. When counter_stm32_capture_callback_set is called, it doesn't verify whether the channel is already in use by an alarm (chdata->callback). Similarly, counter_stm32_set_alarm at line 311 only checks if chdata->callback is set, but doesn't check if the channel is configured for capture mode (chdata->capture). This could lead to undefined behavior if both are configured on the same channel. Either the driver should prevent this by checking both callbacks, or the interrupt handler logic at line 545 that discriminates between modes should be documented as the intended mutual exclusion mechanism.
+```suggestion
+
+	/* Prevent configuring capture on a channel already used for alarms */
+	if (chdata->callback != NULL) {
+		LOG_ERR("%s: Channel %d already configured for alarm, cannot set capture", dev->name, chan);
+		return -EBUSY;
+	}
+```
+
+*--- Copilot (2026-02-04 05:51:06+00:00)
+Missing validation for channel ID in counter_stm32_capture_disable. The function should validate that 'chan' is within valid range before using it to compute the channel mask. An invalid channel ID could lead to incorrect channel being disabled or hardware register corruption.
+
+*--- Copilot (2026-02-04 05:51:06+00:00)
+Pinctrl error handling is overly strict and could prevent driver initialization even when capture functionality is not used. The pinctrl_apply_state call at line 441 returns an error if CONFIG_COUNTER_CAPTURE is enabled but no pinctrl configuration is provided in device tree. However, this breaks backward compatibility - existing device trees without pinctrl configuration will fail to initialize even if they don't use capture. Consider making this conditional: only fail if capture functions are actually called, or check if pcfg is non-NULL before applying. Alternatively, document that when CONFIG_COUNTER_CAPTURE is enabled, pinctrl must be configured in the device tree.
+```suggestion
+	if (cfg->pcfg) {
+		r = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
+		if (r < 0) {
+			LOG_ERR("%s: Counter Capture pinctrl setup failed (%d)", dev->name, r);
+			return r;
+		}
+```
+
+*--- Copilot (2026-02-04 05:51:07+00:00)
+The LOG_WRN message for overcapture uses a format specifier but the severity is WARNING. While this works, consider whether this should be LOG_ERR since overcapture indicates data loss - the counter captured a new value before software read the previous one. This is typically an error condition that the application needs to handle, not just a warning.
+```suggestion
+			LOG_ERR("%s: overcapture on channel %d", dev->name, id);
+```
+
+*--- Copilot (2026-02-04 05:51:07+00:00)
+The documentation for counter_capture_enable and counter_capture_disable lacks important behavioral details. Specifically: (1) Can these be called before or after counter_capture_callback_set? (2) What happens if enable is called without first setting a callback? (3) Can these be called multiple times? (4) What is the expected state after driver initialization - are captures enabled or disabled by default? The STM32 implementation suggests callback must be set first (line 625 checks if channel is enabled), but this isn't documented in the API.
+
+*--- Copilot (2026-02-04 05:51:07+00:00)
+Inconsistency in parameter type between API functions. The counter_capture_callback_set function parameter 'flags' is declared as uint32_t, but it should be counter_capture_flags_t to match the typedef at line 153 and the callback typedef counter_capture_cb_t at line 165. This inconsistency reduces type safety and makes the API harder to understand. The counter_api_capture_callback_set typedef at line 401 correctly uses counter_capture_flags_t.
+```suggestion
+					       counter_capture_flags_t flags, counter_capture_cb_t cb,
+```
+
+*--- Copilot (2026-02-04 05:51:07+00:00)
+Missing channel ID validation in capture_enable syscall implementation. This function should validate that chan_id is within the valid range (less than counter_get_num_of_channels(dev)), similar to how counter_set_channel_alarm validates at line 852. Without this validation, out-of-bounds channel IDs could lead to buffer overruns in driver implementations.
+
+*--- Copilot (2026-02-04 05:51:07+00:00)
+Missing validation for channel ID in counter_stm32_capture_callback_set. The function should validate that 'chan' is less than the number of available channels before accessing config->ch_data[chan]. While the generic API layer might validate this (though it currently doesn't as noted in other comments), driver-level validation provides defense-in-depth. Other STM32 counter functions like counter_stm32_set_alarm don't explicitly validate chan because the API layer does, but since the API layer validation is currently missing for capture functions, this becomes more critical.
+
+*--- Copilot (2026-02-04 05:51:08+00:00)
+The interrupt handler determines mode by checking if LL_TIM_IC_GetActiveInput returns LL_TIM_ACTIVEINPUT_DIRECTTI, but this check doesn't verify that capture is actually configured. If the channel was previously configured for capture and then the configuration was changed to alarm without properly clearing the hardware state, this check could incorrectly route to the capture path. Consider also checking if chdata->capture is non-NULL as an additional safety check.
+
+*--- Copilot (2026-02-04 05:51:08+00:00)
+The function sets chdata->capture and chdata->user_data at lines 713-714, then enables the interrupt at line 720, creating a potential race condition. If an interrupt fires between setting the callback and completing the configuration (line 717), the callback could be invoked with incomplete hardware configuration. Consider enabling the interrupt only after all configuration is complete, or disable interrupts during this critical section.
+```suggestion
+	/* Apply configuration */
+	LL_TIM_IC_Config(timer, LL_TIM_CHANNEL_CH1 << (4 * chan), config_flags);
+
+	chdata->capture = cb;
+	chdata->user_data = user_data;
+```
+
+*--- Copilot (2026-02-04 05:51:08+00:00)
+The API documentation states that callbacks with NULL should be verified in user mode (similar to counter_set_channel_alarm at lines 95-96 in counter_handlers.c), but counter_capture_callback_set allows setting a NULL callback without documentation of what this means. Does NULL callback disable capture, or is a NULL callback an error? The behavior should be documented, and if NULL is allowed, the driver implementation should handle it gracefully (currently at line 558 it checks 'if (cb)' which suggests NULL is acceptable but this isn't documented).
+
+*--- Copilot (2026-02-04 05:51:08+00:00)
+The function lacks documentation explaining the relationship between capture and alarm modes on the same channel. Can a channel be used for both capture and alarm simultaneously? If not, should counter_capture_callback_set return an error if an alarm is already configured on the channel? The implementation suggests they're mutually exclusive (based on the interrupt handler logic at line 545), but this isn't documented.
+
+*--- XenuIsWatching (2026-02-04 18:51:41+00:00)
+neg
+
+*--- XenuIsWatching (2026-02-04 18:52:39+00:00)
+no, this is wrong, it doesn't matter because it must be disabled
+
+*--- XenuIsWatching (2026-02-04 18:53:07+00:00)
+yep, good catch
+
+*--- XenuIsWatching (2026-02-04 18:54:15+00:00)
+yep, good AI 🐶
+
+*--- XenuIsWatching (2026-02-04 18:55:00+00:00)
+incorrect, upper 24 bits, includes bits 8+
+
+*--- XenuIsWatching (2026-02-04 18:57:43+00:00)
+yep, will do 🤖
+
+*--- XenuIsWatching (2026-02-04 18:58:03+00:00)
+yeah... i guess
+
+*--- XenuIsWatching (2026-02-04 18:58:52+00:00)
+COUNTER_CAPTURE_STM32_PRESCALER_DIV1 is 0...
+
+This is wrong
+
+*--- XenuIsWatching (2026-02-04 18:59:48+00:00)
+yeah...i suppose this is a good check (why am i talking to a 🤖 )
+
+*--- XenuIsWatching (2026-02-04 19:00:02+00:00)
+yep, good bot 🤖
+
+*--- XenuIsWatching (2026-02-04 19:00:41+00:00)
+hmm... good point
+
+*--- XenuIsWatching (2026-02-04 19:04:20+00:00)
+this really depends on the SoC... just at least the STM32, can't be configured while it is enabled. it's really implementation defined and the api shouldn't be forced for this, will not do
+
+*--- XenuIsWatching (2026-02-04 19:04:33+00:00)
+yep, will do
+
+*--- XenuIsWatching (2026-02-04 19:06:07+00:00)
+yep, will do
+
+*--- XenuIsWatching (2026-02-04 19:08:23+00:00)
+this does check if that is not non-NULL with the `if (cb)`... (maybe better to rename `capture` to `capture_cb`?
+
+*--- XenuIsWatching (2026-02-04 19:11:06+00:00)
+yeah... i guess
+
+*--- XenuIsWatching (2026-02-04 19:17:17+00:00)
+yep, will do
+
+*--- XenuIsWatching (2026-02-04 19:19:38+00:00)
+this is inaccurate, if both edges are enabled, it will return which one happened (rising OR falling)
+
+*--- XenuIsWatching (2026-02-04 19:36:57+00:00)
+yep, good catch 🤖
+
+*--- XenuIsWatching (2026-02-04 20:05:03+00:00)
+done
+
+*--- XenuIsWatching (2026-02-04 20:09:22+00:00)
+no longer relevant, as now this function now requires it to be disabled before calling it, it will return -EBUSY if it is enabled
+
+*--- XenuIsWatching (2026-02-05 00:48:48+00:00)
+done
+
+*--- Copilot (2026-02-05 00:52:35+00:00)
+Missing field name in struct initialization. The IF_ENABLED macro should include the field name assignment. Based on the pattern used elsewhere in the codebase (e.g., drivers/spi/spi_dw.c:689), this should be: `.pcfg = COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(idx), pinctrl_0), (PINCTRL_DT_INST_DEV_CONFIG_GET(idx)), (NULL)),` inside the IF_ENABLED parentheses.
+```suggestion
+			(.pcfg = COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(idx), pinctrl_0), \
+				(PINCTRL_DT_INST_DEV_CONFIG_GET(idx)), (NULL)),))  \
+```
+
+*--- XenuIsWatching (2026-02-05 00:58:36+00:00)
+yep, good bot 🤖
+
+*--- Copilot (2026-02-05 01:02:53+00:00)
+The capture_disable function should clear the capture_cb to prevent potential issues. Unlike alarms which are one-shot and automatically clear their callbacks, capture callbacks are persistent and continue to fire on each edge. When a capture channel is disabled, the callback should be cleared to avoid unexpected behavior if the channel is re-enabled without explicitly setting a new callback. Consider adding `chdata->capture_cb = NULL;` after disabling the channel, similar to how counter_stm32_cancel_alarm clears the alarm_cb at line 327.
+```suggestion
+	TIM_TypeDef *timer = config->timer;
+	struct counter_stm32_ch_data *chdata = &config->ch_data[chan];
+
+	LL_TIM_CC_DisableChannel(timer, LL_TIM_CHANNEL_CH1 << (4 * chan));
+	chdata->capture_cb = NULL;
+```
+
+*--- Copilot (2026-02-05 01:02:54+00:00)
+The capture_enable function should verify that a capture callback has been set before enabling the channel. Currently, the function only checks if alarm_cb is not NULL (line 613), but doesn't verify that capture_cb has been configured. This could lead to enabling a channel with no callback set, potentially causing interrupts to fire with no handler. Consider adding a check like `if (chdata->capture_cb == NULL) return -EINVAL;` before line 619.
+
+*--- XenuIsWatching (2026-02-06 04:20:31+00:00)
+no, this is by design, you shouldn't have to call configure before every enable
+
+*--- Copilot (2026-02-15 18:23:00+00:00)
+Incorrect channel indexing: `ch2ll[chan - 1]` is wrong because `chan` is 0-based (validated at counter.h:1366). This should be `ch2ll[chan]`. Using `chan - 1` will access the wrong channel or cause an out-of-bounds access when chan=0.
+
+*--- Copilot (2026-02-15 18:23:01+00:00)
+Incorrect channel indexing: `ch2ll[chan - 1]` is wrong because `chan` is 0-based (validated at counter.h:1366). This should be `ch2ll[chan]`. Using `chan - 1` will access the wrong channel or cause an out-of-bounds access when chan=0.
+
+*--- Copilot (2026-02-15 18:23:01+00:00)
+Incorrect channel indexing: `ch2ll[chan - 1]` is wrong because `chan` is 0-based (validated at counter.h:1366). This should be `ch2ll[chan]`. Using `chan - 1` will access the wrong channel or cause an out-of-bounds access when chan=0.
+```suggestion
+	if (LL_TIM_CC_IsEnabledChannel(timer, ch2ll[chan])) {
+```
+
+*--- Copilot (2026-02-15 18:23:01+00:00)
+Incorrect channel computation in multiple places: The expressions `LL_TIM_CHANNEL_CH1 << (4 * id)` should use `ch2ll[id]` to be consistent with 0-based channel indexing and to avoid assumptions about the STM32 LL channel encoding.
+
+*--- Copilot (2026-02-15 18:23:01+00:00)
+Missing test coverage: The new counter capture API introduced in this PR lacks test coverage. Given that the repository has comprehensive test suites for counter drivers (tests/drivers/counter/counter_basic_api), tests should be added to verify the capture functionality, including edge detection, single-shot vs continuous mode, callback invocation, error handling, and channel conflicts with alarms.
+
+*--- Copilot (2026-02-15 18:23:01+00:00)
+Incorrect channel indexing: `ch2ll[chan - 1]` is wrong because `chan` is 0-based (validated at counter.h:1366). This should be `ch2ll[chan]`. Using `chan - 1` will access the wrong channel or cause an out-of-bounds access when chan=0.
+```suggestion
+	if (LL_TIM_CC_IsEnabledChannel(config->timer, ch2ll[chan])) {
+```
+
+*--- Copilot (2026-02-15 18:23:02+00:00)
+Incorrect channel computation: This should use `ch2ll[chan]` to be consistent with the rest of the code and with 0-based channel indexing. The expression `LL_TIM_CHANNEL_CH1 << (4 * chan)` assumes a specific bit layout that may not match the actual STM32 LL definitions.
+```suggestion
+	LL_TIM_IC_Config(timer, ch2ll[chan], config_flags);
+```
+
+*--- Copilot (2026-02-15 18:23:02+00:00)
+Missing interrupt disable: When disabling capture on a channel, the interrupt should be disabled by calling disable_it[chan](timer), similar to how alarm cancellation works (line 342). Without this, interrupts may continue to fire even after the channel is disabled.
+```suggestion
+	LL_TIM_CC_DisableChannel(timer, ch2ll[chan - 1]);
+	disable_it[chan](timer);
+```
+
+*--- Copilot (2026-02-15 18:23:02+00:00)
+Missing validation: counter_stm32_capture_enable should verify that a capture callback has been configured (chdata->capture_cb != NULL) before enabling the channel. Without this check, enabling capture before setting a callback could lead to undefined behavior when an interrupt occurs.
+
+*--- XenuIsWatching (2026-02-15 18:25:41+00:00)
+yep
+
+*--- XenuIsWatching (2026-02-15 18:25:43+00:00)
+yep.... but why does pwm use 1 based???
+
+*--- XenuIsWatching (2026-02-15 18:26:26+00:00)
+yep
+
+*--- XenuIsWatching (2026-02-15 18:35:31+00:00)
+yep
+
+*--- XenuIsWatching (2026-02-15 18:35:48+00:00)
+yep
+
+*--- XenuIsWatching (2026-02-15 19:46:33+00:00)
+done
+
+*--- XenuIsWatching (2026-02-15 19:47:08+00:00)
+yep
+
+*--- XenuIsWatching (2026-02-16 08:39:53+00:00)
+done
+
+*--- XenuIsWatching (2026-02-20 22:08:47+00:00)
+That's how I had it originally named, but I renamed it to how is now for the consistency. I was comparing this to the pwm capture in pwm.h
+
+*--- XenuIsWatching (2026-02-20 22:10:20+00:00)
+Same as other comment
+
+*--- XenuIsWatching (2026-02-20 22:17:58+00:00)
+Yeah... that's something I've considered to use a different typedef here, but some soc can't distinguish which edge when it's configured for both edges such as this stm32. It will just report an event occurred of either rising or falling. It's really based on the vendor implementation here where it can just return the flag for rising edge here only although it received the both edges flag for configuration (if the SoC supports something like that). Some SoC such as Atmel and TI iirc don't have an option for both edges flag, it's either one or the other and their driver would have to return not supported.
+
+I suppose a work around would be to configure it for rising edge first and then do its thing along with then reconfiguring it for falling edge in the callback. As it really can't have two rising edges occur sequentially.
+
+*--- XenuIsWatching (2026-02-20 22:20:31+00:00)
+> Thanks for this PR - I stumbled upon it as I'm interested in using this peripheral functionality with Zephyr.
+> 
+> I left some comments and I'll try it out on a Nucleo.
+
+Thanks!!! There's more work on this on top this where I'm working on a counter-cap-dev branch in my fork which will allow for more tighter integration with existing drivers such as sensors where it can use this counter capture along with its hardware timestamp for the trigger rather than a gpio its software (jittery) timestamp
+
+*--- teburd (2026-02-20 22:23:27+00:00)
+> > Thanks for this PR - I stumbled upon it as I'm interested in using this peripheral functionality with Zephyr.
+> > I left some comments and I'll try it out on a Nucleo.
+> 
+> Thanks!!! There's more work on this on top this where I'm working on a counter-cap-dev branch in my fork which will allow for more tighter integration with existing drivers such as sensors where it can use this counter capture along with its hardware timestamp for the trigger rather than a gpio.
+
+Sounds cool!
+
+*--- XenuIsWatching (2026-02-21 02:31:54+00:00)
+yeah, good suggestion
+
+*--- XenuIsWatching (2026-02-22 08:29:53+00:00)
+done
+
+*--- XenuIsWatching (2026-02-22 08:29:57+00:00)
+done
+
+*--- XenuIsWatching (2026-02-23 01:21:54+00:00)
+will be done in another PR... code is in development
+https://github.com/XenuIsWatching/stm32-h5-zephyr/blob/master/src/capture_test.c
+
+*--- XenuIsWatching (2026-02-24 07:40:19+00:00)
+Changes in latest push
+* fix function names in `counter_handlers.c`
+* split commit in to 2; one for the api additions and one for implementing it in stm32
+
+*--- XenuIsWatching (2026-03-08 01:47:16+00:00)
+> > > Thanks for this PR - I stumbled upon it as I'm interested in using this peripheral functionality with Zephyr.
+> > > I left some comments and I'll try it out on a Nucleo.
+> > 
+> > 
+> > Thanks!!! There's more work on this on top this where I'm working on a counter-cap-dev branch in my fork which will allow for more tighter integration with existing drivers such as sensors where it can use this counter capture along with its hardware timestamp for the trigger rather than a gpio its software (jittery) timestamp
+> 
+> Hey @XenuIsWatching, would you be up to join us this upcoming monday (10AM ET) to share some of your work at the Sensor WG?
+
+Yeah, i can come in to talk about it
+
+*--- XenuIsWatching (2026-04-15 05:51:42+00:00)
+merge conflicts fixed in latest push
+
+*--- nordic-krch (2026-04-16 05:31:41+00:00)
+what about adding Kconfig that indicates whether counter implementation supports the capture feature (`COUNTER_SUPPORT_CAPTURE`?). Something like async API in UART driver: https://github.com/zephyrproject-rtos/zephyr/blob/acc53653b4707aa40c22aec8c33f1d733e5e670f/drivers/serial/Kconfig#L22.
+
+*--- nordic-krch (2026-04-16 05:38:29+00:00)
+I've seen many times a case where getting interrupt when capture event occur was not expected. On the other hand, capture value was done later, after the operation completed. In other words, I'm missing a function for reading the captured value and not enabling interrupt.
+
+What about renaming it to `counter_capture_configure()` (allow null callback) and adding `counter_capture_get(dev, chan, &value)`
+
+*--- XenuIsWatching (2026-04-16 06:28:14+00:00)
+make sense, will do
+
+*--- XenuIsWatching (2026-04-16 06:30:48+00:00)
+I'm not so sure about this... although i've heard similiar feedback like this before.
+
+My thoughts about this are how would you know with `counter_capture_get` if a capture really occured or if you were reading the last capture again (it wouldn't be easy to just check the ts as it wraps due to overflow)
+
+althrougth that would be fairly easy to implement to just 'cache' the timestamp in to driver data and then just return it (along with a status code (and would still require an interrupt to happen within the driver)), i'm not sure what the pratical use of that would be. I don't quite understand what you mean there about "I've seen many times a case where getting interrupt when capture event occur was not expected. On the other hand, capture value was done later, after the operation completed. In other words, I'm missing a function for reading the captured value and not enabling interrupt."
+i figured with the isr callback, the application could rather do whatever it wants to handle it in it's own way, weither store in to an array, or just 'toss' it
+
+*--- XenuIsWatching (2026-04-16 15:49:17+00:00)
+done, `COUNTER_SUPPORTS_CAPTURE` added
+
+*--- nordic-krch (2026-04-22 05:38:26+00:00)
+I'm probably biased because Nordic TIMER just don't have the interrupt on capture. In case of capturing a GPIO event, interrupt would come from GPIO driver anyway.
+
+As for use cases, one example: Let say you want to capture the width of the short pulse. One channel captures rising edge, another falling. If pulse is short there is no point of getting interrupt on the first slope.
+
+Anyway, having configure function which allows null is just more flexible as you can have the same behavior as with `capture_callback_set` but you can have interrupt-less version with `capture_get`. The responsibility about validity of the capture is outside of the counter driver in that case.
+
+*--- XenuIsWatching (2026-04-22 07:01:23+00:00)
+> I'm probably biased because Nordic TIMER just don't have the interrupt on capture. In case of capturing a GPIO event, interrupt would come from GPIO driver anyway.
+
+But Nordic has the peripheral interconnect, right? You would just use a GPIOTE + PPI, right? and you just interrupt on the timer compare interrupt. [I may be wrong here, it's been a while since i've looked at the databook here]
+
+Anyways, I'm probably okay with renaming the `capture_callback_set()` to `counter_capture_configure()`, i just would much rather defer this `capture_get` api to come with a use case when/if that is implemented. We have this marked as `experimental` anyway here
+
+*--- XenuIsWatching (2026-04-22 07:03:44+00:00)
+change in the last push
+* rename `counter_capture_callback_set` to `counter_capture_configure`
+
+*--- nordic-krch (2026-04-28 05:36:14+00:00)
+API does not specify which pin is captured. I guess that it's ok as some SoC may have fixed connections but maybe it's worth mentioning that GPIO setup is vendor specific and done in DT or out of bounds. Otherwise it looks incomplete as there are flags to pick the edge of the capture but pin in nowhere mentioned.
+
+*--- XenuIsWatching (2026-04-29 22:17:08+00:00)
+this is already handled by the 'chan', the SoC (stm32) that we have just implemented just has fixed connections it's a direct connection to specific pads which is done by the DT which is the pinmux in this case
+
+I think that is a good point and maybe there could be a `source` argument added or a `counter_capture_set_source` api with it in the future.... but I think we should cross that bridge when we get there. right now with the only driver i have implemented there wouldn't have a use for that api or argument
+
+I can just add a comment that the channel to source pairing is vendor specific and done in DT for now
+
+*--- XenuIsWatching (2026-04-29 22:23:29+00:00)
+Change in last push
+* doxygen updated on `counter_capture_configure` and `counter_capture_configure_64`
+
+*--- towen (2026-05-01 23:02:59+00:00)
+Thanks @XenuIsWatching - I hope this can be merged soon :rocket: 
+I have tested your driver with the following code, which could perhaps be added as a sample
+<details> <summary>main.c  (expand)</summary>
+
+```
+#include <zephyr/kernel.h>
+#include <zephyr/drivers/counter.h>
+
+#define CAPTURE_CHANNEL_ID 0
+#define CAPTURE_FLAGS (COUNTER_CAPTURE_CONTINUOUS | COUNTER_CAPTURE_FALLING_EDGE)
+
+#define SAMPLE_TIMER DT_INST(0, st_stm32_counter)
+
+
+static void counter_capture_cb(const struct device *counter_dev, uint8_t chan_id,
+				     counter_capture_flags_t flags, uint32_t cap_ticks,
+				     void *user_data)
+{
+	uint32_t now_ticks;
+	uint64_t now_nsec, cap_nsec;
+
+	counter_get_value(counter_dev, &now_ticks);
+
+	now_nsec = counter_ticks_to_ns(counter_dev, now_ticks);
+	cap_nsec = counter_ticks_to_ns(counter_dev, cap_ticks);
+
+	printk("Interrupt latency %lld ns \n", now_nsec-cap_nsec);
+}
+
+int main(void)
+{
+	const struct device *const counter_dev = DEVICE_DT_GET(SAMPLE_TIMER);
+	int err;
+
+	printk("Counter capture sample\n\n");
+
+	if (!device_is_ready(counter_dev)) {
+		printk("device not ready.\n");
+		return 0;
+	}
+
+	counter_start(counter_dev);
+
+	err = counter_capture_configure(counter_dev, CAPTURE_CHANNEL_ID, CAPTURE_FLAGS, &counter_capture_cb, NULL);
+	err |= counter_enable_capture(counter_dev, CAPTURE_CHANNEL_ID);
+
+	if (err != 0) {
+		printk("Error %d\n", err);
+	}
+	else {
+		printk("Counter capture armed\n");
+	}
+
+	while (1) {
+		k_sleep(K_FOREVER);
+	}
+	return 0;
+}
+```
+
+</details>
+
+Touching the PA0 pin of my nucleo_g474re triggers the counter capture, which measures Zephyr's interrupt latency (in its default configuration on stm32) at around 3950 ns.
+
+*--- XenuIsWatching (2026-05-03 05:54:51+00:00)
+> Thanks @XenuIsWatching - I hope this can be merged soon 🚀 I have tested your driver with the following code, which could perhaps be added as a sample
+
+yeah... it could, maybe in other pr after this lands, i do have a tester code in another pr here https://github.com/zephyrproject-rtos/zephyr/pull/104446

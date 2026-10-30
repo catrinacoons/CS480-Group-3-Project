@@ -1,0 +1,512 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114736
+TITLE: scripts: west_commands: patch: Add ability to reverse patches
+
+*--- opening post by ehay64 (2026-07-27 22:03:14+00:00)
+The reverse command is distinct from clean in that it only removes changes that have been applied by a patch. Other changes are left in place. By contrast, clean removes all changes in the module. Patches are removed in reverse order of apply, so that if a patch depends on a previous patch, it will be reversed first.
+
+Additionally, if a patch to be applied/reversed has already been applied/reversed, skip it rather than fail. This makes it possible to run apply or reverse multiple times without causing issues. Apply and reverse are now idempotent like other commands. But, this check only works in the absence of conflicts. It's up to patch authors to ensure patches are conflict free.
+
+The logic between the apply and reverse methods are pretty similar so a minor refactor was done to move the common parts into separate functions.
+
+*--- marc-hb (2026-07-28 19:26:33+00:00)
+That is a very different and confusingly more complicated logic than `patch --reverse` which does not imply `--forward`.
+https://www.man7.org/linux/man-pages/man1/patch.1.html
+
+When possible, I would recommend keeping the `west patch` interface as similar to `patch` as possible for obvious reasons. Sorry if too late, I only had a very brief look.
+
+*--- ehay64 (2026-07-28 19:59:17+00:00)
+Fair point, but I'm not sure we need to be consistent with `patch`. I added this check so that `west patch revert` has consistent behaviour with `west patch apply`, where `apply` can be run multiple times without error.
+
+The logic may be a bit complicated, but it does allow us to distinguish between two states and respond reasonably:
+1. The patch has already been reverted - so no action is taken
+2. A manual edit has been made and the reverse of the patch now conflicts with the working directory - so the actual revert action below will fail
+
+Without this check, both states will cause `west patch revert` to fail and it's not obvious why.
+
+*--- marc-hb (2026-07-28 20:26:06+00:00)
+> The patch has already been reverted - so no action is taken
+
+This "state" is undistinguishable from "the patch was never applied", so it's at best a funny way to name it.
+
+> A manual edit has been made and the reverse of the patch now conflicts with the working directory - so the actual revert action below will fail
+
+Conflicting edits can happen from any starting "state", so this check is not reliable (this is what happens when trying to re-invent version control).
+
+Note this "disclaimer" in https://www.man7.org/linux/man-pages/man1/patch.1.html
+
+>     -N, --forward
+>             Causes patch to ignore patches that it *thinks* are reversed or already applied. 
+>             See also -R.
+
+(emphasis mine)
+
+The --reverse section has indeed more info.
+
+> I added this check so that west patch revert has consistent behaviour with west patch apply, where apply can be run multiple times without error.
+
+OK, so it is indeed too late for consistency with `patch` where `--forward` is not on by default.
+
+It may not be too late for "standing on the shoulder of giants" and treating "reverts" exactly like `patch -R` does: by merely flipping the input and then doing everything exactly the same. In other words: apply and revert should share most of their implementation, which would have avoided this inconsistency in the first place.
+
+*--- ehay64 (2026-07-28 20:44:47+00:00)
+> This "state" is undistinguishable from "the patch was never applied", so it's at best a funny way to name it.
+
+Funny indeed, but I suppose the state of the working directory is the same regardless.
+
+> Conflicting edits can happen from any starting "state"
+
+True, and I would expect all operations to fail in such a case where there are conflicts. But from the point of view of `git apply -R`, it will fail the same if
+1. The patch has not been applied to the working directory (or has already been reverted 😉)
+2. A conflict exists
+
+> OK, so it is indeed too late for consistency with patch where --forward is not on by default.
+
+I'm not opposed to changing the behaviour, but I'd prefer to wait for more feedback to see if there's demand. Worst case, users can define their own behaviour by modifying the commands in their own YAML patch file.
+
+*--- ehay64 (2026-07-28 20:56:03+00:00)
+> apply and revert should share most of their implementation, which would have avoided this inconsistency in the first place.
+
+Thinking about this more, I'm not sure I understand what inconsistency we're discussing here. Is it `patch -R` vs `west patch revert`, or the implementations of `west patch apply` vs `west patch revert`?
+
+*--- marc-hb (2026-07-28 21:33:05+00:00)
+> Funny indeed, but I suppose the state of the working directory is the same regardless.
+
+Using only the present tense and not assuming anything about the past yields names that are both simple and factual. Example: "Patch [is] not applied". So the INFO message could/should simply say "patch is not applied, ..." instead "already reverted, skipping."
+
+To look at the past you need ... a git log, which `west patch` obviously does not have. Yet? :-D
+
+> But from the point of view of git apply -R, it will fail the same if
+> 1. The patch has not been applied to the working directory (or has already been reverted 😉)
+> 2. A conflict exists
+
+Fair enough as long as no output or source comment implies any certainty there. The current comment should IMHO be more obvious that the "apply" check is only "best effort" and not 100% reliable.
+
+> > OK, so it is indeed too late for consistency with patch where --forward is not on by default.
+
+> I'm not opposed to changing the behaviour, ...
+
+I think I was pretty clearly NOT asking to change the `--forward` default. BTW I don't understand why `patch` calls this option "--forward" but it's probably 40 years old now so waaaay too late to change that name now!
+
+> Thinking about this more, I'm not sure I understand what inconsistency we're discussing here. Is it patch -R vs west patch revert, or the implementations of west patch apply vs west patch revert?
+
+Too late for the former, not too late for the latter. I skipped a blank line (among others) to make that transition, sorry that wasn't enough.
+
+`west apply` and `west revert` are 100% symetrical. If they shared most of their implementation as they should, then this `--forward`  inconsistency would not have been there in the first place. This PR does not seem to reduce that duplication but increase it instead?
+
+*--- ehay64 (2026-07-28 21:46:35+00:00)
+> I think I was pretty clearly NOT asking to change the --forward default.
+
+My apologies then. I was not clear on the ask.
+
+> This PR does not seem to reduce that duplication but increase it instead?
+
+I tried to factor out the common parts as best I could into `execute_on_patch()`. I suppose the only real difference are the commands used to check and apply/revert, and the order in which the patches are processed.
+
+> The current comment should IMHO be more obvious that the "apply" check is only "best effort" and not 100% reliable.
+
+I'll update the comment.
+
+*--- marc-hb (2026-07-29 15:31:36+00:00)
+> I tried to factor out the common parts as best I could into execute_on_patch().
+
+One can see that `apply()` and `revert()` are (unsurprisingly) almost identical. I don't think there should be any `revert()` method, there should only be a an `apply(..., revert=False)` method. That would erase all inconsistencies between them now and in the future - including the `--forward` inconsistency that this PR is fixing.
+
+*--- ehay64 (2026-07-29 16:52:56+00:00)
+I've collapsed the `apply()` and `revert()` methods added the `revert=False` parameter to the apply method.
+
+*--- Copilot (2026-07-30 07:27:35+00:00)
+The docstring example mentions `git revert`, but the schema defaults use `git apply --reverse` for reverting patch files. Updating this example avoids confusion about how revert is implemented.
+
+This issue also appears in the following locations of the same file:
+- line 407
+- line 445
+
+*--- decsny (2026-07-31 01:06:26+00:00)
++1
+
+West patch is basically unusable in any realistic downstream situation before this change
+
+*--- danieldegrasse (2026-08-04 17:24:18+00:00)
+Can you use [Path.resolve()](https://docs.python.org/3/library/pathlib.html#pathlib.Path.resolve) here?
+
+*--- danieldegrasse (2026-08-04 17:25:39+00:00)
+```suggestion
+        command_list.append(patch_path)
+```
+
+*--- danieldegrasse (2026-08-04 17:26:39+00:00)
+Probably better to log an error here with the returncode and `stderr` from the subprocess?
+
+*--- danieldegrasse (2026-08-04 17:32:09+00:00)
+Could we rename this function to `patch` or similar, and call it from `apply` and `revert`? I think we should probably pass the `check_cmd` and `apply_cmd` as arguments to this function, in case there is some other patch operation that needs this function in the future
+
+*--- ehay64 (2026-08-04 18:20:01+00:00)
+Good call, I was having trouble trying to come up with a generic name for both operations. `patch` is so obvious 🤦
+
+*--- ehay64 (2026-08-04 21:21:41+00:00)
+Done
+
+*--- ehay64 (2026-08-04 21:21:46+00:00)
+Done
+
+*--- ehay64 (2026-08-04 21:22:17+00:00)
+Done, but the error needs to be squelched when running the check command since we expect it to fail.
+
+*--- marc-hb (2026-08-05 15:02:46+00:00)
+This "best effort and..." comment was carried forward from the discussion in https://github.com/zephyrproject-rtos/zephyr/pull/114736#discussion_r3668935610 but without all the relevant code and context there it does not make sense anymore.
+
+Trying to summarize the discussion that happened before:
+
+- If the patch can be applied cleanly, then the revert must be skipped silently without reporting any error. Either the patch was already reverted, or never applied: same state. Either way we are in a well-known patch state.
+
+- If there is a conflict when trying to apply the patch, then we must try to revert it. But we DO NOT KNOW yet why the apply failed and we do not know the state: maybe the revert will succeed, maybe not.
+
+This "best effort and ... " sentence here comes from this "maybe not". But it does not make sense once you detached it from the corresponding code.
+
+The corresponding code seems to already have this comment so you can drop it here.
+
+EDIT: in fact you should rather simplify and just drop all these new commands entirely.
+
+*--- marc-hb (2026-08-05 15:10:54+00:00)
+```suggestion
+    def patch(self, args, yml, revert=False, dst_mods=None):
+```
+I really don't see what these `.yaml` additions bring to the table besides some unnecessary indirection/obfuscation.
+
+The command to use is simply: 
+```
+   apply-command
++ `--check` when checking
++ `--revert` when reverting.
+```
+
+And that's it! Nothing complicated.
+
+*--- marc-hb (2026-08-05 15:13:02+00:00)
+This message must depend on the `revert` parameter.
+
+- When applying: "patch X was already applied, skipping"
+- When reverting: "patch X was not applied, skipping" (either reverted or never applied)
+
+*--- marc-hb (2026-08-05 15:16:13+00:00)
+I wasn't finished with the review and didn't think you would react so quickly, sorry. Please take a look at my latest comments.
+
+*--- ehay64 (2026-08-05 15:17:53+00:00)
+This change was made based on https://github.com/zephyrproject-rtos/zephyr/pull/114736#discussion_r3714799604 where the commands are passed into the new `patch()` method.
+
+*--- ehay64 (2026-08-05 15:25:41+00:00)
+I believe there's value in specifying the commands in the yaml file. It gives users the flexibility to override the commands if they wish to do so, on a per-patch basis. I'm also not sure if it's best to assume we can always tack on `--reverse` or `--check` to the `apply-command` if users can override it.
+
+*--- marc-hb (2026-08-05 17:53:06+00:00)
+Sorry I missed the ability to override the patch command on a per-patch basis. Are you aware of anyone ever using that overriding feature before? It's not like there are many ways to apply a patch; all commands do more or less the same thing.
+
+Now it's becoming unwieldy to have to define not just one but 4 commands per patch. Instead of the partial duplication in 4 commands, how about defining a base command and then suffixes for `--check` and `--reverse`?
+
+Another possibility: make revert incompatible with overriding the patch command (assuming it was never really used much).
+
+*--- marc-hb (2026-08-05 17:57:48+00:00)
+This comment is still confusing. It is factually correct, BUT "check-apply-command" is only used by... `west revert`! See the code below to understand why (hint: skipping).
+
+What a confusing user interface. See alternatives suggested below.
+
+*--- ehay64 (2026-08-05 18:22:51+00:00)
+I'm not aware of anyone using the overriding feature, but considering it exists, I would like to maintain the option. I suppose one use case is actually using the plain old `patch` command instead of `git`, or even running some arbitrary script. I'm not sure why one would do this, but it's possible.
+
+I think defining the suffixes would lead to more confusion, no? For example, it would not be immediately obvious why the base command was called with a particular suffix for the checking part of the routine; granted I did my best to comment the routine. But by defining the whole command, the rational behind the specific command is abstracted away. It also gives users the flexibility to turn the check into a nop if they really wanted.
+
+*--- marc-hb (2026-08-05 18:37:38+00:00)
+```suggestion
+        # This command is used to guess whether the patch was already reverted (or never applied).
+```
+Also: move this command LAST, so the commands for `west patch` and `west revert` are kept together instead of being interleaved.
+
+EDIT: also, tell the user that these can be made always successful "no-ops" if desired.
+
+*--- marc-hb (2026-08-05 18:39:46+00:00)
+```suggestion
+        # This command is used to guess whether the patch was already applied
+```
+
+*--- marc-hb (2026-08-05 18:42:24+00:00)
+> I'm not aware of anyone using the overriding feature, but considering it exists, I would like to maintain the option.
+
+Fair.
+
+> For example, it would not be immediately obvious why the base command was called with a particular suffix for the checking part of the routine; [...] But by defining the whole command, the rational behind the specific command is abstracted away. It also gives users the flexibility to turn the check into a nop if they really wanted.
+
+Good points. It's also good that users can override a single default and the other keep working. I mean a mix of `git applys ...` default + `patch ...` overrides should work, right?
+
+
+> granted I did my best to comment the routine. 
+
+See new suggestions above.
+
+*--- ehay64 (2026-08-05 18:45:36+00:00)
+~~I'm sorry, I'm not sure I understand. Is there more context that this comment could use? I'll admit, working in the details of this issue, I may be taking some knowledge for granted. Would it make more sense to swap the names of the check commands? So this would become `check-revert-command`?~~
+
+I've tried to make the user interface as symmetrical as possible between `apply` and `revert`. If users want to override `apply`, then I'm sure there's a case to be made for overriding `revert`.
+
+EDIT: I have no idea why, but GitHub replies are coming through delayed. You've answered my question above.
+
+*--- ehay64 (2026-08-05 18:54:49+00:00)
+> I mean a mix of git applys ... default + patch ... overrides should work, right?
+
+Yes, a mixture of command should work; as long as what the user is attempting and the commands specified work outside the scope of this script.
+
+*--- ehay64 (2026-08-05 19:01:01+00:00)
+Unfortunately, `patch()` no longer has the context to know what operation it's performing due to the change requested by https://github.com/zephyrproject-rtos/zephyr/pull/114736#discussion_r3714799604. I can put the `revert` parameter back, but it would only effect this log. I'm okay to put it back if requested.
+
+*--- marc-hb (2026-08-05 19:17:42+00:00)
+Thanks, the comments make sense to me now!
+
+How about this for these field names?
+```suggestion
+        revert-test-command:
+```
+Just a suggestion.
+
+*--- marc-hb (2026-08-05 19:21:20+00:00)
+Instead of adding the `revert` parameter back, how about adding this error message itself as a parameter? This would keep the "check_cmd" and the "check_cmd_errmsg" together in the same place.
+
+*--- marc-hb (2026-08-05 19:24:13+00:00)
+Please only catch expected exceptions
+https://docs.astral.sh/ruff/rules/blind-except/
+https://pylint.readthedocs.io/en/stable/user_guide/messages/warning/broad-exception-caught.html
+
+*--- marc-hb (2026-08-05 19:27:06+00:00)
+Actually, is a mere `return False` enough here? I mean, should a missing `.patch` file be treated like a mere conflict? It looks much worse to me, I would be tempted to `self.die()` here.
+
+*--- sylvioalves (2026-08-07 04:26:57+00:00)
+you now dropped (apply and revert) the nonzero exit, meaning CI running west patch apply and west build proceeds against an unpatched tree and ships a binary missing required patches, is it?
+
+*--- sylvioalves (2026-08-07 04:29:26+00:00)
+did you miss implementing the reverse order here?
+
+*--- sylvioalves (2026-08-07 04:31:49+00:00)
+does `get_file_sha256sum`  raises OSError?
+
+```suggestion
+        except Exception as e:
+            self.err(f"failed to read {pth}: {e}")
+            return False
+```
+
+*--- sylvioalves (2026-08-07 04:32:00+00:00)
+does `get_file_sha256sum`  raises OSError?
+
+```suggestion
+        except Exception as e:
+            self.err(f"failed to read {pth}: {e}")
+            return False
+```
+
+*--- sylvioalves (2026-08-07 04:33:51+00:00)
+this is now called before the sha256 check, is this expected/correcT?
+
+*--- sylvioalves (2026-08-07 04:34:47+00:00)
+Please update `zephyr-cmds.rst` with the `revert` command.
+
+*--- sylvioalves (2026-08-07 04:35:19+00:00)
+do we have a test for `west patch`?
+
+*--- tejlmand (2026-08-07 09:45:28+00:00)
+I don't like my tools to guess.
+
+Perhaps this is better:
+```suggestion
+        # This command tests whether the patch was already applied.
+```
+
+*--- tejlmand (2026-08-07 10:03:02+00:00)
+more guessing.
+
+*--- marc-hb (2026-08-07 13:23:40+00:00)
+Changing the description will not change the logic. The problem (which was discussed extensively before) is that this test can conflicts for either good or bad reasons and there is no easy way to tell.
+
+In more detail:
+- test has no conflict -> skipping with **certainty**.
+- test conflicts -> not skipping, operation success is **unpredictable**.
+
+I suggested "guess" and I admit it's not perfect because the result of the test is sometimes certain and sometimes not. But "test" sounds too deterministic.
+
+*--- marc-hb (2026-08-07 13:24:13+00:00)
+No, it's the very same logic.
+
+*--- marc-hb (2026-08-07 13:26:59+00:00)
+Catching broad Exception hides bugs, I just asked to address this warning
+
+https://pylint.readthedocs.io/en/stable/user_guide/messages/warning/broad-exception-caught.html
+https://docs.astral.sh/ruff/rules/blind-except/
+
+I'm not even sure why there is a `try/except` here, there does not seem to be any good reason why this would fail.
+
+*--- marc-hb (2026-08-07 13:27:17+00:00)
+See above.
+
+*--- marc-hb (2026-08-07 13:27:33+00:00)
+No, it's based on the commands
+
+*--- tejlmand (2026-08-11 07:36:50+00:00)
+> Changing the description will not change the logic.
+
+Correct, and i'm not asking to change the logic.
+But as you also wrote, the outcome of the test is either conflict or no conflict, and that result is used to decide whether or not the patch should be applied.
+
+To me, that is not a guess, although the success of applying the patch is unpredictable.
+
+And later, we don't use the term `guess`, so why here ?
+```
+- test_cmd: Command tag in the yml file to execute for checking if the patch
+            has already been applied (e.g. "revert-test-command")
+```
+
+*--- tejlmand (2026-08-11 07:50:45+00:00)
+> What alternative would you suggest?
+
+the term that `git` uses, and what we're actually doing under the hood: `reverse`.
+
+I don't see any reason why `revert` is better than the term `reverse`, a term already used by git itself, and which is the feature we use under the hood.
+
+Using `reverse` will also make it easier for anyone to link the west extension feature to the corresponding git command, if they have to look at the implementation in future, and they have not been part of this discussion.
+
+*--- ehay64 (2026-08-11 16:53:48+00:00)
+I agree with @marc-hb. The command that is executed here cannot fully determine with certainty if the apply/revert will actually work. It can be considered an "educated guess".
+
+*--- ehay64 (2026-08-11 16:55:38+00:00)
+Indeed, we perform a similar guess when reverting as we do when applying.
+
+*--- ehay64 (2026-08-11 16:58:17+00:00)
+It does, `get_file_sha256sum()` attempts to read the patch with `open()`.
+
+For some context, this try/except block was carried over from the previous implementation. I tried to keep current logic intact where I could.
+
+*--- ehay64 (2026-08-11 16:58:50+00:00)
+Resolving this comment because it appears to be a duplicate.
+
+*--- ehay64 (2026-08-11 17:19:46+00:00)
+The commands inform the operation, but @sylvioalves you're correct, the patches should be processed in reverse order when reverting. I'll update this.
+
+*--- ehay64 (2026-08-11 17:37:22+00:00)
+The outcome is the same since this informs what repositories should be cleaned when an operation, either patching or hash checking, fails. So we expect to call `clean()` when `--roll-back` is specified and an operation fails.
+
+*--- ehay64 (2026-08-11 17:41:47+00:00)
+Is it preferred to `self.die()` in the event of an error?
+
+*--- ehay64 (2026-08-11 18:50:28+00:00)
+Considering users can override the apply and revert/reverse commands on a per patch basis, I'm not sure we need to lock ourselves to the terminology that `git` uses. True, `reverse` is used under the hood in default cases, but that's not necessarily true for user defined ones.
+
+*--- marc-hb (2026-08-14 04:28:44+00:00)
+> But as you also wrote, the outcome of the test is either conflict or no conflict, and that result is used to decide whether or not the patch should be applied. To me, that is not a guess, ...
+
+What exactly is not a guess? The conflicts and the _decision to attempt_  are not guesses but those are not what the comment refers to.
+
+You are  both formal and vague at the same time. Formal in picking a specific word, but then quite vague when describing how that word is wrong. 
+
+> ... although the success of applying the patch is unpredictable.
+
+The value of the word "guess" is to highlight that this command does not guarantee anything in the end. "In the end" is what matters when documenting the user interface. The user interface does not care that some _intermediate_ steps and are not guesses because those are just implementation details.
+
+> And later, we don't use the term guess, so why here ?
+
+Maybe an oversight.
+
+*--- marc-hb (2026-08-14 04:58:02+00:00)
+tl;dr: I think `revert` is OK but I agree with @tejlmand  that `--reverse` seems more accurate. 
+
+> Considering users can override the apply and revert/reverse commands on a per patch basis, I'm not sure we need to lock ourselves to the terminology that git uses. True, reverse is used under the hood in default cases, but that's not necessarily true for user defined ones.
+
+The name `git apply --reverse` actually comes from `patch --reverse` because `git apply` is only `patch` with some bells, tweaks and whistles. https://www.man7.org/linux/man-pages/man1/patch.1.html
+
+Every git alternative I ever heard of is also based on "diff and patch". For instance: `svn --reverse-diff`
+https://svnbook.red-bean.com/en/1.8/svn.ref.svn.html#svn.ref.svn.sw.reverse_diff
+
+Some other VC tools don't even bother implementing a "better patch" like git does and they just ask users to use "patch" directly if/when needed.
+
+We may never know why users can override those commands on a per .patch basis (or even: if some actually do...), but all those user-defined commands will be either `patch` or something based on "patch". In other words, _the world seems already "locked" on "patch" terminology because there never was any competing alternative_.
+
+There is an inconsistency though: `--reverse` is an option whereas `revert` is a command. I forgot whether I already suggested `west patch apply --reverse` above, apologies :-) Maybe I forgot because I don't care enough about the name of this new command?
+
+PS: even if this re-used some git-specific jargon here, it would not be that bad considering west and Zephyr are very "locked" to git anyway... I digress - "reverse" is not even git-specific.
+
+*--- marc-hb (2026-08-14 05:03:42+00:00)
+> For some context, this try/except block was carried over from the previous implementation. 
+
+Thanks, I had missed that.
+
+> I tried to keep current logic intact where I could.
+
+Agreed, the behavior when a patch cannot be read should stay as similar as reasonably possible. I mean it could change but not in this PR because that would be a completely different change.
+
+*--- marc-hb (2026-08-14 05:05:37+00:00)
+Now that you had to add a `reverse_order` boolean anyway, maybe `test_cmd_errmsg` is now "overkill" and could be dropped to simplify this function's signature. Up to you.
+
+*--- marc-hb (2026-08-14 15:38:01+00:00)
+```suggestion
+Optionally, patches can be reversed rather than cleaning all modules. This leaves non-conflicting, unrelated edits
+```
+
+*--- marc-hb (2026-08-14 15:44:45+00:00)
+> but @sylvioalves you're correct, the patches should be processed in reverse order when reverting. I'll update this.
+
+That is a great catch, thanks @sylvioalves. I think this was lost when the two code paths were deduplicated. It would have been caught by some basic test coverage that involves at least two patches that depend on each other. A lost of west extensions have good test coverage, how about this one?
+
+*--- ehay64 (2026-08-18 21:38:42+00:00)
+Good call, I'll remove it.
+
+*--- ehay64 (2026-08-19 18:41:22+00:00)
+@marc-hb and @tejlmand I've changed the command and associated terminology from `revert` to `reverse`.
+
+*--- marc-hb (2026-08-19 21:38:13+00:00)
+removed -> lost
+
+```suggestion
+                module will be lost, including changes that are not part of
+```
+A stronger and scarier adjective because the default `west patch clean` command is the command that every git tutorial tells you to never use.
+
+
+This is part of the "sales pitch" for this PR when you think about it :-)
+
+*--- ehay64 (2026-08-19 22:48:51+00:00)
+Agreed, I'm all for a stronger sales pitch! 😉
+
+*--- ehay64 (2026-08-19 23:39:38+00:00)
+> Generally speaking, the documentation of west patch seems to fall short with respect to conflicts. If you have some personal experience there, it would be great to add a few words somewhere in the help text or documentation about conflicts in general? This PR changes some of the behavior with respect to conflicts, so conflicts are not off-topic here.
+
+I'm not sure what would be useful other than reminding users that conflicts may occur based on the content of their patches? I'm not sure general information about conflicts would be helpful here given the wealth of resources available elsewhere. Or am I misunderstanding the ask?
+
+> BTW have you considered trying first with --check before applying for real? Would that avoid some .orig and .rej "pollution"? I mean:
+
+I considered it, but I'm not sure we want to continue when a patch fails. If patches depend on previous ones that have failed, it could create an avalanche of errors that could be harder to sort through. Personally, I'd prefer the process to halt and let me investigate and resolve the situation before proceeding.
+
+Regarding testing, I don't see a direct test for this extension, but I do agree that at some level this would kind of be re-inventing version control. I'm not sure if we want to extend the scope of this PR to adding this.
+
+*--- marc-hb (2026-08-19 23:45:56+00:00)
+[Sorry I'm noticing this that late]
+
+So this new `west reverse` now provides a much more "gentle" and safer alternative to `west clean` unless... one misunderstands the misnamed and "misdocumented" `--roll-back` option that happily destroys all your local changes as soon as anything goes wrong? Did I understand that right? Assuming I did:
+- Either `--roll-back` should actually roll-back and undo the subset that was successful. Doable but probably a significant amount of work.
+- Or, much simpler: the help text for `--roll-back` should be corrected to be much scarier and reflect what it does: calling the git commands that every git tutorial tells you to never use and destroying the main value of the new `west reverse`.
+
+*--- marc-hb (2026-08-19 23:51:21+00:00)
+> Did I understand that right? 
+
+- Probably not. The `hasttr()` addition was really not obvious to me, sorry. Now I think it's there because only `west patch` has it? Please add a comment stating that.
+
+- I STILL think the --roll-back help text is not scary enough.
+
+*--- ehay64 (2026-08-19 23:59:20+00:00)
+Updated, I tried to use the same terminology as the `clean` command: "changes will be _lost_".
+
+*--- marc-hb (2026-08-19 23:59:24+00:00)
+> I'm not sure what would be useful other than reminding users that conflicts may occur based on the content of their patches? I'm not sure general information about conflicts would be helpful here given the wealth of resources available elsewhere. Or am I misunderstanding the ask?
+
+- Reminders are helpful; you've already added a couple.
+- Yes there is a lot of information about `patch`, `git apply` and conflicts in general but what I found missing is. 1. the description of how `west patch/reverse` REACT and behave when conflicts happen 2. a little bit of advice about what to do next when conflicts happen and things go wrong.
+
+No need to duplicate the advice already available all over the internet when ONE patch fails: this is about what to do when something goes wrong in SERIES of patches. When dealing with multiple patches, that advice becomes more tool-specific.
+
+Just a nice to have based on your experience if you can, no big deal.
+
+*--- ehay64 (2026-09-16 21:26:26+00:00)
+@tejlmand do you mind having another look at this? Thanks

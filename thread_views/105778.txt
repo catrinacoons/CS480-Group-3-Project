@@ -1,0 +1,202 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/105778
+TITLE: [RFC] drivers: remoteproc: add OpenAMP remote-side driver
+
+*--- opening post by mausys (2026-03-18 18:35:51+00:00)
+### Overview
+
+This RFC introduces remote-side support for RemoteProc based on the OpenAMP library.
+The implementation converts the existing sample
+(samples/subsys/ipc/openamp_rsc_table/src/main_remote.c) into a reusable driver and extends it to support devicetree-based configuration.
+
+### Features
+- RemoteProc driver for the remote processor using OpenAMP
+- Devicetree-based description of:
+   - resource tables
+   - carveouts (shared memory regions)
+   - VirtIO devices and vrings
+- Automatic generation of the OpenAMP resource table from devicetree
+- Support for carveouts, enabling more complex memory mappings
+- RPMsg VirtIO device driver
+- RPMsg logging backend with fallback to the RAM console
+
+### Motivation
+This work enables a flexible and reusable way to describe OpenAMP resources in devicetree instead of hardcoding them in application code.
+
+Carveout support is particularly important for systems with complex memory translation setups (e.g. MMU/IOMMU).
+
+### Use Case
+The implementation is used for RemoteProc over PCIe on a
+AMD Zynq-7000 SoC (Cortex-A9) connected to a Linux host.
+
+### Test Setup
+
+- Hardware: Duebon TEC0097 PCIe evaluation board
+- FPGA design: https://github.com/mausys/tec0097-pcie
+- FSBL (with bitstream): https://github.com/mausys/zynq-fsbl
+- Linux kernel module (with RemoteProc over PCIe support): https://github.com/mausys/rproc_pcie
+- Zephyr application: https://github.com/mausys/zephyr-zynq
+
+### Devicetree Example
+
+Below is a simplified example showing how resources are described:
+```
+vdev0vring0: memory@1400 {
+		compatible= "zephyr,memory-region";
+		zephyr,memory-region = "vdev0vring0";
+		reg = <0x1400 0x2000>;
+	};
+
+	vdev0vring1: memory@3400 {
+		compatible= "zephyr,memory-region";
+		zephyr,memory-region = "vdev0vring1";
+		reg = <0x3400 0x2000>;
+	};
+
+	vdev0buffer: memory@5400 {
+		compatible= "zephyr,memory-region";
+		zephyr,memory-region = "vdev0buffer";
+		reg = <0x5400 0x8000>;
+	};
+
+	remoteproc {
+		rsc_tbl: resource_table {
+			compatible = "openamp,resource-table";
+			carveouts = <&vdev0vring0 &vdev0vring1 &vdev0buffer>;
+			vdevs = <&vdev0>;
+		};
+
+		vrings {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			vdev0_tx: vring@0 {
+				compatible = "openamp,vring";
+				#vring-cells = <0>;
+				notify-id = <0>;
+				memory-region = <&vdev0vring0>;
+				num-buffers = <8>;
+				mboxes = <&mbox 0>;
+				reg = <0>;
+			};
+
+			vdev0_rx: vring@1 {
+				compatible = "openamp,vring";
+				#vring-cells = <0>;
+				notify-id = <1>;
+				memory-region = <&vdev0vring1>;
+				num-buffers = <8>;
+				mboxes = <&mbox 0>;
+				reg = <1>;
+			};
+		};
+
+		vdevs {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			vdev0: vdev@0 {
+				compatible = "openamp,rpmsg-virtio-device";
+				vrings = <&vdev0_tx &vdev0_rx>;
+				vring-names = "tx", "rx";
+				memory-region = <&vdev0buffer>;
+				reg = <0>;
+			};
+		};
+	};
+```
+```
+&vdev0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	ept_log: endpoint@0 {
+		status = "okay";
+		compatible = "openamp,rpmsg-endpoint";
+		type = "rpmsg-raw";
+		reg = <0x0>;
+	};
+  
+  
+	ept_rpc: endpoint@11 {
+		status = "okay";
+		compatible = "openamp,rpmsg-endpoint";
+		type = "rpmsg-raw";
+		reg = <0x11>;
+	};
+};
+```
+
+### Notes / RFC Points
+
+Feedback on devicetree bindings and naming is highly appreciated
+API naming (z_rproc_*) may need adjustment if promoted to public interfaces
+
+*--- mausys (2026-04-29 17:15:14+00:00)
+Hi all, this PR was closed due to inactivity, but the changes are still relevant.
+
+Could someone please take another look when you have time? Happy to make further updates if needed. Thanks!
+
+*--- natto1784 (2026-05-27 09:15:01+00:00)
+Hey @mausys, great work! Do you also have something in work for a host-side remoteproc driver? We are interested in working on this, and I was wondering if there's already some progress.
+
+*--- mausys (2026-05-27 14:04:11+00:00)
+> Hey @mausys, great work! Do you also have something in work for a host-side remoteproc driver? We are interested in working on this, and I was wondering if there's already some progress.
+
+Thanks! I don't have plans to implement a host-side driver. The typical RemoteProc flow relies on dynamic driver instantiation via resource table parsing (where the host parses the resource table from the ELF file, allocates resources, and instantiates drivers). This conflicts with Zephyr's static driver model.
+
+In my view, Zephyr is generally better suited as the remote OS rather than the host. My assumption has been that most architectures run Linux on the application core (Cortex-A) and Zephyr on the real-time core (Cortex-M/R), but I'm open to being corrected if you have a different use case in mind!
+
+*--- mausys (2026-06-27 09:39:01+00:00)
+Ping. Still interested in getting this merged. Thoughts?
+
+*--- henrikbrixandersen (2026-06-27 18:31:01+00:00)
+Retriggered CI.
+
+*--- WallaceIT (2026-07-17 16:35:43+00:00)
+The compiler for ARMv8-M emits a warning for the `(metal_phys_addr_t *)(void *)&XXX->pa` casts here:
+
+```
+/home/user/zephyrproject/zephyr/drivers/remoteproc/rpmsg_virtio_device.c:159:52: warning: taking address of packed member of 'struct fw_rsc_carveout' may result in an unaligned pointer value [-Waddress-of-packed-member]
+  159 |                       (metal_phys_addr_t *)(void *)&rsc_co_vring_tx->pa, rsc_co_vring_tx->len, -1,
+      |
+```
+
+Aside from the warning itself, is the usage of the `pa` member correct here? Shouldn't it be modified (if needed) by the host?
+
+*--- mausys (2026-07-20 14:20:13+00:00)
+Thanks for testing! The packed-member warning should be resolved now.
+The host (Linux kernel) modifies the pa field prior to loading the resource_table into shared memory.
+
+*--- beriberikix (2026-09-10 23:08:34+00:00)
+Tested this on the Cortex-M7 of an **NXP FRDM-IMX95** (`imx95_evk/mimx9596/m7`, Zephyr 4.4.0) under Linux remoteproc (NXP BSP kernel 6.18.2, `imx_rproc` + `virtio_rpmsg_bus`). It works well once three small things are addressed. I carried the PR as an out-of-tree module to try it, with each fix as a separate commit written against Zephyr-tree paths: https://github.com/beriberikix/zephyr-rproc-ipc
+
+**Results on hardware**
+
+- Echo on an `rpmsg-raw` endpoint (`/dev/rpmsgN` on Linux): 205/205 messages of 1–496 bytes byte-exact, ~1.3 MiB/s round-trip, including across three remoteproc stop/start cycles.
+- Two endpoints on one vdev: Linux creates a channel for each (0x400, 0x401), and each `/dev/rpmsgN` reaches the right one (100/100 each).
+- On top of it I also tried an IPC service backend and an MCUmgr SMP transport (below). A real application (a [Pouch](https://github.com/golioth/pouch) session to Golioth) runs over it end to end.
+
+**Fixes that were needed on i.MX95**
+
+1. **Resource table location** ([91b8df6](https://github.com/beriberikix/zephyr-rproc-ipc/commit/91b8df678dabbb4205b0c5d15dea9597a642228c)). Linux's i.MX remoteproc copies the table into its fixed `rsc-table` reserved region and then reads/writes that copy, so `rproc_virtio_wait_remote_ready()` never sees `DRIVER_OK` if the remote uses its linked table. I added an optional `memory-region` to `openamp,resource-table`: when set, the table is copied there (and cache-flushed) before first use, and all lookups point into the copy. This is what `CONFIG_OPENAMP_COPY_RSC_TABLE` does for the existing sample.
+2. **Doorbell** ([0d7dd8e](https://github.com/beriberikix/zephyr-rproc-ipc/commit/0d7dd8e700d57052e19e28579a86c90104852e2b)). `rvdev_notify()` sends `mbox_send_dt(tx, NULL)`. On the i.MX MU a NULL message is a general-purpose interrupt, while Linux takes vring kicks as data messages, so the name-service announcement is never seen: no channel is created. Sending the notify id as data when `mbox_mtu_get_dt() > 0` fixes it (confirmed by reverting just this change).
+3. **`.resource_table` placement** ([56d469f](https://github.com/beriberikix/zephyr-rproc-ipc/commit/56d469f7b17a140dd74dd8b1e788bd579d019cc5)). Nothing places the section, so it lands as an orphan with a linker warning. The existing SoC snippets (e.g. `soc/nxp/imx/rsc_table.ld`) are gated on the legacy `CONFIG_OPENAMP_RSC_TABLE`. I placed it from the driver's CMake with `SUBALIGN(8)` and made `OPENAMP_RESOURCE_TABLE` depend on `!OPENAMP_RSC_TABLE`, since both define `resource_table`.
+
+**Other notes from bring-up** (not blocking for me)
+
+- The vrings need fixed `device-address` values: `rvdev_init()` reads `vring[i].da` before waiting for the host, so the default of -1 cannot work. (From reading the code, not tested.)
+- Carveout names must equal the Linux reserved-memory node names (`vdev0vring0`, `vdev0vring1`, `vdevbuffer` here). From my reading of `rproc_handle_carveout()`, a name Linux does not know makes it allocate a fresh carveout rather than use the reserved region. (Also from reading the code.) This might be worth a line in the binding docs.
+- `rvdev_init()` blocks `POST_KERNEL` init until the host sets `DRIVER_OK`. Harmless when Linux loads the core (~60 ms here), but it might be worth doing in the rx thread.
+- `zephyr,priority` is declared in `openamp,rpmsg-virtio-device.yaml`, but the driver only uses `CONFIG_RPMSG_VDEV_THREAD_PRIORITY`. The priority matters: endpoint callbacks run on that thread, and in my application it has to sit below the app's work queue.
+- `z_rproc_get_vdev(config->idx)` matches the instance index against the vdev node's `reg`, so `reg` has to equal the DT instance number.
+- `metal_io_init(&data->mr_rsc_table, rsc_table, (metal_phys_addr_t *)rsc_table, ...)` passes the table itself as the physmap, which looks unintended.
+- The second "failed to init vring 0" error message is for vring 1.
+
+**Built on top** (same repo, in case it is useful for where this goes next)
+
+- An IPC service backend, `zephyr,ipc-rproc-rpmsg`, that wraps the `rpmsg_device` from this driver. Endpoints are announced via the name service. Since the NS has no ack, `bound` fires on the first message from the host.
+- `MCUMGR_TRANSPORT_IPC`, raw SMP over an IPC endpoint with reassembly. `smpmgr` works through a small Linux UDP relay, with packets of ~1.9 KB in both directions.
+
+Happy to turn any of the fixes into commits on this PR, or follow-ups once it lands, whichever you prefer.
+
+Disclosure, per the contribution guidelines: the fixes and the module were written with AI assistance (`Assisted-by: Claude:claude-opus-5` on those commits). Everything reported above as tested was run on the hardware described. Anything submitted from it will carry my own `Signed-off-by` after review.

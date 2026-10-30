@@ -1,0 +1,112 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/79642
+TITLE: Bluetooth: CCP: Server: Add support for get UCI
+
+*--- opening post by Thalley (2024-10-10 09:05:08+00:00)
+Add support for getting the UCI.
+For now the UCI will be duplicated by the TBS
+implementation, but will be optimizied in the future
+so only one copy of the UCI exists.
+
+*--- Copilot (2025-04-07 08:49:52+00:00)
+Index validation should use '>= CONFIG_BT_TBS_BEARER_COUNT' to correctly ensure that the index is within the bounds of the bearer array.
+```suggestion
+	if (index >= CONFIG_BT_TBS_BEARER_COUNT) {
+```
+
+*--- Copilot (2025-04-07 09:05:49+00:00)
+In the documentation for bt_ccp_call_control_server_get_bearer_uci, the parameter is mistakenly referred to as 'name' instead of 'uci'. Consider updating it to '@p uci' for clarity.
+```suggestion
+ * @retval -EINVAL @p bearer or @p uci is NULL
+```
+
+*--- fredrikdanebjer (2025-11-19 08:50:57+00:00)
+Do we normally assume that omitting index will default the index to 0, instead of the whole list?
+
+*--- Thalley (2025-11-26 10:41:41+00:00)
+For now at least we always default to bearer[0] if no index is provided. 
+
+Do you think it makes more sense to perform the action on all bearers if index is omitted? 
+
+It could work, especially for all "get/read" operations, but probably doesn't make sense for "set/write" operations. 
+
+It's following the implementation of the TBS shell, but we can change that no problem.
+
+We can also just modify it so that index is a mandatory argument
+
+*--- Thalley (2025-12-09 08:07:14+00:00)
+@fredrikdanebjer please re-review
+
+*--- fredrikdanebjer (2025-12-12 05:44:01+00:00)
+As long as we follow the style that has been used before, I'm happy.
+
+My comment was because I do not think its as intuitive that omitting the index means that we return the first index with the naming used, instead of returning the whole list.
+
+It could make sense to return the whole list as well - but just returning one element also makes a lot of sense.
+
+>We can also just modify it so that index is a mandatory argument
+Could make sense.
+
+I guess there is some room to make the signature a bit clearer.
+
+*--- fredrikdanebjer (2025-12-12 05:45:14+00:00)
+@Thalley I'm approving, but please consider the reply I left for the future :)
+
+*--- Thalley (2025-12-12 08:46:49+00:00)
+> As long as we follow the style that has been used before, I'm happy.
+
+Yeah, this command is just doing the same as the others in this module. It's a new module of course, so there isn't a whole lot of history to consider (except if we compare it to the TBS shell module). 
+
+I'd be OK with always requiring an index to make it clearer. I'm not sure if we want to add commands that sent read requests to all bearers, because 1) either we need to implement a simple state machine to handle it on a bearer-by-bearer level and need to support disconnects etc. in the shell module, and 2) the write commands doesn't benefit from this as we probably never want to write the same value to each bearer.
+
+*--- aescolar (2025-12-12 09:17:15+00:00)
+> result of comparison of unsigned expression < 0 is always false
+
+@Thalley don't you want to fix the issue reported by Sonarcloud?
+it is valid
+
+*--- Copilot (2025-12-12 09:26:17+00:00)
+The parameter documentation incorrectly states "The bearer to get the name for" when it should say "The bearer to get the UCI for" since this function retrieves the UCI, not the provider name.
+```suggestion
+ * @brief Get the bearer UCI.
+ *
+ * @param[in]  bearer  The bearer to get the UCI for.
+```
+
+*--- Copilot (2025-12-12 09:26:17+00:00)
+The command help text incorrectly states "get_bearer_name" but should be "get_bearer_uci" to match the actual command name. This is a copy-paste error from the line above.
+```suggestion
+     get_bearer_uci   : Get bearer UCI [index]
+```
+
+*--- Copilot (2025-12-12 09:26:18+00:00)
+The command used in the documentation is incorrect. It shows "get_bearer_name 1" but should be "get_bearer_uci 1" to match the command being demonstrated in this section.
+```suggestion
+   uart:~$ ccp_call_control_server get_bearer_uci 1
+```
+
+*--- Copilot (2025-12-12 09:26:18+00:00)
+The variable name 'res_bearer_name' is misleading as it's being used to store the UCI, not the bearer name. It should be renamed to something like 'res_bearer_uci' for clarity.
+
+*--- Copilot (2025-12-12 09:26:18+00:00)
+The variable name 'res_bearer_name' is misleading as it's being used to store the UCI, not the bearer name. It should be renamed to something like 'res_bearer_uci' for clarity.
+
+*--- Copilot (2025-12-12 09:26:19+00:00)
+The variable name 'res_bearer_name' is misleading as it's being used to store the UCI, not the bearer name. It should be renamed to something like 'res_bearer_uci' for clarity.
+
+*--- Copilot (2025-12-12 09:26:19+00:00)
+The test function name includes 'null_name' but it's actually testing for a null UCI parameter. The name should be changed to 'test_bt_ccp_call_control_server_get_bearer_uci_inval_null_uci' for consistency and clarity.
+```suggestion
+	       test_bt_ccp_call_control_server_get_bearer_uci_inval_null_uci)
+```
+
+*--- Copilot (2025-12-12 09:26:19+00:00)
+The documentation comment incorrectly states "Get the bearer provider name" when it should say "Get the bearer UCI" since this function retrieves the UCI, not the provider name.
+```suggestion
+ * @brief Get the bearer UCI.
+ *
+ * @param[in]  bearer  The bearer to get the UCI for.
+ * @param[out] uci     Pointer that will be updated to be the bearer UCI.
+```
+
+*--- kartben (2026-01-06 09:28:19+00:00)
+a followup with release notes entries for the new APIs would be nice

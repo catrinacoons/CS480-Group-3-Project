@@ -1,0 +1,74 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/119304
+TITLE: bluetooth: mesh: fix rpl storage timeout
+
+*--- opening post by alxelax (2026-09-16 09:49:52+00:00)
+The replay protection list and the solicitation replay list shared the
+pending-store work item with every other settings flag. Scheduling any
+other flag, such as model data, rescheduled that work item to
+CONFIG_BT_MESH_STORE_TIMEOUT, and the handler then stored every flag
+that was set, the replay lists included. CONFIG_BT_MESH_RPL_STORE_TIMEOUT
+was therefore only honored while nothing else was pending, and the
+replay lists were written to flash far more often than configured.
+
+Give the replay lists a work item of their own, armed with
+CONFIG_BT_MESH_RPL_STORE_TIMEOUT. store_pending_flags() now takes a mask
+so that each work item stores only the flags it owns, and the generic
+item masks the replay list flags out. bt_mesh_settings_store_pending()
+cancels both items and flushes everything, leaving the synchronous path
+unchanged. Both replay lists keep sharing one deadline, and each is
+still stored only when its own flag is set.
+
+plus unit tests to check that there is no interference among stored groups and
+all groups behave as designed.
+
+*--- Copilot (2026-09-16 10:16:42+00:00)
+The suite sleeps for roughly 110 seconds in total (the 10-second RPL deadline is exercised by several tests), but Twister's default test timeout is 60 seconds (`scripts/pylib/twister/twisterlib/config_parser.py:66`). As written, native_sim will time out before the suite completes; add an explicit timeout (for example, 120 seconds) or shorten the repeated waits.
+
+*--- alxelax (2026-09-16 10:22:56+00:00)
+the ztest reported 122 s is simulated time, not wall clock; twister measured 0.01 s, because NATIVE_SIM_SLOWDOWN_TO_REAL_TIME is disabled for CONFIG_ZTEST builds without BT_USERCHAN, so the simulator skips idle time.
+
+*--- ludvigsj (2026-09-16 14:20:55+00:00)
+I _think_ we commonly have the `ZTEST_SUITE` at the _bottom_ of the suite, after the test cases? Is there a reason why you put it up here?
+
+*--- ludvigsj (2026-09-16 14:30:01+00:00)
+Wow, that's a bit of a mouthful. Consider something like
+
+```c
+#define MOCK_STORE(_func, _flag) \
+void bt_mesh_ ## _func(void)     \
+{                                \
+	store_cnt[BT_MESH_SETTINGS_ ## _flag ## _PENDING]++; \
+}
+```
+
+or something, to not have to use almost 100 lines on these. Purely cosmetic of course, I don't expect a test-bug to sneak into any of these mocks, so decide for yourself.
+
+*--- omkar3141 (2026-09-16 17:00:54+00:00)
+There seems to be one side-effect with the new logic now. Old logic (due to bug) was saving RPL after IV update reset clears the RPL. But now, new logic won't save RPL even after IV update resets it until timeout fires. This is creating a situation where, if power cycle occurs immediate after IV update, but before RPL is saved, next reboot will load stale RPL. If the RPL would have been full, the stale RPL will just make whole situation problematic ... potentially.
+
+So, When NO_WAIT_PENDING_BITS are triggered (specially for IV_PENDING), rpl_pending_store should be called.
+
+*--- alxelax (2026-09-17 07:18:42+00:00)
+Your suggestion is architecturally wrong. You want to add IV index logic into settings module purpose of which is absolutely different. This is module functionality violation.
+Even more, it recreates initial bug that is fixed by this PR.
+It should be implemented in place where IV index update is managed.
+
+*--- alxelax (2026-09-17 07:19:15+00:00)
+> How about testcase yaml addition since you added a a new suit? Otherwise twister won't run it.
+
+Have you looked at CI results before writing this comment?
+
+*--- alxelax (2026-09-17 07:22:05+00:00)
+Yep, AI agent usage makes brain lazy. Suggestion seems reasonable. I will add it.
+
+*--- omkar3141 (2026-09-18 16:59:03+00:00)
+Will you add this at appropriate place as a part of these changes? I don't understand how my comment recreates initial bug. My comment simply pointed out the changed behavior as a part of review of this work. The intent is to point out underlaying issue which might get overlooked and it is not a suggestion to recreate old logic.
+
+Because now with the timeout fix, original behavior with respect to IV update completion, is changing and potentially creating a situation I described above. Please check if you want to fix it in this PR ... or as a seperate issue in seperate PR. I would recommend to keep them together, but it is upto you.
+
+*--- omkar3141 (2026-09-18 17:08:45+00:00)
+> > How about testcase yaml addition since you added a a new suit? Otherwise twister won't run it.
+> 
+> Have you looked at CI results before writing this comment?
+
+Please add the link in your response, it will be easy for me to check and verify.

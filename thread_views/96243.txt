@@ -1,0 +1,47 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/96243
+TITLE: Bluetooth: Controller: Add support for nRF54L15DK debug pins
+
+*--- opening post by cvinayak (2025-09-18 21:40:13+00:00)
+Add support for GPIO debug pins for nRF54L15DK.
+
+Relates to #93199.
+
+*--- Copilot (2025-09-29 04:18:49+00:00)
+DEBUG_PIN3 and DEBUG_PIN4 are both assigned to BIT(10), which means they would control the same GPIO pin. DEBUG_PIN4 should use a different bit value.
+```suggestion
+#define DEBUG_PIN4       BIT(12)
+```
+
+*--- Copilot (2025-09-29 04:18:50+00:00)
+DEBUG_PIN5 and DEBUG_PIN6 are both assigned to BIT(11), which means they would control the same GPIO pin. DEBUG_PIN6 should use a different bit value.
+```suggestion
+#define DEBUG_PIN6       BIT(15)
+```
+
+*--- cvinayak (2025-09-29 04:26:01+00:00)
+@diggit FYI. An old commit I had lying  around, not adding DT support, but extension similar to earlier hard coded way of using GPIO debug pins. Contributions to convert to use of DT is welcome from the community.
+
+*--- cvinayak (2025-10-05 04:06:46+00:00)
+There are no more free pins, adv and peripheral, scan and central will share pins for nRF54L debugging.
+
+*--- cvinayak (2025-10-05 04:06:54+00:00)
+There are no more free pins, adv and peripheral, scan and central will share pins for nRF54L debugging.
+
+*--- Thalley (2025-10-05 09:59:28+00:00)
+I suggest to add a comment stating that this is intentional, and not a bug
+
+*--- Thalley (2025-10-05 09:59:30+00:00)
+I suggest to add a comment stating that this is intentional, and not a bug
+
+*--- cvinayak (2025-10-12 05:47:23+00:00)
+Changed pins and added comments.
+
+*--- Copilot (2025-10-13 09:40:12+00:00)
+The original condition `CONFIG_BOARD_NRF5340DK` has been replaced, but the updated condition should maintain backward compatibility. Consider using `#elif` instead of replacing the original condition to ensure existing NRF5340DK configurations continue to work.
+
+*--- Copilot (2025-10-13 09:40:13+00:00)
+The original `CONFIG_BOARD_NRF5340DK` condition has been expanded to three specific variants, but this may break compatibility if the original generic condition was used elsewhere. Verify that all NRF5340DK board configurations are properly covered by these three specific variants.
+```suggestion
+#elif defined(CONFIG_BOARD_NRF5340DK) || \
+	defined(CONFIG_BOARD_NRF5340DK_NRF5340_CPUAPP) || \
+```

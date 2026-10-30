@@ -1,0 +1,203 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/90965
+TITLE: Bluetooth: Controller: nRF54Lx: Add Controller Privacy Support
+
+*--- opening post by cvinayak (2025-06-02 16:48:46+00:00)
+Add Controller Privacy support for nRF54Lx by porting to use NRF_AAR00 h/w peripheral.
+
+*--- Thalley (2025-06-03 07:24:37+00:00)
+Why `+ 3`?
+
+*--- Thalley (2025-06-03 07:24:48+00:00)
+Why an array with a single entry?
+
+*--- Thalley (2025-06-03 07:25:47+00:00)
+Please avoid using magic numbers
+
+*--- Thalley (2025-06-03 07:26:18+00:00)
+Ditto with magic numbers
+
+*--- Thalley (2025-06-03 07:46:53+00:00)
+IS_ENABLED?
+
+*--- Thalley (2025-06-03 07:46:59+00:00)
+IS_ENABLED?
+
+*--- Thalley (2025-06-03 09:09:03+00:00)
+Consider if we can use `POINTER_TO_UINT` to store the pointer as a integer value.
+
+*--- cvinayak (2025-06-03 10:15:10+00:00)
+Added inline comments.
+
+*--- cvinayak (2025-06-03 10:15:33+00:00)
+Added inline comment.
+
+*--- cvinayak (2025-06-03 10:27:05+00:00)
+Fixed.
+
+*--- cvinayak (2025-06-03 10:28:46+00:00)
+Keeping this outside the scope of this PR; will take a call once I analyze other sonarcloud complaints, if related.
+
+*--- cvinayak (2025-06-03 10:32:47+00:00)
+Fixed
+
+*--- cvinayak (2025-06-03 10:49:34+00:00)
+done
+
+*--- cvinayak (2025-06-03 10:49:39+00:00)
+done
+
+*--- Thalley (2025-06-03 11:23:34+00:00)
+The comment is just stating the fact that there's an array with a single entry, but not why it's an array in the first place instead of just `struct aar_job_ptr out;`
+
+*--- Thalley (2025-06-03 11:24:42+00:00)
+```suggestion
+	 * Radio packet pointer offset by 3 compared to legacy NRF_AAR that took Radio packet
+	 * pointer value.
+```
+
+Could you add a reference for this? As someone who doesn't know what the legacy NRF_AAR is, I wouldn't know where to find more information.
+
+*--- Thalley (2025-06-03 11:24:53+00:00)
+```suggestion
+	 * Radio packet pointer offset by 3 compared to legacy NRF_AAR that took Radio packet
+```
+
+*--- Thalley (2025-06-03 11:25:52+00:00)
+Could we not defined a `#define LEGACY_AAR_OFFSET 3U` to use here? 
+
+If all the 3's in this function refer to the same value, they should use a defined value instead of a literal value IMO
+
+*--- Thalley (2025-06-03 11:26:22+00:00)
+Magic number 16
+
+*--- Thalley (2025-06-03 11:27:25+00:00)
+The function does not protect against any issues where `nirk > CONFIG_BT_CTLR_RL_SIZE`
+
+*--- cvinayak (2025-06-03 13:10:18+00:00)
+Fixed an assignment to MAXRESOLVED accordingly. It should be a list as documented in product specification, and can be configured for multiple match, if required.
+
+*--- cvinayak (2025-06-03 13:15:40+00:00)
+Updated comment to mention that nRF51/52/53 had the legacy AAR h/w.
+
+*--- cvinayak (2025-06-03 13:17:26+00:00)
+Added different defines for all the 3s.
+
+*--- cvinayak (2025-06-03 13:21:47+00:00)
+Fixed
+
+*--- cvinayak (2025-06-03 13:23:07+00:00)
+added define.
+
+*--- cvinayak (2025-06-03 13:30:11+00:00)
+Upper layers ensure `nirk` does not exceed configured max value in the use of this function: https://github.com/zephyrproject-rtos/zephyr/blob/8bc3a14c057595cd7a9914573215de4ed51fcf08/subsys/bluetooth/controller/ll_sw/ull_filter.c#L826
+
+*--- aescolar (2025-06-03 14:26:07+00:00)
+minor:
+```suggestion
+	/* NOTE: Refer to the AAR section in the SoC product specification for details */
+```
+I think the spec does not refer to it as "NRF_AAR" anywhere(?)
+
+*--- aescolar (2025-06-03 14:27:36+00:00)
+```suggestion
+	struct aar_job_ptr out[AAR_JOB_OUT_MAX_RESOLVED + 1];
+```
+Don't we, in theory, also need a termination in the out job? (I think the HW may not really care in this case)
+
+*--- aescolar (2025-06-03 14:30:26+00:00)
+I think you can set just one job of size AAR_IRK_SIZE*nirk instead of nirk jobs.
+
+*--- aescolar (2025-06-03 14:36:11+00:00)
+Silly optimization: As you rely on the IRKs being set correctly already, I guess you could also save setting the length and attrib. for these 2 here.
+
+*--- cvinayak (2025-06-03 16:20:15+00:00)
+`A job list ends with a zero filled job entry. `  is only mentioned in the paragraph containing `collect data from multiple memory regions`.
+
+There is no mention of any required zero filled job entry in the output job list section of the documentation, nor `ERRORSTATUS` value about premature output job list, if any, only a `PrematureInptrEnd` value.
+
+That said, I have not tested on target; I will add new samples or update `broadcaster_multiple` and `observer` samples to generate and resolve addresses to check what works on target.
+
+*--- cvinayak (2025-06-03 16:20:25+00:00)
+Updated.
+
+*--- cvinayak (2025-06-03 16:31:50+00:00)
+Ah! sure, will try both on target (was curious to test scatter-gather of the IRKs).
+
+*--- cvinayak (2025-06-03 16:32:33+00:00)
+Thanks, will do.
+
+*--- cvinayak (2025-06-05 05:03:02+00:00)
+This change to use single job is pending in my todo.
+
+*--- Thalley (2025-06-05 08:37:34+00:00)
+Wouldn't it still make sense to add an assert or something similar, in case the upper layers provide an invalid `nirk` value?
+
+*--- Thalley (2025-06-05 08:39:23+00:00)
+It's unclear to me whether, when moving/indenting existing code, whether the code should still be updated to follow the current guidelines or not :|
+
+E.g. this should be
+```suggestion
+		if (err != 0) {
+```
+
+But not sure if that's something we want to do when just moving code
+
+*--- cvinayak (2025-10-23 20:38:55+00:00)
+@copilot please give me the code changes to set just one job of size AAR_IRK_SIZE*nirk instead of nirk jobs.
+
+*--- cvinayak (2025-10-23 20:40:23+00:00)
+This is a HAL interface and lets have it trust the upper layer to provide valid values.
+
+*--- jhedberg (2025-10-23 20:44:25+00:00)
+@cvinayak there's a merge conflict
+
+*--- Copilot (2025-10-23 21:25:49+00:00)
+[nitpick] Pointer arithmetic using addrptr which is uint32_t could be fragile. Consider casting to uint8_t* first or documenting why this approach is safe.
+
+*--- Copilot (2025-10-23 21:25:49+00:00)
+[nitpick] The nested casts and pointer arithmetic are complex. Consider storing the intermediate calculation in a variable for clarity: `uint8_t *irk_entry = ((uint8_t *)irk) + (AAR_IRK_SIZE * i);`
+```suggestion
+		uint8_t *irk_entry = ((uint8_t *)irk) + (AAR_IRK_SIZE * i);
+		aar_job.in[2U + i].ptr = (void *)irk_entry;
+```
+
+*--- Copilot (2025-10-23 21:25:49+00:00)
+[nitpick] Document why UINT32_MAX is used as the invalid/unresolved value. Consider defining a named constant like `AAR_STATUS_UNRESOLVED` for better code clarity.
+
+*--- Copilot (2025-10-23 21:25:50+00:00)
+[nitpick] Using 0U for all fields in the terminating entry may be ambiguous. Consider defining a constant or macro like `AAR_JOB_TERMINATOR` to make the intent explicit.
+
+*--- cvinayak (2025-10-24 09:58:07+00:00)
+@aescolar can we agree to take optimization in the future? I will not be able to make change in the immediate future, this PR is passing BabbleSIM tests, and it sufficient as enhancement PR.
+
+*--- aescolar (2025-10-24 12:04:22+00:00)
+sure
+
+*--- cvinayak (2025-10-24 14:49:19+00:00)
+Here is an analysis of the pull request "Bluetooth: Controller: nRF54Lx: Add Controller Privacy Support" (<https://github.com/zephyrproject-rtos/zephyr/pull/90965>):
+
+### Pros
+- **Feature Addition**: Adds Controller Privacy support for the nRF54Lx platform, extending Bluetooth LE support in Zephyr for Nordic’s newest SoC.
+- **Hardware Utilization**: Ports the privacy feature to leverage the NRF_AAR00 hardware peripheral, potentially improving performance and offloading cryptographic work from the CPU.
+- **Code Quality**: The PR modifies 12 files, adds 209 lines, and removes 43 lines, indicating focused changes rather than widespread refactoring.
+- **Labels/Testing**: Labeled for Bluetooth, Tests, Controller, Host, and nRF BSIM, suggesting test coverage and attention to relevant subsystems.
+- **Review Activity**: Has 45 review comments, demonstrating active feedback and review from maintainers and Bluetooth subsystem experts.
+- **Milestone Targeted**: Aims for Zephyr v4.3.0, making it part of an upcoming feature release.
+
+### Cons / Potential Drawbacks
+- **Hardware Dependency**: This privacy implementation is specific to the nRF54Lx and uses the NRF_AAR00 peripheral, so it is not portable to other controllers.
+- **Regression Risk**: As with any low-level Bluetooth controller change, there is a risk of introducing regressions in privacy-related Bluetooth features (e.g., address resolution, privacy mode, etc.), especially if other platforms or host stacks rely on generic APIs.
+- **Merge State**: The PR is currently "blocked" for merging, which implies outstanding issues or required changes highlighted during review.
+- **Complexity**: Bluetooth Privacy is a complex feature and can introduce subtle bugs related to address resolution, whitelisting, and host-controller interaction.
+- **Limited Scope**: The benefit is limited to users of nRF54Lx; users of other platforms do not gain from this change.
+
+### Potential Regressions
+- No explicit regression reports are mentioned in the PR metadata, but because this touches core controller privacy logic, thorough testing (including interoperability and edge cases) is necessary to avoid issues such as:
+  - Incorrect address resolution (devices unable to connect due to privacy mismatches)
+  - Unintended privacy leaks or failures to resolve addresses securely
+  - Performance regressions if the hardware peripheral is not used correctly
+
+### Summary
+**This PR is a targeted enhancement for nRF54Lx users, adding hardware-accelerated privacy features. Its main risks are around Bluetooth privacy regressions and the integration of hardware-specific code, but it is well-reviewed and scoped.** Thorough testing, review resolution, and validation on real hardware are essential to prevent regressions.
+
+If you want a deeper analysis (e.g., diff review, review comments, or related issues), let me know!

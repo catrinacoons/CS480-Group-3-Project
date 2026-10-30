@@ -1,0 +1,15 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112778
+TITLE: modem: cellular: bugfixes
+
+*--- opening post by JordanYates (2026-07-06 06:47:18+00:00)
+Ensure that the CMUX buffer sizes instantiated in `modem_cellular.h` meet the minimum size required by the CMUX module.
+
+Don't attempt to run a `NULL` periodic script, and add assertions into `modem_chat` to raise the issue if this does occur.
+
+Increase the default CMUX MTU size for the nRF93M1 from 31 bytes to 127.
+
+*--- Copilot (2026-07-07 12:56:01+00:00)
+In MODEM_CELLULAR_EVENT_TIMEOUT, the periodic-paused branch sets periodic_timeout_skipped but no longer breaks out of the switch, so the periodic script will still be started even when periodic execution is paused. This changes behavior vs the await-registered handler and makes the pause API ineffective in the registered state.
+
+*--- JordanYates (2026-07-07 12:59:13+00:00)
+Error crept in while rebasing, resolved

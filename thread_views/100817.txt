@@ -1,0 +1,53 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/100817
+TITLE: Bluetooth: CCP: Add user_data to bt_ccp_call_control_client_cb
+
+*--- opening post by Thalley (2025-12-10 14:50:39+00:00)
+Add a user_data field to bt_ccp_call_control_client_cb. The field is optional to enable via Kconfig. The field can be used to provide additional context from the owner of the callback structure, to the callbacks themselves.
+
+This solves a memory use-after-free issue in the unit tests where the values from the callback was accessed after they were released, as the values were just stack allocated.
+
+*--- Copilot (2025-12-10 14:56:12+00:00)
+Incorrect bearer assignment. Should be `fixture->bearers[i] = bearers->tbs_bearers[i];` instead of `fixture->bearers[i] = bearers->gtbs_bearer;`. This loop is copying TBS bearers, not the GTBS bearer.
+```suggestion
+		fixture->bearers[i] = bearers->tbs_bearers[i];
+```
+
+*--- Copilot (2025-12-10 14:56:12+00:00)
+Incorrect loop iteration. The loop should iterate over all TBS bearers from index 0 to `bearers->tbs_count`, but currently it iterates from the current value of `i` to `bearers->tbs_count`. This will skip TBS bearers when GTBS is enabled. Consider using a separate loop variable: `for (size_t j = 0; j < bearers->tbs_count; j++)` and then assign `fixture->bearers[i++] = bearers->tbs_bearers[j];`.
+```suggestion
+	for (size_t j = 0; j < bearers->tbs_count; j++) {
+		zassert_not_null(bearers->tbs_bearers[j]);
+		fixture->bearers[i++] = bearers->tbs_bearers[j];
+```
+
+*--- Copilot (2025-12-10 14:56:13+00:00)
+Incorrect loop iteration. The loop should iterate over all TBS bearers from index 0 to `bearers->tbs_count`, but currently it iterates from the current value of `i` to `bearers->tbs_count`. This will skip TBS bearers when GTBS is enabled. Consider using a separate loop variable: `for (size_t j = 0; j < bearers->tbs_count; j++)` and then assign `fixture->bearers[i++] = bearers->tbs_bearers[j];`.
+```suggestion
+	for (size_t j = 0; j < bearers->tbs_count; j++) {
+		zassert_not_null(bearers->tbs_bearers[j]);
+		fixture->bearers[i++] = bearers->tbs_bearers[j];
+```
+
+*--- Copilot (2025-12-10 14:56:13+00:00)
+The help text contains redundant wording. Consider simplifying to: "This option enables support for user_data in Call Control Profile Client callbacks."
+```suggestion
+	  This option enables support for user_data in Call Control Profile Client callbacks.
+```
+
+*--- Copilot (2025-12-10 14:56:14+00:00)
+Spelling error in comment: "THis" should be "This".
+```suggestion
+	/* TODO: This need to have a size that is the max of all string values */
+```
+
+*--- Copilot (2025-12-10 14:56:14+00:00)
+Incorrect bearer assignment. Should be `fixture->bearers[i] = bearers->tbs_bearers[i];` instead of `fixture->bearers[i] = bearers->gtbs_bearer;`. This loop is copying TBS bearers, not the GTBS bearer.
+```suggestion
+		fixture->bearers[i] = bearers->tbs_bearers[i];
+```
+
+*--- Copilot (2025-12-10 20:00:45+00:00)
+The @param documentation says "client" but the actual parameter name is "bearer". This should be "@param bearer" to match the function signature.
+```suggestion
+	 * @param bearer    Call Control Client bearer instance pointer.
+```

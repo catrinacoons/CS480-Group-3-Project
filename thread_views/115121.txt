@@ -1,0 +1,75 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115121
+TITLE: drivers: timer: renesas_rx_cmt: never program CMCOR to zero
+
+*--- opening post by nashif (2026-08-01 00:22:17+00:00)
+sys_clock_set_timeout() computes the compare value as
+"current + delay - 1", where delay can legitimately be zero.
+
+On this SoC MAX_TICKS is 0 (CYCLES_PER_TICK is 60000 and the CMT
+counter is 16-bit), so the requested tick count is always clamped
+to 0 and delay collapses to
+"roundup(elapsed, CYCLES_PER_TICK) - elapsed", which is zero
+whenever the call lands exactly on a tick boundary. If CMCNT reads
+1 at that moment, CMCOR ends up programmed to 0.
+
+That value is fatal: the compare match clears CMCNT to 0, so a
+CMCOR of 0 matches again on the very next cycle and the CPU never
+leaves the tick ISR. It does not self-heal either, because with no
+pending kernel timeout sys_clock_set_timeout() returns early on
+SYS_CLOCK_MAX_WAIT and never reprograms the register.
+
+The window is one cycle wide, so any unrelated change in code size
+or instruction timing can expose it. It was hit on
+qemu_rx/r5f562n8 by the secure_storage.psa.its scenario
+secure_storage.custom.store, which hung with its test thread
+frozen on its very first instruction and both CMCOR and CMCNT
+reading 0.
+
+Push such a deadline out by a single cycle instead. The worst-case
+error is one cycle of jitter.
+
+Assisted-by: Claude:claude-opus-5
+Signed-off-by: Anas Nashif <anas.nashif@intel.com>
+
+*--- npitre (2026-08-02 01:42:03+00:00)
+I think this trades a real bug for a systematic cost, and the bug is somewhere else.
+
+A `CMCOR` of zero is a legitimate value. The compare matches on the next cycle, the ISR runs immediately, and that would correct itself on the spot, because the ISR announces and the kernel then asks for the next deadline. What makes it fatal here is the early return a few lines up:
+
+```c
+	/* Nothing to do when the kernel has no near deadline to schedule. */
+	if (ticks == SYS_CLOCK_MAX_WAIT) {
+		return;
+	}
+```
+
+With an empty timeout queue the kernel passes exactly that value, so the driver declines to reprogram and whatever period is in place becomes permanent. That is what turns a zero into an interrupt storm rather than a single early tick. Your commit message says as much: "It does not self-heal either, because with no pending kernel timeout `sys_clock_set_timeout()` returns early on `SYS_CLOCK_MAX_WAIT` and never reprograms the register."
+
+The clamp is not cheap on this SoC. `CYCLES_PER_TICK` is 60000, so `MIN_PERIOD_CYCLES` is 15000 cycles, 2.5 ms against a 10 ms tick. Because `MAX_TICKS` is 0 there, every `sys_clock_set_timeout()` asks for the distance to the next tick boundary, spread over one whole tick, so as much as a quarter of that range lands under the clamp and is pushed out. That is a permanent accuracy loss on the ordinary path, paid to contain one pathological value on the empty-queue path.
+
+It is also worth noting that the early return is not conditioned on sloppy idle at all. Without that option `SYS_CLOCK_MAX_WAIT` is a genuine request: the kernel caps the wait there precisely so an announce lands within the range its tick accounting can represent. Declining to program it means the driver no longer honours that bound, and this patch does not address that either.
+
+On this driver that is more than a range question, because the cycle base is extended by polling rather than by an interrupt. `cmt1_elapsed()` adds one CMT1 period when it notices the wrap flag, and catches a single wrap per call. CMT1 wraps every 65536 cycles, about 10.9 ms here, against a 10 ms tick, so the cycle count stays correct only while something calls that function often enough. Today that holds only because the period left behind in `CMCOR` happens to be short. It is not something the driver arranges, and it stops being true the moment a longer period is left in place, which is exactly the state the early return preserves.
+
+Minor, but the description no longer matches the patch: it says "Push such a deadline out by a single cycle instead. The worst-case error is one cycle of jitter", which describes a different change from the quarter-tick clamp in the diff.
+
+What I would suggest instead is fixing the reprogramming. In #114901 that early return is gone, and the no-deadline case has its own entry point which programs the longest period the register can hold:
+
+[9e95394cb471](https://github.com/zephyrproject-rtos/zephyr/commit/9e95394cb471) in #114901
+
+A `CMCOR` of zero then resolves at the next match: the ISR runs, the kernel reports nothing pending, and the driver stretches the period to `COUNTER_MAX`, 65535 cycles, which stays just inside the CMT1 wrap so the polling still catches every one. Short deadlines keep their accuracy, and the wakeup rate drops while nothing is pending, which the early return does not achieve either.
+
+*--- nashif (2026-08-02 01:43:52+00:00)
+> What I would suggest instead is fixing the reprogramming. In #114901 that early return is gone, and the no-deadline case has its own entry point which programs the longest period the register can hold:
+> 
+> [997a46324fa7](https://github.com/zephyrproject-rtos/zephyr/commit/997a46324fa7)
+> 
+> A `CMCOR` of zero then resolves at the next match: the ISR runs, the kernel reports nothing pending, and the driver stretches the period to `COUNTER_MAX`, 65535 cycles, which stays just inside the CMT1 wrap so the polling still catches every one. Short deadlines keep their accuracy, and the wakeup rate drops while nothing is pending, which the early return does not achieve either.
+
+yeah, I just verified that your PR fixes the problem for RX, at least the test passes now. https://github.com/zephyrproject-rtos/zephyr/pull/115147
+
+*--- quytranpzz (2026-08-03 16:38:27+00:00)
+Thanks for the update. The CMCOR != 0 fix makes sense, but MIN_PERIOD_CYCLES = CYCLES_PER_TICK / 4 seems larger than necessary
+
+*--- nashif (2026-08-05 13:18:14+00:00)
+superseded by https://github.com/zephyrproject-rtos/zephyr/pull/114901

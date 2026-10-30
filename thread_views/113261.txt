@@ -1,0 +1,22 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113261
+TITLE: drivers: gpio: gpio_mcux: support GPIO_DISCONNECTED in PORT variant
+
+*--- opening post by leonardojc90 (2026-07-10 20:15:17+00:00)
+The PORT-based gpio_mcux_port_configure() rejects any configuration that sets neither GPIO_INPUT nor GPIO_OUTPUT with -ENOTSUP. This makes it impossible to release a pin with gpio_pin_configure(dev, pin, GPIO_DISCONNECTED), which applications such as debug probes and programmers need in order to tri-state shared target pins (SWD, ICSP, UPDI) when a protocol is deactivated.
+
+Handle GPIO_DISCONNECTED by clearing the pin's direction bit in PDDR, turning it into an input. Since no pull flags are present in a disconnect request, the pull resistors are also disabled by the existing PCR logic below, leaving the pin floating (high impedance).
+
+Tested by building samples/subsys/dap for frdm_mcxa156; the change has been shipping as a downstream patch in our probe firmware (MCXA156), where it releases shared programming pins between protocol switches.
+
+*--- zejiang0jason (2026-07-13 07:11:12+00:00)
+To disconnect a signal to GPIO, the MUX bit field in PORT PCR register should be configured.
+Another concern is, this will place the GPIO in floating state, which is bad for power consumption: https://electronics.stackexchange.com/questions/7179/is-it-really-a-bad-idea-to-leave-an-mcu-input-pin-floating.
+
+*--- leonardojc90 (2026-07-14 00:32:32+00:00)
+> To disconnect a signal to GPIO, the MUX bit field in PORT PCR register should be configured. Another concern is, this will place the GPIO in floating state, which is bad for power consumption: https://electronics.stackexchange.com/questions/7179/is-it-really-a-bad-idea-to-leave-an-mcu-input-pin-floating.
+
+Thanks for taking a look. This started as a patch for an old revision of Zephyr used on our application that I'm trying to upstream now.
+
+I'll rework it to configure the pin at the pad level instead, returning early so the pull/drive-strength/MUX-to-GPIO configuration below is skipped for this case.
+
+I assume effectively disconnecting the pin and disabling the input buffer would reduce the power consumption concerns. This is the same reasoning behind configuring unused pins as analog on other vendors' parts, and it matches how in-tree drivers already implement this flag (gpio_stm32 → analog mode, gpio_nrfx → input buffer disconnect). GPIO_DISCONNECTED is also only ever applied when the application explicitly asks for it — in our case a debug probe that must fully release shared programming lines so the target board can drive them, so the net is not left floating in practice.

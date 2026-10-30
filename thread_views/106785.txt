@@ -1,0 +1,486 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/106785
+TITLE: Bluetooth: BAP: Optimize unicast client for single direction
+
+*--- opening post by anand16158 (2026-04-02 19:00:10+00:00)
+Fixes #106773
+
+If the Unicast Client only supports one direction (sink or source but not
+both), several things can be optimized:
+
+- **Early rejection**: `bt_bap_unicast_client_discover()` now returns
+  `-ENOTSUP` for unsupported directions before setting the BUSY flag,
+  avoiding a GATT discovery that would always fail.
+
+- **Struct size reduction**: `snk_loc_subscribe` and `src_loc_subscribe`
+  in `struct unicast_client` are compiled out when the corresponding
+  direction is not configured, saving a `struct bt_gatt_subscribe_params`
+  per connection per unused direction.
+
+- **dir field optimization**: The `dir` field in `struct unicast_client`
+  is compiled out when only a single direction is configured.
+  A new `unicast_client_get_dir()` helper abstracts this, returning a
+  hardcoded direction value in single-direction builds.
+
+- **Callback guards**: `start` and `stop` fields in
+  `struct bt_bap_unicast_client_cb` are wrapped behind
+  `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` since they are only valid for
+  source endpoints. In-tree users updated accordingly.
+
+*--- Thalley (2026-04-02 19:07:46+00:00)
+Since we are now guarding valid opcodes, we should consider logging non-supported ones in the `default` clause; something like `LOG_DBG("Unexpected response opcode 0x%02X", rsp->op);`
+
+*--- Thalley (2026-04-02 19:13:49+00:00)
+I think that if we set an invalid default value to `dir` (e.g. `dir = 0`), then we can avoid having the `#elif` by doing something like 
+
+```c
+#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK)
+	if (params == &uni_cli_insts[bt_conn_index(conn)].snk_loc_subscribe) {
+		dir = BT_AUDIO_DIR_SINK;
+	}
+#endif /* CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK */
+
+#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)
+	if (params == &uni_cli_insts[bt_conn_index(conn)].src_loc_subscribe) {
+		dir = BT_AUDIO_DIR_SOURCE;
+	}
+#endif /* CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK */
+
+	if (PAC_DIR_UNUSED(dir)) {
+		LOG_ERR("Invalid notification");
+
+		return BT_GATT_ITER_CONTINUE;
+	}
+```
+
+*--- Thalley (2026-04-02 19:15:52+00:00)
+General comment: I think we can use `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK` and `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` instead which may be semantically "better"
+
+*--- Thalley (2026-04-02 19:17:00+00:00)
+We can optimize this a bit too by using something like `if (IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) && dir == BT_AUDIO_DIR_SINK)` as that help remove unused variables at link-time as `snk_uuid`
+
+*--- Thalley (2026-04-02 19:17:53+00:00)
+This entire function should be guarded instead :)
+
+*--- Thalley (2026-04-02 19:17:56+00:00)
+This entire function should be guarded instead :)
+
+*--- Thalley (2026-04-02 19:19:04+00:00)
+We should guard `bt_bap_unicast_client_start` and `bt_bap_unicast_client_stop` with `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` as well
+
+*--- Copilot (2026-04-02 19:36:13+00:00)
+`start`/`stop` are now conditionally compiled out of `struct bt_bap_unicast_client_cb` when `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` is disabled. Any in-tree users that unconditionally initialize `.start`/`.stop` will fail to compile in sink-only configurations (e.g. `tests/bluetooth/tester/src/audio/btp_bap_unicast.c` currently sets both unconditionally). Please update those initializers to guard `.start`/`.stop` behind the same Kconfig (or use an alternative pattern that doesn’t reference missing struct members).
+
+*--- Copilot (2026-04-02 19:36:13+00:00)
+The PR description notes that the `dir` field optimization is left for a follow-up, but this change set now compiles out `unicast_client.dir` when only a single direction is configured and introduces `unicast_client_get_dir()` to abstract it. Please update the PR description (or adjust the change) so the stated scope matches the actual code changes.
+
+*--- anand16158 (2026-04-02 20:12:29+00:00)
+Done. Added `LOG_DBG("Unexpected response opcode 0x%02X", rsp->op);` in the default clause.
+
+*--- anand16158 (2026-04-02 20:12:50+00:00)
+Done. Initialized `dir = 0` and replaced the `#elif` chain with independent `#if defined()` blocks followed by a single `PAC_DIR_UNUSED(dir)` check.
+
+*--- anand16158 (2026-04-02 20:13:09+00:00)
+Done. Updated to `if (IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) && dir == BT_AUDIO_DIR_SINK)` and same for source.
+
+*--- anand16158 (2026-04-02 20:13:26+00:00)
+Done. Replaced `_COUNT > 0` guards with `defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK)` and `defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)` throughout the affected blocks.
+
+*--- anand16158 (2026-04-02 20:14:01+00:00)
+Done. Wrapped both `bt_bap_unicast_client_start` and `bt_bap_unicast_client_stop` entirely with `#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)` and removed the inner guards.
+
+*--- anand16158 (2026-04-02 20:15:12+00:00)
+Done. Wrapped both `bt_bap_unicast_client_start` and `bt_bap_unicast_client_stop` entirely with `#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)` and removed the inner guards.
+
+*--- anand16158 (2026-04-02 20:15:19+00:00)
+Done. Both `bt_bap_unicast_client_start` and `bt_bap_unicast_client_stop` in `bap_unicast_client.c` are now guarded with `#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)`.
+
+*--- anand16158 (2026-04-02 20:15:36+00:00)
+Done. Guarded `.start` and `.stop` initializers in `btp_bap_unicast.c` behind `#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)`.
+
+*--- anand16158 (2026-04-02 20:15:49+00:00)
+Done. Updated the PR description to accurately reflect that the `dir` field is now compiled out in single-direction builds via the `unicast_client_get_dir()` helper.
+
+*--- Copilot (2026-04-02 20:21:53+00:00)
+`sub_params` is used without being initialized. If `unicast_client_get_dir()` ever returns a value other than SINK/SOURCE (e.g., due to a sequencing issue, future changes, or unexpected state), this becomes undefined behavior and can also trigger compiler "maybe-uninitialized" warnings. Initialize `sub_params` to NULL and add an `else`/guard that returns an error (or skips subscription) when no matching direction is selected before dereferencing it.
+
+*--- Thalley (2026-04-02 20:34:44+00:00)
+Same comment as https://github.com/zephyrproject-rtos/zephyr/pull/106785#discussion_r3029874376: Consider using the non-COUNT versions
+
+*--- Thalley (2026-04-02 20:35:20+00:00)
+```suggestion
+static inline enum bt_audio_dir unicast_client_get_dir(const struct unicast_client *client)
+```
+
+Zephyr uses line width of 100, so this can be a single line :)
+
+*--- anand16158 (2026-04-03 06:06:24+00:00)
+Done. Changed to #if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) and #if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC) for the snk_loc_subscribe and src_loc_subscribe struct fields as well.
+
+*--- Thalley (2026-04-07 07:11:02+00:00)
+@anand16158 Please fix the build issue :)
+
+*--- Thalley (2026-04-07 11:35:27+00:00)
+I think the entire function should be guarded by `#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)`
+
+Since this is an API function, the documentation for the function should also be updated with `kconfig_dep`
+
+*--- Thalley (2026-04-07 11:39:08+00:00)
+```suggestion
+#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) && \
+	defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)
+```
+
+We can also consider adding another promptless Kconfig option to denote whether the client support bidirectional audio and use that, but that's up to you
+
+*--- Thalley (2026-04-07 11:39:30+00:00)
+Similarly, please use `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK` and `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` everywhere :)
+
+*--- Thalley (2026-04-07 11:40:02+00:00)
+```suggestion
+	enum bt_audio_dir dir = 0; /* assign to invalid value for the `PAC_DIR_UNUSED` check below */ 
+```
+
+*--- Thalley (2026-04-07 11:40:37+00:00)
+Consider storing `unicast_client_get_dir(&uni_cli_insts[index])` in a local variable for shorter lines
+
+*--- Thalley (2026-04-07 11:41:07+00:00)
+Ditto; consider storing `unicast_client_get_dir(client)` in a local (`const`) variable
+
+*--- anand16158 (2026-04-07 14:09:38+00:00)
+Hi @Thalley,
+
+Thanks for the review. I’ve addressed the feedback in the latest push:
+
+bt_bap_stream_stop: The implementation and the public declaration are now guarded with CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC, and the API docs include the relevant @kconfig_dep entries. All in-tree call sites (CAP initiator, shell, tester, BSIM, ASCS tests) are updated so sink-only / no–ASE-SRC builds stay consistent.
+
+bap_unicast_client.c: Preprocessor conditions now use defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) / ASE_SRC where appropriate; BUILD_ASSERT and array sizing still use the *_COUNT symbols. The location discover path uses a local cli_dir, and the dir = 0 case is documented for PAC_DIR_UNUSED. The static helpers around start/stop PDUs remain under ASE_SRC so we don’t hit unused-function warnings.
+
+Please have another look when you have time.
+
+*--- Thalley (2026-04-08 06:05:20+00:00)
+```suggestion
+ * @kconfig_dep{CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC}
+```
+
+Just having this should be enough
+
+*--- Thalley (2026-04-08 06:05:55+00:00)
+```suggestion
+```
+
+We do not guard header declarations, only the actual functions as per https://docs.zephyrproject.org/latest/contribute/coding_guidelines/index.html#additional-rules
+
+*--- Thalley (2026-04-08 06:07:28+00:00)
+```suggestion
+#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) && defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)
+```
+
+Zephyr uses 100 column width, so this (and more like it) fits on a single line
+
+*--- Thalley (2026-04-08 06:07:46+00:00)
+```suggestion
+#endif /* CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK && CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC
+```
+
+*--- Thalley (2026-04-08 06:09:01+00:00)
+```suggestion
+	if (dir == BT_AUDIO_DIR_SINK && !IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK)) {
+		LOG_DBG("No sink ASE support");
+		return -ENOTSUP;
+	}
+```
+
+*--- Thalley (2026-04-08 06:09:15+00:00)
+```suggestion
+	if (dir == BT_AUDIO_DIR_SOURCE && !IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)) {
+		LOG_DBG("No source ASE support");
+		return -ENOTSUP;
+	}
+```
+
+*--- Thalley (2026-04-08 06:16:37+00:00)
+Please use `IS_ENABLED` instead :) 
+
+In the case that `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC=n`, `can_stop` shall never be true, so I think you can just add IS_ENABLED to the `if (can_stop) {` part. 
+
+Please also use IS_ENABLED the other places in this file
+
+*--- Thalley (2026-04-08 06:18:39+00:00)
+```suggestion
+#endif /* CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC */
+```
+
+Any users of this should use IS_ENABLED before calling `test_server_receiver_stop_ready_expect_error`, so we should not have an empty definition of the function
+
+*--- Thalley (2026-04-08 06:18:51+00:00)
+Please use IS_ENABLED
+
+*--- Thalley (2026-04-08 06:18:58+00:00)
+Please use IS_ENABLED
+
+*--- Copilot (2026-04-08 06:28:05+00:00)
+`start`/`stop` initializers are now compiled out when `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` is disabled. In that configuration, the static callback functions `unicast_client_start_cb` / `unicast_client_stop_cb` become unused (they appear to be referenced only from these struct members), which can trigger `-Wunused-function` warnings (often treated as errors in CI). Guard those function definitions behind the same `#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)` or mark them as maybe-unused to keep sink-only builds warning-free.
+
+*--- Copilot (2026-04-08 06:28:05+00:00)
+There is trailing whitespace at the end of the `dir` initialization line. Please remove the trailing spaces to avoid checkpatch/lint failures and keep the file consistent with common whitespace rules.
+```suggestion
+	enum bt_audio_dir dir = 0; /* assign to invalid value for the `PAC_DIR_UNUSED` check below */
+```
+
+*--- Thalley (2026-04-08 07:35:53+00:00)
+@anand16158 just as a general comment, please do not resolve review comments yourself unless they are applied exactly as the suggestions as per https://docs.zephyrproject.org/latest/contribute/contributor_expectations.html#workflow-suggestions-that-help-reviewers :)
+
+*--- Thalley (2026-04-10 05:49:08+00:00)
+```suggestion
+ * @kconfig_dep{CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC}
+```
+
+*--- Thalley (2026-04-10 05:49:45+00:00)
+```suggestion
+#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) && defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)
+```
+
+*--- Thalley (2026-04-10 05:51:34+00:00)
+```suggestion
+#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK) && defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)
+```
+
+*--- Thalley (2026-04-10 05:54:16+00:00)
+As per https://github.com/zephyrproject-rtos/zephyr/pull/106785#discussion_r3049515205 please move the IS_ENABLED to the `if (can_stop)` so that it becomes `if (IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC) && can_stop)` to guard the entire section with it :)
+
+*--- Thalley (2026-04-10 06:16:02+00:00)
+I think this entire `else` needs to be guarded by `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC`. The `BT_CAP_COMMON_SUBPROC_TYPE_STOP` part of the procedure is only valid when we are stopping SRC ASEs. 
+
+So if we do something like 
+
+```c
+	else if (IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)) {
+		    ...
+		    bt_cap_common_set_subproc(BT_CAP_COMMON_SUBPROC_TYPE_STOP);
+		    ...
+	} else {
+		struct bt_cap_initiator_proc_param *proc_param;
+
+		if (!bt_cap_common_proc_is_done()) {
+			/* We are still disabling or stopping some */
+			bt_cap_common_unlock_proc();
+
+			return;
+		}
+
+		bt_cap_common_set_subproc(BT_CAP_COMMON_SUBPROC_TYPE_RELEASE);
+
+		proc_param = get_next_proc_param(active_proc);
+		if (proc_param == NULL) {
+			/* If proc_param is NULL then this step is a no-op and we can finish the
+			 * procedure
+			 */
+			cap_initiator_unicast_audio_proc_complete(active_proc);
+
+			return;
+		} /* wait for bt_cap_initiator_qos_configured */
+	}
+```
+
+I _think_ it should work; this will effectively make the CAP Initiator skip the `BT_CAP_COMMON_SUBPROC_TYPE_STOP` subprocedure completely.
+
+*--- Thalley (2026-04-10 06:18:14+00:00)
+This entire function should be guarded by `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` :)
+
+*--- Thalley (2026-04-10 06:18:39+00:00)
+This entire function should be guarded by `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` :)
+
+*--- anand16158 (2026-04-10 08:01:03+00:00)
+Done.
+
+*--- anand16158 (2026-04-10 08:01:18+00:00)
+Done. Also fixed the other instances at the struct field and unicast_client_discover_complete for consistency.
+
+*--- anand16158 (2026-04-10 08:01:29+00:00)
+Done.
+
+*--- anand16158 (2026-04-10 08:01:50+00:00)
+Done, changed to if (IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC) && can_stop).
+
+*--- anand16158 (2026-04-10 08:02:03+00:00)
+Done. The else is now else if (IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)) with the stop logic, and a new else branch that skips straight to BT_CAP_COMMON_SUBPROC_TYPE_RELEASE as you suggested.
+
+*--- anand16158 (2026-04-10 08:02:19+00:00)
+Done. Wrapped btp_ascs_receiver_stop_ready with #if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC), and also guarded the declaration in the header and the command table entry in btp_bap.c.
+
+*--- anand16158 (2026-04-10 08:02:29+00:00)
+Done. Wrapped stop_streams and its call site with #if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC).
+
+*--- anand16158 (2026-04-10 08:03:48+00:00)
+Done. Removed the empty #define and guarded all call sites with #if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC).
+
+*--- Copilot (2026-04-10 10:32:42+00:00)
+In `bt_cap_initiator_disabled()`, the new `else` branch for non-`CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` sets the sub-procedure to RELEASE and may `return` (or just exit the function) without unlocking `active_proc_mutex` when `proc_param != NULL`. This can leave the CAP procedure mutex locked and deadlock subsequent callbacks/operations. Ensure the function calls `bt_cap_common_unlock_proc()` (or `bt_cap_common_clear_proc()` when completing) on all exit paths, including when `proc_param` is non-NULL and you intend to wait for the next callback.
+```suggestion
+		}
+
+		/* Wait for bt_cap_initiator_qos_configured */
+		bt_cap_common_unlock_proc();
+```
+
+*--- Thalley (2026-04-10 10:47:37+00:00)
+The entire function should be guarded by CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC
+
+*--- Thalley (2026-04-10 10:53:41+00:00)
+```suggestion
+uint8_t btp_ascs_receiver_stop_ready(const void *cmd, uint16_t cmd_len,
+				     void *rsp, uint16_t *rsp_len);
+```
+
+Function declarations should not be guarded :)
+
+*--- anand16158 (2026-04-10 11:44:56+00:00)
+> Two minor comments, otherwise LGTM.
+> 
+> Do you by any chance have any before-and-after numbers to see the effect of this PR in RAM/FLASH usage?
+
+I don't have before/after numbers handy yet. I can generate a size comparison for a sink-only vs both-directions build if that would be helpful -- which board/config would you prefer?
+
+*--- Thalley (2026-04-10 11:48:36+00:00)
+> > Two minor comments, otherwise LGTM.
+> > Do you by any chance have any before-and-after numbers to see the effect of this PR in RAM/FLASH usage?
+> 
+> I don't have before/after numbers handy yet. I can generate a size comparison for a sink-only vs both-directions build if that would be helpful -- which board/config would you prefer?
+
+It's not that important, but it could be fun to see the diff between
+
+```
+west build -b nrf52840dk/nrf52840 tests/bluetooth/shell/ -- -DCONF_FILE=audio.conf 
+west build -b nrf52840dk/nrf52840 tests/bluetooth/shell/ -- -DCONF_FILE=audio.conf -DCONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK_COUNT=0
+west build -b nrf52840dk/nrf52840 tests/bluetooth/shell/ -- -DCONF_FILE=audio.conf -DCONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC_COUNT=0
+```
+
+*--- Thalley (2026-04-10 12:37:13+00:00)
+```suggestion
+	int err;
+```
+
+*--- Thalley (2026-04-10 12:37:26+00:00)
+```suggestion
+	err = bt_bap_unicast_client_stop(stream);
+	if (err != 0) {
+		LOG_DBG("Stopping stream failed: %d", err);
+		return err;
+	}
+
+	return 0;
+```
+
+*--- Thalley (2026-04-10 12:38:13+00:00)
+```suggestion
+#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC) || defined(__DOXYGEN__)
+```
+
+*--- Thalley (2026-04-10 12:38:43+00:00)
+```suggestion
+```
+
+We do not guard function declaration in header files :)
+
+*--- Thalley (2026-04-10 12:38:48+00:00)
+```suggestion
+```
+
+*--- Copilot (2026-04-10 12:45:12+00:00)
+In this `else` branch we are already in the `bt_cap_common_proc_is_done()` case (it is the `else` of `if (!bt_cap_common_proc_is_done())` above), so the nested `if (!bt_cap_common_proc_is_done())` check is dead code. Removing it would simplify control flow and avoid confusing future readers about which states are possible here.
+```suggestion
+
+```
+
+*--- anand16158 (2026-04-14 10:14:41+00:00)
+@Thalley please review it.
+
+*--- Thalley (2026-04-14 12:56:29+00:00)
+> @Thalley please review it.
+
+Please fix CI issues first :) Was waiting for those to go green before doing another review ^_^
+
+*--- Copilot (2026-04-14 13:04:44+00:00)
+`bt_bap_stream_stop()` is now only built when `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` is enabled (see `bap_stream.c`), but `bt_cap_initiator_stopped()` later in this file still calls `bt_bap_stream_stop()` unconditionally (around line ~2692). In sink-only unicast-client builds this will produce an undefined reference at link time. Guard the stop path (and any `bt_bap_stream_stop()` calls) behind `IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)` / `#if defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)` or make the stop sub-procedure skip directly to release when source ASEs are not supported.
+
+*--- Copilot (2026-04-14 17:30:52+00:00)
+`btp_ascs_receiver_stop_ready()` (the function introduced under this new `#if`) unref's `conn` early (`bt_conn_unref(conn)`) and then later uses that pointer in `bt_conn_get_info(conn, ...)` and `btp_send_ascs_operation_completed_ev(conn, ...)`. This is a use-after-unref. Keep the reference until after the last use (e.g., move `bt_conn_unref(conn)` to just before returning) or take a new reference for the later calls.
+
+*--- anand16158 (2026-04-14 18:42:28+00:00)
+Addressed: bt_conn_unref(conn) is only called after the last use of conn and on error paths ( current ad9b8ab)
+
+*--- Copilot (2026-04-14 19:51:13+00:00)
+`unicast_client_get_dir()` uses `#else` to mean “source-only build”, but that branch is also selected when *neither* `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK` nor `_ASE_SRC` is enabled (both counts set to 0). In that configuration the helper will incorrectly return `BT_AUDIO_DIR_SOURCE`. Consider changing the preprocessor logic to `#elif defined(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC)` and adding an explicit `#else` fallback (e.g., `__ASSERT(false, ...)` or returning an invalid dir) to avoid silently selecting SOURCE when no direction is configured.
+
+*--- Thalley (2026-04-14 20:10:20+00:00)
+What was the issue with `IS_ENABLED` here?
+
+*--- Thalley (2026-04-14 20:11:44+00:00)
+We should be able to use `IS_ENABLED` here too
+
+*--- Thalley (2026-04-14 20:12:59+00:00)
+The _neither_ case doesn't exist
+
+*--- Copilot (2026-04-15 18:06:24+00:00)
+`struct bt_bap_unicast_client_cb` now compiles out the `start`/`stop` members when `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC` is disabled, but this file still unconditionally dereferences `listener->start`/`listener->stop` (e.g. in the unicast client notify helpers and the CP notification switch). That will fail to compile in sink-only builds. Guard all `start`/`stop` related code paths (notify helpers and `BT_ASCS_START_OP`/`BT_ASCS_STOP_OP` handling) behind `CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC`, or provide alternative logic that doesn’t reference missing struct members.
+
+*--- Copilot (2026-04-15 18:06:24+00:00)
+`bt_bap_unicast_client_discover()` no longer reliably tracks the requested discovery direction when building with a single direction: `unicast_client_get_dir()` returns a compile-time constant, and `client->dir` is only assigned in dual-direction builds. Without an explicit early reject, calling discover with the unsupported direction will proceed but the rest of the discovery flow will behave as if the supported direction was requested. Add an early `-ENOTSUP` return when `dir` doesn’t match the enabled direction(s) (before setting the BUSY flag / starting GATT discovery), and ensure any early returns clear BUSY if it was already set.
+
+*--- Thalley (2026-04-15 18:35:21+00:00)
+```suggestion
+#if CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SNK || CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC
+```
+
+*--- Thalley (2026-04-15 18:35:56+00:00)
+Bad merge conflict resolve?
+
+*--- Thalley (2026-04-15 18:37:27+00:00)
+Bad merge conflict resolve?
+
+*--- Thalley (2026-04-15 18:37:40+00:00)
+```suggestion
+					sys_le16_to_cpu(cfg->codec.vid), cc, cfg->cc_len);
+```
+
+*--- Thalley (2026-04-15 18:37:47+00:00)
+```suggestion
+	unicast_client_ep_set_metadata(ep, metadata, enable->metadata_len);
+```
+
+*--- Thalley (2026-04-15 18:38:04+00:00)
+Bad merge conflict resolve?
+
+*--- Thalley (2026-04-15 18:38:19+00:00)
+Bad merge conflict resolve?
+
+*--- Thalley (2026-04-15 18:38:25+00:00)
+Bad merge conflict resolve?
+
+*--- Thalley (2026-04-15 18:39:40+00:00)
+Already done above
+
+*--- Thalley (2026-04-15 18:40:54+00:00)
+Why can't this be 
+```suggestion
+	} else if (IS_ENABLED(CONFIG_BT_BAP_UNICAST_CLIENT_ASE_SRC) && can_stop) {
+```
+
+?
+
+*--- Thalley (2026-04-15 18:41:15+00:00)
+Ditto
+
+*--- anand16158 (2026-04-15 19:10:23+00:00)
+> Looks like there were some bad merge conflict resolves
+
+yes , trying to resolve
+
+*--- Thalley (2026-05-04 20:57:10+00:00)
+@anand16158 Please rebase :)
+
+*--- Thalley (2026-05-20 19:14:30+00:00)
+@anand16158 Just wanted to check up on this PR :) Would be a shame if it ended up stale
+
+*--- Thalley (2026-06-29 21:58:27+00:00)
+@anand16158 Please do a rebase :)

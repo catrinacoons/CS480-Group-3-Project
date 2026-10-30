@@ -1,0 +1,754 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/77884
+TITLE: uuid: Add Universally Unique Identifier (UUID) utilities
+
+*--- opening post by sorru94 (2024-09-02 13:09:06+00:00)
+Add a basic implementation of UUID generating and manipulating functions.
+
+Fixes: #77882
+
+*--- jukkar (2024-09-02 13:36:17+00:00)
+There are lot of uuid handling code in Bluetooth, should BT use this library?
+
+*--- sorru94 (2024-09-02 14:47:49+00:00)
+> There are lot of uuid handling code in Bluetooth, should BT use this library?
+
+I'm unfamiliar regarding the Bluetooth use of the UUID. I see it uses 16 and 32 bits partial UUIDs, which are not defined in [RFC 9562](https://datatracker.ietf.org/doc/html/rfc9562).
+We could add a couple of defines similar to the ones in the bluetooth driver ([`BT_UUID_INIT_128`](https://docs.zephyrproject.org/latest/doxygen/html/group__bt__uuid.html#ga1a840adf4bc06cf2cd5dbeb0c868374b) for example) to ease the transition.
+
+*--- jhedberg (2024-09-02 20:22:41+00:00)
+> > There are lot of uuid handling code in Bluetooth, should BT use this library?
+> 
+> I'm unfamiliar regarding the Bluetooth use of the UUID. I see it uses 16 and 32 bits partial UUIDs, which are not defined in [RFC 9562](https://datatracker.ietf.org/doc/html/rfc9562). We could add a couple of defines similar to the ones in the bluetooth driver ([`BT_UUID_INIT_128`](https://docs.zephyrproject.org/latest/doxygen/html/group__bt__uuid.html#ga1a840adf4bc06cf2cd5dbeb0c868374b) for example) to ease the transition.
+
+AFAIK at least the 16- and 32-bit Bluetooth UUIDs don't follow any non-Bluetooth standard. The way the Bluetooth core specification deals with these, is that in practice everything is a 128-bit UUID, however UUIDs which are derived from the so-called Bluetooth Base UUID can be compressed into 16- and 32-bit formats (and these again expanded back into 128 bit format). I have a feeling we'll need to keep the Bluetooth UUID API separate, but some proper research into their compatibility with these RFC specs needs to be done. We might at most e.g. provide conversion functions to convert back and forth between bt_uuid_t and uuid_t.
+
+*--- jukkar (2024-09-03 05:08:34+00:00)
+@sorru94 could you check if there would be any non-BT code that could be changed to use this library?
+At least in dhcpv6 https://github.com/zephyrproject-rtos/zephyr/blob/0237d375de5fe8912b9e4134f45f7774a155b977/subsys/net/lib/dhcpv6/dhcpv6_internal.h#L83 there is uuid handling.
+
+*--- Thalley (2024-09-04 07:52:09+00:00)
+Suggest to mention that this is without a NULL terminator, and if you want to store a UUID as a string in a variable then it need to be declared as
+```c
+char uuid_str[UUID_STR_LEN + 1]
+```
+
+Alternative, you can increment these values by 1 to account for that.
+
+*--- Thalley (2024-09-04 07:53:17+00:00)
+```suggestion
+ * @param[out] out The UUID where the result will be written.
+ *
+ * @retval 0 if the UUID has been correctly generated and stored in @p out
+```
+
+Suggest an empty line between params and return values for readability sake
+
+*--- Thalley (2024-09-04 07:58:38+00:00)
+In BT we have `bt_uuid_create` which create a UUID based on a 16, 32 or 128 value (not a string). 
+
+So instead of e.g. `"6E400001-B5A3-F393-E0A9-E50E24DCCA9E"` it can create it from something like 
+`[0x6E, 0x40, 0x00, 0x01, 0xB5, 0xA3, 0xF3, 0x93, 0xE0, 0xA9, 0xE5, 0x0E, 0x24, 0xDC, 0xCA, 0x9E]`. Not sure if that has any uses here in this generic API
+
+*--- Thalley (2024-09-04 07:58:44+00:00)
+`bt_uuid_to_str` could probably be modified to just call `uuid_to_string`
+
+*--- Thalley (2024-09-04 08:00:25+00:00)
+`struct bt_uuid_128` could probably be modified to use this type so that it's changed from
+
+```c
+struct bt_uuid_128 {
+	/** UUID generic type. */
+	struct bt_uuid uuid;
+	/** UUID value, 128-bit in little-endian format. */
+	uint8_t val[BT_UUID_SIZE_128];
+};
+```
+
+to
+
+```c
+struct bt_uuid_128 {
+	/** UUID generic type. */
+	struct bt_uuid uuid;
+	/** UUID value, 128-bit in little-endian format. */
+	uuid_t val;
+};
+```
+
+*--- Thalley (2024-09-04 08:01:13+00:00)
+For the example in BT we have `#define BT_UUID_STR_LEN 37` to account for the NULL terminator
+
+*--- Thalley (2024-09-04 08:03:34+00:00)
+Hmm, some of these dependencies looks a bit strict. 
+
+For example if we are only using `uuid_from_string` then we don't need `BASE64` and `ENTROPY_GENERATOR`, right? 
+
+Would it make sense to make these more gradual, and only apply to the specific functions?
+
+*--- Thalley (2024-09-04 08:48:52+00:00)
+Any reason why `uuid_str_base` is a `const` local variable but other constants like `UUID_STR_POSITION_FIRST_HYPHEN` are `#define`s?
+
+*--- Thalley (2024-09-04 08:51:57+00:00)
+Did you check if any of the functions here https://github.com/zephyrproject-rtos/zephyr/blob/main/include/zephyr/sys/util.h#L540-L582 could be used to help convert from string to hex?
+
+*--- Thalley (2024-09-04 09:01:34+00:00)
+This is a bit of a funny test - 2 generated UUIDs can be the same, although very unlikely. We can probably keep it, but it actually fail with correct behavior
+
+*--- Thalley (2024-09-04 09:02:58+00:00)
+```suggestion
+	zassert_str_equal("2ed6657d-e927-568b-95e1-2665a8aea6a2", uuid_str));
+```
+
+We actually have functions to compare strings (keeping it as is, is also fine)
+
+*--- Thalley (2024-09-04 09:03:23+00:00)
+```suggestion
+	int res;
+```
+
+*--- Thalley (2024-09-04 09:03:59+00:00)
+Did you consider `zassert_mem_equal` for comparing arrays?
+
+*--- andyross (2024-09-05 00:03:31+00:00)
+Driving by: I note carefully here that BT appears to demand a **little endian** UUID representation.
+
+*--- andyross (2024-09-05 00:04:35+00:00)
+More drive-by: this is clearly byte-packing a **big endian** UUID.  The first element is a 32 bit dword and should be stored "73, 5f, b3, 44" on little endian systems.
+
+*--- sorru94 (2024-09-05 07:38:52+00:00)
+Yes, I should have mentioned it in the comments. 
+I will make them all include the null terminator for coherency with the other library.
+
+*--- sorru94 (2024-09-05 07:55:03+00:00)
+Adding a method to initialize a UUID from a buffer can be useful. 
+However, I would avoid creating a UUID from 16 and 32 buffers as it's specific to Bluetooth and not defined in the RFC.
+
+*--- sorru94 (2024-09-05 09:00:23+00:00)
+Yes, that makes sense.
+
+*--- sorru94 (2024-09-05 09:27:03+00:00)
+It's only used in this function and should not be useful outside the library so I didn't want to make a file-wide define.
+
+*--- sorru94 (2024-09-05 09:27:45+00:00)
+Yes, I will remove this part of the test as it's nondeterministic.
+
+*--- Thalley (2024-09-05 09:32:06+00:00)
+That was kind of my point. `UUID_STR_POSITION_FIRST_HYPHEN` is also only used in `should_be_hyphen`, but has made a `#define` instead. 
+
+Ditto for `UUID_OFFSET_VERSION` only being used in `overwrite_uuid_version_and_variant`.
+
+It doesn't need to be changed, but just curious about the inconsistency :)
+
+*--- sorru94 (2024-09-06 07:36:37+00:00)
+Oh, I didn't notice. 
+I'm removing `uuid_str_base` as a side effect of using `hex2bin` as you suggested, so there should be no inconsistency.
+
+*--- sorru94 (2024-09-06 07:56:44+00:00)
+> Seems like there's an endianness collision between the existing code and the new library? UUIDs basically made a huge mess of this with that text format, and almost nothing does it "correctly" (if there even is a "correct"). But 100% for sure we should be doing it **consistently**, and I don't think we are?
+
+I'm unsure about the endianness for the UUID used/expected by the BT module (or other modules).
+However, I tried to follow as much as possible  [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html#section-4) for this library where they state:
+
+> In the absence of explicit application or presentation protocol specification to the contrary, each field is encoded with the most significant byte first (known as "network byte order").
+
+And:
+
+> Saving UUIDs to binary format is done by sequencing all fields in big-endian format. However, there is a known caveat that Microsoft's Component Object Model (COM) GUIDs leverage little-endian when saving GUIDs. The discussion of this (see [[MS_COM_GUID](https://www.rfc-editor.org/rfc/rfc9562.html#MS_COM_GUID)]) is outside the scope of this specification.
+
+I'm guessing the UUID in the Bluetooth module uses the COM GUIDs format where the first 4 bytes are represented using little endian while the last 6 are represented using big-endian.
+
+I don't know if including a non-standard representation of UUIDs would be a good choice for this library. We could always introduce helper functions for conversion to the "COM GUIDs" format. Here or directly in the BT module.
+
+What do you think? @andyross
+
+*--- Thalley (2024-09-06 10:19:10+00:00)
+```suggestion
+ * @retval 0 The UUID has been correctly generated and stored in @p out
+ * @retval -EINVAL @p input is not acceptable
+ * @retval -ENOMEM Memory allocation failed
+ * @retval -ENOTSUP mbedTLS returned an unrecognized error
+```
+
+When using `@retval` we should avoid `val if reason` formats, due to how the final result is rendered. I've done the same mistake in the past: https://docs.zephyrproject.org/latest/doxygen/html/group__bt__bap__broadcast.html#ga5e6e0b758409cbdde93c0f648ef5e5e8
+
+The description after the value should start as it was a regular sentence.
+
+*--- Thalley (2024-09-06 10:19:21+00:00)
+This applies to all functions added by this API
+
+*--- Thalley (2024-09-06 10:22:54+00:00)
+Suggest to refer to `sys_memcpy_swap` or `sys_mem_swap` to converting between LE and BE 
+
+Alternative, we can offer 2 functions:
+`uuid_from_buffer_le` and `uuid_from_buffer_be` like we do here: https://github.com/zephyrproject-rtos/zephyr/blob/main/include/zephyr/bluetooth/crypto.h#L53-L69
+
+*--- Thalley (2024-09-06 10:23:30+00:00)
+Doesn't `data_size` always need to be 16 octets? 
+
+We could consider
+```suggestion
+int uuid_from_buffer(const uint8_t data[UUID_SIZE], uuid_t out);
+```
+
+*--- Thalley (2024-09-06 10:26:29+00:00)
+Is `ENTROPY_GENERATOR` required for this?
+
+As far as I cant tell `uuid_generate_v4` only relies on `sys_rand_get` and I don't see any dependencies on that function.
+
+*--- Thalley (2024-09-06 10:28:25+00:00)
+```suggestion
+	for (int i = 0; i < UUID_SIZE; i++) {
+```
+
+Minor; `UUID_SIZE` is currently defined as an `int`, and we should consider using the same type here. 
+
+`UUID_SIZE` and the other macros can be defined to be `unsigned int` by appending `U` to the value, which would make this
+```suggestion
+	for (unsigned int i = 0; i < UUID_SIZE; i++) {
+```
+instead
+
+*--- Thalley (2024-09-06 10:28:47+00:00)
+```suggestion
+	if ((data == NULL) || (data_size != UUID_SIZE) || out == NULL) {
+		return -EINVAL;
+	}
+```
+
+*--- Thalley (2024-09-06 10:29:15+00:00)
+Missing input validation (several of the input values could be incorrect or `NULL`
+
+*--- Thalley (2024-09-06 10:29:24+00:00)
+`out` could be NULL, right?
+
+*--- Thalley (2024-09-06 10:29:44+00:00)
+```suggestion
+	if ((input == NULL) || (strlen(input) + 1 != UUID_STR_LEN) || out == NULL) {
+		return -EINVAL;
+	}
+```
+
+*--- Thalley (2024-09-06 10:30:00+00:00)
+```suggestion
+	if (uuid == NULL || (out == NULL) || (out_size < UUID_STR_LEN)) {
+		return -EINVAL;
+	}
+```
+
+*--- Thalley (2024-09-06 10:30:12+00:00)
+```suggestion
+	if (uuid == NULL || (out == NULL) || (out_size < UUID_BASE64_LEN)) {
+```
+
+*--- Thalley (2024-09-06 10:30:23+00:00)
+```suggestion
+	if (uuid == NULL || (out == NULL) || (out_size < UUID_BASE64URL_LEN)) {
+```
+
+*--- sorru94 (2024-09-06 15:24:15+00:00)
+I think it is, without setting `ENTROPY_GENERATOR` I get a linking error when I build for most boards I tried. The error is an undefined reference to `z_impl_sys_rand_get`.
+
+*--- andyross (2024-09-06 23:33:54+00:00)
+> However, I tried to follow as much as possible [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html#section-4) for this library
+
+Yeah... the problem is that "UUIDs" in practical code don't really and haven't ever followed that RFC, which is a post-hoc kind of cleanup thing.  Windows GUIDs are the obvious example of something that is always converted LE, and the code @Thalley posted above certainly implies the BT inherited the convention.
+
+I'm don't have enough of a stake here to demand one or the other, I'm just saying (1) whatever code we commit needs to be **extremely** clear about the endianness convention and (2) it should match the conventions used by any existing in-tree users (or else support both, I guess, but... yuck)
+
+*--- Thalley (2024-09-07 11:15:46+00:00)
+Okay, yeah that sort of makes sense. It's just an undocumented requirement of `sys_rand_get` it looks like :)
+
+*--- sorru94 (2024-09-09 12:35:24+00:00)
+I created the two functions as you suggested, let me know if it is what you meant with little endian.
+
+*--- Thalley (2024-09-09 13:02:13+00:00)
+Suggest to add `@since` and `@version 0.1.0` to indicate an experimental API, so that we can modify it more easily in the coming months in case we need to modify it. 
+
+See https://docs.zephyrproject.org/latest/develop/api/overview.html#api-overview for more info
+
+*--- Thalley (2024-09-09 13:03:38+00:00)
+Is this right? The last 2 values, `8899` and `AABBCCDDEEFF`, don't need to be swapped?
+
+*--- Thalley (2024-09-09 13:04:47+00:00)
+Why not use `sys_memcpy_swap`?
+
+*--- Thalley (2024-09-09 13:06:07+00:00)
+In the documentation for this function, only the first 3 parts are swapped, but this swaps the first 4. Why?
+
+And why isn't the 5th swapped? (not familiar with the UUID spec)
+
+*--- Thalley (2024-09-09 13:09:13+00:00)
+Similar to the experimental version in the header file, these should probably also `select EXPERIMENTAL` and add `[EXPERIMENTAL]` to their labels
+
+*--- Thalley (2024-09-11 09:48:01+00:00)
+> The `8899` should be `9988` while the last one is correct. See the other related comment for more info.
+
+What other related comment? Can you share the link?
+
+*--- sorru94 (2024-09-11 09:54:34+00:00)
+The issue with the endianness is that the UUID spec defines UUID only as big-endian.
+The interpretation of little-endian UUID is not universal.
+From my understanding here are our options for the UUID:
+- Standard big-endian representation: `00112233-4455-6677-8899-AABBCCDDEEFF`
+- little-endian representation inverting each block: `33221100-5544-7766-9988-FFEEDDCCBBAA`
+- little-endian representation inverting the full UUID: `FFEEDDCC-BBAA-9988-7766-554433221100`
+- little-endian representation for Microsoft COM GUIs representation: `33221100-5544-7766-8899-AABBCCDDEEFF`
+
+I'm not sure which of those little-endian notations is used in the Bluetooth module. 
+However, from my very superficial research, I think the last one is the more widely adopted. It's also the only one referenced in the standard.
+
+*--- sorru94 (2024-09-11 09:56:35+00:00)
+Yes, if we follow the COM GUID representation the last two should not be swapped.
+
+*--- sorru94 (2024-09-11 10:05:01+00:00)
+Sorry, I deleted the comment as It was my mistake. I replied on the other comment and will push the changes shortly.
+
+*--- Thalley (2024-09-11 10:35:24+00:00)
+I'll need to read up on the UUID spec. Endianess is always a bit tricky, but it usually comes down the the language and terminology used in the specs and whether the blocks are values or arrays of values.
+
+*--- sorru94 (2024-09-11 10:54:27+00:00)
+The blocks change based on the UUID version. For example, v5 is defined as follows: 
+```
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           sha1_high                           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|         sha1_high             |  ver  |      sha1_mid         |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|var|                       sha1_low                            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           sha1_low                            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+Where sha1_* are all components of the same SHA-1 hash.
+While UUID v1 is defined as follows:
+```
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           time_low                            |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|           time_mid            |  ver  |       time_high       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|var|         clock_seq         |             node              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                              node                             |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+```
+As a consequence, it might be difficult to find a generic conversion method.
+
+*--- Thalley (2024-09-12 10:01:48+00:00)
+So after the RFC and looking more into this, I've noticed the following:
+
+1. 4122, which is obsoleted by 9562, does seemingly not define any specific endianess
+2. 9562 defines UUIDs to be stored as big-endian
+3. MS documentation seemingly only refers to 4122
+4. Haven't found any references to 4122 or 9562 from the BT specs
+5. If we want to be 9562 compliant and treat all UUIDs a big-endian, then it's pretty each to support
+6. If we want to support converting between little and big endian, then it's more tricky. Each version of UUID (version 1 to 8) have slightly different structures, and ideally each value in each version should be converted. As far as I can tell 9562 does not define how to represent those as strings, because it is big-endian. 
+7. MS converts the first 3 values to little endian (https://devblogs.microsoft.com/oldnewthing/20220928-00/?p=107221) and then treats the 6-byte MAC address as a 6-octet array instead of a 6-octet value. MS seemingly also treats `time_high` and `ver` as a single value, instead of 12 and 4 bit values respectively. MS seemingly uses UUID version 1 (https://www.rfc-editor.org/rfc/rfc9562.html#name-uuid-version-1) for their GUIDs (UUIDs). The way that MS treats UUIDs is a complete mess :upside_down_face: 
+
+To continue with this PR, I think we need to ask what it is we want to achieve. Do we want to library that implements 9562? Do we want a library that is compatible with MS COM? Do we want a library that is compatible with Bluetooth? 
+
+The 9562 RFC has this nice little paragraph in the beginning that pretty much sums up the mess: 
+
+> The use of UUIDs is extremely pervasive in computing. They comprise the core identifier infrastructure for many operating systems such as Microsoft Windows and applications such as the Mozilla Web browser; in many cases, **they can become exposed in many non-standard ways**.
+
+The purpose of 9562 is to take RFC 4122 and properly standardize it.
+
+*--- sorru94 (2024-09-12 13:43:42+00:00)
+> So after the RFC and looking more into this, I've noticed the following:
+> 
+>     1. 4122, which is obsoleted by 9562, does seemingly not define any specific endianess
+> 
+>     2. 9562 defines UUIDs to be stored as big-endian
+> 
+>     3. MS documentation seemingly only refers to 4122
+> 
+>     4. Haven't found any references to 4122 or 9562 from the BT specs
+> 
+>     5. If we want to be 9562 compliant and treat all UUIDs a big-endian, then it's pretty each to support
+> 
+>     6. If we want to support converting between little and big endian, then it's more tricky. Each version of UUID (version 1 to 8) have slightly different structures, and ideally each value in each version should be converted. As far as I can tell 9562 does not define how to represent those as strings, because it is big-endian.
+> 
+>     7. MS converts the first 3 values to little endian (https://devblogs.microsoft.com/oldnewthing/20220928-00/?p=107221) and then treats the 6-byte MAC address as a 6-octet array instead of a 6-octet value. MS seemingly also treats `time_high` and `ver` as a single value, instead of 12 and 4 bit values respectively. MS seemingly uses UUID version 1 (https://www.rfc-editor.org/rfc/rfc9562.html#name-uuid-version-1) for their GUIDs (UUIDs). The way that MS treats UUIDs is a complete mess 🙃
+> 
+> 
+> To continue with this PR, I think we need to ask what it is we want to achieve. Do we want to library that implements 9562? Do we want a library that is compatible with MS COM? Do we want a library that is compatible with Bluetooth?
+> 
+> The 9562 RFC has this nice little paragraph in the beginning that pretty much sums up the mess:
+> 
+> > The use of UUIDs is extremely pervasive in computing. They comprise the core identifier infrastructure for many operating systems such as Microsoft Windows and applications such as the Mozilla Web browser; in many cases, **they can become exposed in many non-standard ways**.
+> 
+> The purpose of 9562 is to take RFC 4122 and properly standardize it.
+
+Yes, I agree that we need to clarify the scope of the library. 
+My two cents are:
+- This library could implement an RFC9562-compliant version of the UUIDs. 
+- Libraries/drivers/modules using application-specific UUID variants could wrap around it or extend it following their requirements.
+
+*--- Thalley (2024-09-12 14:22:51+00:00)
+> Yes, I agree that we need to clarify the scope of the library. My two cents are:
+> 
+>     * This library could implement an RFC9562-compliant version of the UUIDs.
+> 
+>     * Libraries/drivers/modules using application-specific UUID variants could wrap around it or extend it following their requirements.
+
+If this library is going to implement RFC 9562, then I don't expect it to be usable for other implementations that use a different RFC (e.g. 4122) or no RFC (like Bluetooth seemingly does). Given the 8 versions of UUID, we cannot easily transform UUIDs in a way that makes sense. 
+
+Speaking of versions of UUID: As long as we keep everything big endian it's not a big deal, but if we do not, then we might need a `uuid_v1_t`, `uuid_v2_t`, etc. if we want to support little endianess in any capacity. 
+
+That also means that a function like `uuid_from_buffer_le` will depend on the version, as each version have different structures and thus the way to transform from little to big endianess will differ for each version.
+
+*--- sorru94 (2024-09-12 15:34:15+00:00)
+> If this library is going to implement RFC 9562, then I don't expect it to be usable for other implementations that use a different RFC (e.g. 4122) or no RFC (like Bluetooth seemingly does). Given the 8 versions of UUID, we cannot easily transform UUIDs in a way that makes sense.
+> 
+> Speaking of versions of UUID: As long as we keep everything big endian it's not a big deal, but if we do not, then we might need a `uuid_v1_t`, `uuid_v2_t`, etc. if we want to support little endianess in any capacity.
+> 
+> That also means that a function like `uuid_from_buffer_le` will depend on the version, as each version have different structures and thus the way to transform from little to big endianess will differ for each version.
+
+It's unclear to me if a method for endianess conversion can be discerned with certainty from the UUID version.
+For sure the UUID version is one dependency. However, even within the same version there might be multiple representations possible.
+The initial purpose for this library was to provide an UUIDs implementation following the latest RFC. 
+Since the new RFC is quite exhaustive it makes it easy to create an "independent" library to parse and generate UUIDs.
+The utility of this library wants to be for future development within the RTOS.
+Making changes to make it compatible with the bluetooth is fine but should not come to a detriment to the usability of the library for new designs.
+
+*--- Thalley (2024-09-12 19:48:48+00:00)
+> It's unclear to me if a method for endianess conversion can be discerned with certainty from the UUID version.
+> For sure the UUID version is one dependency. However, even within the same version there might be multiple representations possible.
+
+As far as I can tell, there's only a single possible represenation: 
+```
+The formal definition of the UUID string representation is provided by the following ABNF [[RFC5234](https://datatracker.ietf.org/doc/html/rfc5234)]:
+
+UUID     = 4hexOctet "-"
+           2hexOctet "-"
+           2hexOctet "-"
+           2hexOctet "-"
+           6hexOctet
+hexOctet = HEXDIG HEXDIG
+DIGIT    = %x30-39
+HEXDIG   = DIGIT / "A" / "B" / "C" / "D" / "E" / "F"
+
+Note that the alphabetic characters may be all uppercase, all lowercase, or mixed case, as per [Section 2.3](https://rfc-editor.org/rfc/rfc5234#section-2.3) of [[RFC5234](https://datatracker.ietf.org/doc/html/rfc5234)]. An example UUID using this textual representation from the above ABNF is shown in [Figure 1](https://datatracker.ietf.org/doc/html/rfc9562#sampleStringUUID).
+
+f81d4fae-7dec-11d0-a765-00a0c91e6bf6
+```
+
+So regardless of version, it will always be `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` and since UUIDs are always Big endian (in RFC9562) then that represenation works with all versions. 
+
+> The initial purpose for this library was to provide an UUIDs implementation following the latest RFC.
+> Since the new RFC is quite exhaustive it makes it easy to create an "independent" library to parse and generate UUIDs.
+> The utility of this library wants to be for future development within the RTOS.
+
+That sounds good to me
+
+> Making changes to make it compatible with the bluetooth is fine but should not come to a detriment to the usability of the library for new designs.
+
+Given what I've learned, I don't see this being useful for BT. RFC9562 does not seem compatible with the Bluetooth UUID usage. 
+
+I suggest that we remove the `uuid_from_buffer_le` again and rename `uuid_from_buffer_be` to `uuid_from_buffer` again, and as per the RFC treat all UUIDs as big endian, and then try to be full RFC9562 compliant. 
+
+If we at any point in the future decide to work towards compatibility with BT or the MS version of UUIDs, then we can revisit such conversion functions.
+
+*--- Thalley (2024-09-16 13:22:46+00:00)
+@sorru94 please fix CI issues - I'll do another review after that
+
+*--- sorru94 (2024-09-19 15:42:31+00:00)
+> @sorru94 please fix CI issues - I'll do another review after that
+
+Sorry for being a little slow, it should be fixed.
+
+*--- jhedberg (2024-09-20 11:17:10+00:00)
+@sorru94 wouldn't it make sense to also include a `uuid_copy(uuid_t dst, const uuid_t src)` API, since the underlying type is an array instead of e.g. a struct?
+
+*--- sorru94 (2024-09-20 14:23:12+00:00)
+> @sorru94 wouldn't it make sense to also include a `uuid_copy(uuid_t dst, const uuid_t src)` API, since the underlying type is an array instead of e.g. a struct?
+
+Yes, I think it would be helpful. I will add it.
+
+*--- sorru94 (2024-09-20 14:27:46+00:00)
+> No additional comments from me.
+> 
+> It would have been nice to have a defined use case for this implementation (e.g. a sample or something), but not sure it's necessary. It's somewhat odd to add support for something without any uses, especially since this cannot be used with e.g. Bluetooth, but maybe the SOF module or something like that could use this in the future.
+
+I agree that it's odd. However, the UUID is already in use in many places within the project. I hope this library will entice people to standardize its use.
+
+*--- Thalley (2024-09-20 15:10:49+00:00)
+> I agree that it's odd. However, the UUID is already in use in many places within the project. I hope this library will entice people to standardize its use.
+
+Which project are you referring to here? The SOF?
+
+*--- sorru94 (2024-09-23 07:19:58+00:00)
+> > I agree that it's odd. However, the UUID is already in use in many places within the project. I hope this library will entice people to standardize its use.
+> 
+> Which project are you referring to here? The SOF?
+
+I was referring to the Zephyr project. 
+As @jukkar mentioned above `dhcpv6` uses some form of UUIDs. Furthermore, I could find some UUID in `fs/ext2.h`, `usb/bos.h`, and `drivers/tee.h`.
+Hopefully, once this driver is available those modules could transition to using this one instead of ad hoc implementations.
+
+*--- jhedberg (2024-09-23 09:04:34+00:00)
+The one thing that concerns me a bit with the way you've defined the `uuid_t` type, is that it hides away the distinction of passing by value vs passing by reference. Maybe that's a good thing, but it's often nice to be able to see this very clearly in API usage by having pointer types vs value types, and using `&` to pass by reference, etc. Since the type that `uuid_t` is encapsulating is an array you end up in practice always passing by reference, which could come as a surprise, e.g. if a function expects to be able to modify an input parameter without it having any effects on the caller. I don't have a strong opinion either way, and there does seem to be benefits of the current solution, but I'm wondering if you did some careful comparison & analysis of defining the type as:
+```c
+typedef struct {
+	uint8_t uuid[UUID_SIZE]
+} uuid_t;
+```
+vs the current:
+```c
+typedef uint8_t uuid_t[UUID_SIZE];
+```
+
+*--- Thalley (2024-09-23 09:13:56+00:00)
+> The one thing that concerns me a bit with the way you've defined the `uuid_t` type, is that it hides away the distinction of passing by value vs passing by reference. Maybe that's a good thing, but it's often nice to be able to see this very clearly in API usage by having pointer types vs value types, and using `&` to pass by reference, etc. Since the type that `uuid_t` is encapsulating is an array you end up in practice always passing by reference, which could come as a surprise, e.g. if a function expects to be able to modify an input parameter without it having any effects on the caller. I don't have a strong opinion either way, and there does seem to be benefits of the current solution, but I'm wondering if you did some careful comparison & analysis of defining the type as:
+> 
+> ```c
+> typedef struct {
+> 	uint8_t uuid[UUID_SIZE]
+> } uuid_t;
+> ```
+> 
+> vs the current:
+> 
+> ```c
+> typedef uint8_t uuid_t[UUID_SIZE];
+> ```
+
+Doesn't our coding guidelines (or the Linux kernel guidelines) suggest not to `typedef` structs? 
+https://www.kernel.org/doc/html/v4.10/process/coding-style.html#typedefs
+
+Another alternative would be to do
+```c
+struct uuid {
+    uint8_t uuid[UUID_SIZE]
+};
+```
+
+and then pass around `struct uuid`s which can be passed by value, by mutable reference or `const` reference (which I believe is the point of your suggestion here as well)
+
+*--- jhedberg (2024-09-23 09:18:21+00:00)
+@Thalley my impression is that Zephyr is much more relaxed to the usage of typedefs, but there should always be a some good justification for their usage.
+
+*--- jukkar (2024-09-24 04:37:49+00:00)
+> I was referring to the Zephyr project. 
+> As @jukkar mentioned above `dhcpv6` uses some form of UUIDs. Furthermore, I could find some UUID in `fs/ext2.h`, `usb/bos.h`, and `drivers/tee.h`.
+> Hopefully, once this driver is available those modules could transition to using this one instead of ad hoc implementations.
+> 
+
+I would suggest that at least one user of this api could be found and converted to use it in this pr. It is a bit weird to have an api in upstream that nobody uses.
+
+*--- sorru94 (2024-10-03 16:05:45+00:00)
+@Thalley and @jhedberg. As for your suggestion, I replaced the type definition with a struct. Let me know if it was what you intended.
+@jukkar I tried to use this library in the ext2 library, just to have one that uses it.
+
+*--- Thalley (2024-10-03 17:52:17+00:00)
+@sorru94 Looks like CI tests are failing, please have a look
+
+*--- Thalley (2024-10-04 12:22:35+00:00)
+This is an API change, isn't it? 
+
+If it is a stable API, then it needs to follow https://docs.zephyrproject.org/latest/develop/api/api_lifecycle.html#introducing-breaking-api-changes
+
+An alternative which is a bit dirty would be to do
+```suggestion
+	union {
+		uint8_t uuid[16];
+		struct uuid uuid;
+	};
+```
+
+So that it's not breaking. I'll leave this up to the maintainer(s) of the `fs`
+
+*--- Thalley (2024-10-04 12:24:59+00:00)
+One thing I've noticed now is that you more often than not pass by value (e.g. `struct uuid src`) rather than by reference (`struct uuid *dst`). 
+
+Is that something you have considered? Since the struct is 16 octets, that's quite a lot of data being passed around compared to a pointer (typically 4 octets). 
+
+Should the API primarily use pass by reference instead of value?
+
+*--- Thalley (2024-10-04 12:28:36+00:00)
+In most functions you also have `(src, dst)` (e.g. `uuid_from_buffer(const uint8_t data[UUID_SIZE], struct uuid *out);` , but this functions does `(dst, src)`. 
+
+Consider making them consistent
+
+*--- Thalley (2024-10-04 12:31:17+00:00)
+Looks like you've misconfigured your editor to format all lines in the file, and not only the lines you've changed. 
+
+Please revert all format changes that are not changed
+
+*--- sorru94 (2024-10-07 07:17:33+00:00)
+It's true, I'm not sure how much the uuid field is used in the current version of the ext2 module. It would be nice if the maintainers of the `fs` could help.
+Another option for this change to be non-breaking would be to keep the `typedef uint8_t uuid_t[UUID_SIZE];` in uuid.h instead of the struct version.
+
+*--- sorru94 (2024-10-07 07:30:38+00:00)
+I usually pass by reference only when changes to the parameter are needed, i.e. when it's used as an output.
+Do you know if copying 16 Bytes on each function call is an issue? Are there guidelines for this in the Zephyr project?
+
+*--- Thalley (2024-10-07 09:40:14+00:00)
+> Do you know if copying 16 Bytes on each function call is an issue? Are there guidelines for this in the Zephyr project?
+
+I'm not aware of any guidelines, but pass by value would increase the stack usage, right? 
+
+Personally I (almost) always pass by reference for structs (unless they are smaller than the size of a pointer).
+
+*--- jhedberg (2024-10-14 12:31:16+00:00)
+@sorru94 to make the distinction of "input" vs "output" parameter clear, a good practice is to use `const struct uuid *uuid` for input, which makes it clear that the function will not modify it.
+
+*--- pdgendt (2025-02-25 12:43:56+00:00)
+Sad to see this closed, @sorru94 do you think you can come back to this?
+
+*--- sorru94 (2025-02-27 10:38:17+00:00)
+> Sad to see this closed, @sorru94 do you think you can come back to this?
+
+Sure, if someone reopens this I will address the comments.
+
+*--- sorru94 (2025-02-27 10:39:19+00:00)
+True, I updated the affected functions.
+
+*--- pdgendt (2025-02-27 10:47:51+00:00)
+> Sure, if someone reopens this I will address the comments.
+
+I'm not able to reopen it, maybe try to rebase and force push first? Other than that, I don't know.
+
+*--- kartben (2025-02-27 10:56:24+00:00)
+@sorru94 if you reset the sorru94:add-uuid-utilities branch to commit a93cdb1 (SHA this PR was at when closed) we shall be able to re-open the PR
+
+*--- sorru94 (2025-02-27 11:06:30+00:00)
+> @sorru94 if you reset the sorru94:add-uuid-utilities branch to commit [a93cdb1](https://github.com/zephyrproject-rtos/zephyr/commit/a93cdb14f25d4f32b12e18f7126aaadd841164d9) (SHA this PR was at when closed) we shall be able to re-open the PR
+
+I did reset to [a93cdb1](https://github.com/zephyrproject-rtos/zephyr/commit/a93cdb14f25d4f32b12e18f7126aaadd841164d9). However, are you sure you didn't mean [18400cd](https://github.com/zephyrproject-rtos/zephyr/commit/18400cd58d5f1b8113e260045bb87f6f1f2d03b7)? I think that was the last commit in this PR.
+
+*--- pdgendt (2025-02-27 11:08:08+00:00)
+> I did reset to [a93cdb1](https://github.com/zephyrproject-rtos/zephyr/commit/a93cdb14f25d4f32b12e18f7126aaadd841164d9). However, are you sure you didn't mean [18400cd](https://github.com/zephyrproject-rtos/zephyr/commit/18400cd58d5f1b8113e260045bb87f6f1f2d03b7)? I think that was the last commit in this PR.
+
+It can't be reopened now, so probably, yes.
+
+*--- Thalley (2025-03-06 14:40:28+00:00)
+@sorru94 I still think this needs to be considered an API change, which we probably should avoid or follow the procedure for breaking a stable API
+
+*--- sorru94 (2025-03-10 10:07:06+00:00)
+@Thalley 
+Regarding [this](https://github.com/zephyrproject-rtos/zephyr/pull/77884#discussion_r1787634715) suggestion. I don't see how it would work. There is no apparent way to distinguish which of the two options is used. Accessing an array differs from accessing a struct.
+
+It would have worked with my initial proposal of defining the uuid as a typedefinition of an array. But I have been pushed in the direction of using a struct. This makes it much harder to implement non-breaking changes to existing APIs.
+
+I honestly do not know how to implement such a change in a non-breaking manner. Other suggestions are welcome.
+
+*--- Thalley (2025-03-10 10:34:39+00:00)
+> @Thalley Regarding [this](https://github.com/zephyrproject-rtos/zephyr/pull/77884#discussion_r1787634715) suggestion. I don't see how it would work. There is no apparent way to distinguish which of the two options is used. Accessing an array differs from accessing a struct.
+> 
+> It would have worked with my initial proposal of defining the uuid as a typedefinition of an array. But I have been pushed in the direction of using a struct. This makes it much harder to implement non-breaking changes to existing APIs.
+> 
+> I honestly do not know how to implement such a change in a non-breaking manner. Other suggestions are welcome.
+
+IIRC the reason why you changed that, was to have a use of this new API, which makes sense. I wonder if there's a alternative thing we can modify to use the new API that does not require a change to a public API. Maybe a test or a sample? Alternatively, you could add a new sample that exercises some of the new functions you've added.
+
+*--- sorru94 (2025-04-08 09:14:07+00:00)
+> > @Thalley Regarding [this](https://github.com/zephyrproject-rtos/zephyr/pull/77884#discussion_r1787634715) suggestion. I don't see how it would work. There is no apparent way to distinguish which of the two options is used. Accessing an array differs from accessing a struct.
+> > It would have worked with my initial proposal of defining the uuid as a typedefinition of an array. But I have been pushed in the direction of using a struct. This makes it much harder to implement non-breaking changes to existing APIs.
+> > I honestly do not know how to implement such a change in a non-breaking manner. Other suggestions are welcome.
+> 
+> IIRC the reason why you changed that, was to have a use of this new API, which makes sense. I wonder if there's a alternative thing we can modify to use the new API that does not require a change to a public API. Maybe a test or a sample? Alternatively, you could add a new sample that exercises some of the new functions you've added.
+
+I added a sample for the UUID module.
+It seems the best way for this module to get merged and start being used subsequently.
+As any change to a module currently using its ad hoc UUID implementation would break a public APIs.
+
+*--- Thalley (2025-04-08 09:30:51+00:00)
+```suggestion
+accordingly to IETF RFC 9562.
+```
+
+*--- Copilot (2025-04-08 09:31:00+00:00)
+The error message here incorrectly references 'uuid_from_string' for the uuid_to_string call. It should be updated to 'uuid_to_string returned an error' to accurately reflect the function being tested.
+```suggestion
+	zassert_true(result == 0, "uuid_to_string returned an error");
+```
+
+*--- Copilot (2025-04-08 09:31:00+00:00)
+The documentation for the 'namespace' parameter incorrectly states that it is a string representation, while the function prototype expects a pointer to a struct uuid. Update the doc comment to accurately describe the parameter type.
+```suggestion
+ * @param namespace A pointer to a struct uuid to be used as namespace.
+```
+
+*--- Thalley (2025-04-08 16:56:40+00:00)
+@sorru94 looks good to me, but looks like there's some issue with the sample
+
+*--- Thalley (2025-04-10 09:42:38+00:00)
+```suggestion
+#endif
+```
+
+It doesn't really make sense to have the `#else` here, does it? 
+
+You should also be able to just add something like `Z_TEST_SKIP_IFNDEF(CONFIG_UUID_V4)` in the test itself
+
+*--- Thalley (2025-04-10 09:44:08+00:00)
+I realize that this comment is a bit last, but do we even need this at all? 
+
+If none of the below is enabled, and none of the functions are called, the linker should remove the entire file by itself anyways.
+
+*--- sorru94 (2025-04-10 10:40:49+00:00)
+I initially added the `#else` as I remember reading in some guideline of zephyr contribution that it was better to leave an empty test than to totally exclude the test case from the build. But honestly I can't find it anymore so I'm fine with removing it.
+`Z_TEST_SKIP_IFNDEF` does not work well here as `uuid_generate_v4` is conditionally excluded from the build by `CONFIG_UUID_V4`.
+As an alternative I could leave  `uuid_generate_v4` always implemented and return [ENOSYS](https://docs.zephyrproject.org/apidoc/latest/group__system__errno.html#ga43785b9969e0bd1af532dbde06c5540b) when `CONFIG_UUID_V4` is not defined.
+
+*--- sorru94 (2025-04-10 10:48:32+00:00)
+Removing this would make always available to the user functions such as `uuid_copy`, `uuid_from_buffer` and `uuid_from_string`. Since this is an experimental module I think it makes more sense to provide those functions only when explicitly using experimental features.
+
+*--- Thalley (2025-04-10 11:12:39+00:00)
+Sure. Since it's experimental, we could remove it when we it stops being experimental
+
+*--- pdgendt (2025-04-10 11:16:56+00:00)
+Fix copyright notice? If this is simply copied from another place, we should consider putting the generic copyright here.
+
+```suggestion
+# Copyright The Zephyr Project Contributors
+```
+
+*--- pdgendt (2025-04-10 11:17:42+00:00)
+There are some mixed copyright years/owners, are all of them accurate?
+
+*--- sorru94 (2025-04-10 11:46:08+00:00)
+I'll check them
+
+*--- sorru94 (2025-04-10 11:52:45+00:00)
+I ran through all the licensing headers and made them coherent.
+
+*--- kartben (2025-04-11 10:04:43+00:00)
+You are wrapping very aggressively here (72 characters?) --- 100 is fine/better :)
+
+Also, you can be fancy with the Sphinx `:rfc:` role. Reworded + reformatted below:
+
+```suggestion
+Universally Unique Identifiers (UUID), also known as Globally Unique IDentifiers (GUIDs), are an
+open industry standard (:rfc:`9562`) for 128-bit long identifiers intended to guarantee uniqueness
+across space and time.
+```
+
+*--- sorru94 (2025-04-11 10:24:48+00:00)
+> This is really great. Minor documentation comments, in case this goes through another round of updates (or if you want to address as a follow-up PR)
+
+If there is no other large change, I would make this a follow-up PR.
+
+*--- tomi-font (2025-05-23 09:36:25+00:00)
+No entry has been added to the `MAINTAINERS.yml` file, so PRs touching these files have no one nor any label added to them. (Example: https://github.com/zephyrproject-rtos/zephyr/pull/90372)
+Maybe something should be done about this?
+
+*--- tomi-font (2025-07-28 09:38:18+00:00)
+Again a PR that gets no reviewer assigned: https://github.com/zephyrproject-rtos/zephyr/pull/93565
+We need to fix this.
+@sorru94 would you be willing to step up as maintainer?
+
+*--- sorru94 (2025-07-28 15:08:36+00:00)
+> Again a PR that gets no reviewer assigned: #93565 We need to fix this. @sorru94 would you be willing to step up as maintainer?
+
+@tomi-font I would be happy to help if needed.
+
+*--- tomi-font (2025-07-30 12:26:46+00:00)
+> @tomi-font I would be happy to help if needed.
+
+https://discord.com/channels/720317445772017664/989195595572973648/1399669949861199965

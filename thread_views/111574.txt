@@ -1,0 +1,25 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111574
+TITLE: Clean-up Doxygen top-level group + add CI check
+
+*--- opening post by kartben (2026-06-18 07:50:38+00:00)
+Shuffling things around to not clutter top-level Doxygen home page
+
+Last commit adds a check complementing the coverage "delta" check that already existed, so that we detect in CI when unparented groups are being added so as to avoid the top-level doxygen groups becoming a mess :)
+The result of the job in case someone would be introducing a top-level group inadvertently would look like this: https://github.com/zephyrproject-rtos/zephyr/actions/runs/29088095508?pr=111574.
+
+Cleaned-up Doxygen homepage at https://builds.zephyrproject.io/zephyr/pr/111574/docs/doxygen/html/topics.html
+
+*--- kartben (2026-07-10 15:22:47+00:00)
+pushed an update to the python script to make sonarqube happy
+
+*--- Copilot (2026-07-10 16:22:56+00:00)
+The job summary strings include emojis ("🗂️", "✅"). Zephyr style guidance asks to avoid non-ASCII symbols in code and to avoid emojis in any case (doc/contribute/style/code.rst:30-31). Using plain ASCII text here keeps the script consistent with project style and avoids potential encoding/rendering issues in CI summaries.
+
+*--- Copilot (2026-07-10 16:22:57+00:00)
+The SPDX copyright header does not follow the format recommended in Zephyr's contribution guidelines: it should include the word "Copyright" (doc/contribute/guidelines.rst:116-123). This matters for SPDX/REUSE tooling that expects the canonical form.
+
+*--- dkalowsk (2026-07-13 01:32:36+00:00)
+I'm assuming any other deprecated groups may be added to list as time moves forward.  Should this list also be keep-sorted ?
+
+*--- kartben (2026-07-13 08:03:53+00:00)
+It's pretty exceptionl that an entire group (subsystem) would be deprecated so I'm just expecting this whole section to disappear when old USB device stack completely goes away during this cycle and then we'll handle any future deprecation (if any) as it arises. Thanks for your attention to details though!

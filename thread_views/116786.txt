@@ -1,0 +1,16 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116786
+TITLE: dts: bindings: can: remove deprecated bus-speed properties
+
+*--- opening post by kartben (2026-08-19 12:05:02+00:00)
+Removes the `bus-speed` and `bus-speed-data` CAN controller devicetree properties, deprecated in Zephyr 3.7 when they were renamed to `bitrate` and `bitrate-data` (#73654).
+
+*--- henrikbrixandersen (2026-08-23 18:23:22+00:00)
+@kartben Please rebase on `main` and resolve any merge conflicts.
+
+*--- kartben (2026-08-25 13:18:54+00:00)
+re-re-re-based
+
+*--- henrikbrixandersen (2026-08-25 15:53:46+00:00)
+> re-re-re-based
+
+See, this is why we normally do not handle removal of deprecated functionality in batches ;)

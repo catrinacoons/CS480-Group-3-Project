@@ -1,0 +1,184 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/97316
+TITLE: tests: bluetooth: ascs: make callback expectation checks more generic
+
+*--- opening post by dkushche (2025-10-10 00:24:26+00:00)
+The existing ASCS test callback verification functions scale poorly and are not easily reusable across different cases.
+
+This change introduces a more generic approach to expectation checks by adding `expect_bt_bap_unicast_server_cb_release_called(_expected_count, _streams)` and similar functions, improving readability and maintainability of ASCS unit tests.
+
+Fixes #58034
+
+*--- Thalley (2025-10-10 08:44:57+00:00)
+May seems silly, but could you align the `\`s? :)
+
+*--- Copilot (2025-10-10 08:46:11+00:00)
+Missing comma in function call - there should be a comma between '1' and 'streams'.
+```suggestion
+	expect_bt_bap_unicast_server_cb_release_called(1, streams);
+```
+
+*--- Copilot (2025-10-10 08:46:11+00:00)
+Inconsistent parameter type: `streams` parameter should be `struct bt_bap_stream *streams[]` to match the array pattern used in other similar functions in this file.
+```suggestion
+								struct bt_bap_stream *streams[])
+```
+
+*--- Copilot (2025-10-10 08:46:12+00:00)
+Array access `streams[i]` will fail because `streams` is declared as a single pointer, not an array. This will cause undefined behavior when `i > 0`.
+
+*--- Copilot (2025-10-10 08:46:12+00:00)
+Function `expect_bt_bap_stream_ops_started_called_once` is still being used but appears to be replaced by the generic version `expect_bt_bap_stream_ops_started_called`. These calls should be updated to use the new generic function for consistency.
+```suggestion
+	expect_bt_bap_stream_ops_started_called(1, streams);
+```
+
+*--- Copilot (2025-10-10 08:46:12+00:00)
+Stream array contains duplicate entries `{ stream, stream }` but is used to verify different call counts. This will cause incorrect verification when checking the second call with `streams[1]` since both array elements point to the same stream object.
+
+*--- Copilot (2025-10-10 08:46:12+00:00)
+Stream array contains duplicate entries `{ stream, stream }` but is used to verify different call counts. This will cause incorrect verification when checking the second call with `streams[1]` since both array elements point to the same stream object.
+
+*--- Copilot (2025-10-10 08:46:13+00:00)
+Stream array contains duplicate entries `{ stream, stream }` but is used to verify different call counts. This will cause incorrect verification when checking the second call with `streams[1]` since both array elements point to the same stream object.
+
+*--- Thalley (2025-10-10 08:47:27+00:00)
+Consider doing the following
+
+```suggestion
+	struct bt_bap_stream *streams[] = { stream };
+
+	expect_bt_bap_unicast_server_cb_release_called(ARRAY_SIZE(streams), streams);
+	expect_bt_bap_stream_ops_released_called(ARRAY_SIZE(streams), streams);
+```
+
+It will be easier to search for a generic pattern, rather than relying on literal values, and will also work when `streams` has more than 1 stream
+
+*--- Thalley (2025-10-10 08:47:58+00:00)
+```suggestion
+	const struct bt_bap_stream *streams[1] = { stream };
+```
+
+Minor comment, but I see that some of the other similar checks use `const`
+
+*--- Thalley (2025-10-10 08:48:25+00:00)
+For a single stream, you could also do `expect_bt_bap_unicast_server_cb_release_called(1, &stream);`
+
+*--- Thalley (2025-10-10 08:49:07+00:00)
+Previous comments also apply here
+
+*--- Thalley (2025-10-10 08:51:56+00:00)
+Do you think it makes sense to remove the `not_called` as well, and call `expect_bt_bap_stream_ops_configured_called(0, NULL)` instead of `expect_bt_bap_stream_ops_configured_not_called`?
+
+*--- Thalley (2025-10-10 08:53:43+00:00)
+When looping over the `call_count` we should probably use `unsigned int` to use the same type for the iterator as the target (https://github.com/zephyrproject-rtos/zephyr/blob/main/subsys/testsuite/include/zephyr/fff.h#L64)
+
+*--- dkushche (2025-10-10 12:53:12+00:00)
+Yes, sounds good
+
+*--- dkushche (2025-10-14 13:35:14+00:00)
+Hope now it looks better
+
+*--- dkushche (2025-10-17 10:12:17+00:00)
+Hi @Thalley , could you please take a look when you have a chance? 🙏
+
+*--- dkushche (2025-10-20 09:01:04+00:00)
+@jhedberg @sjanc @asbjornsabo @larsgk @babrsn
+Hi! I've addressed the previous review comments and pushed the updates.
+Please take a look when you have time I think it's ready for merging now. Thanks!
+
+*--- dkushche (2025-10-24 00:30:19+00:00)
+I like the interface we achieved for the expect functions, but the macro doesn't handle NULL properly. It could potentially be fixed using an `EMPTY`, but I believe inline functions are easier to maintain, so I decided to use them instead.
+
+I’m not entirely sure how to address the issue reported by `./scripts/ci/check_compliance.py`. It seems that using the `zassert_equal_ptr` macro causes the line length to exceed 100 columns after expansion, and there's no straightforward way to work around that.
+
+*--- dkushche (2025-10-30 14:43:45+00:00)
+Hey, could anybody please run the pipeline one more time? Thanks!
+
+*--- dkushche (2025-11-11 11:05:40+00:00)
+<img width="1814" height="756" alt="image" src="https://github.com/user-attachments/assets/915208b8-97a2-4316-8b63-8cb59587d4e2" />
+
+*--- dkushche (2025-11-11 11:49:05+00:00)
+* Fixed all failing tests.
+* Compliance check warnings seem to be false positives caused by macro expansions; no long lines actually present.
+* PR is ready for merge.
+
+*--- Thalley (2025-11-11 12:03:22+00:00)
+> * Fixed all failing tests.
+> 
+>     * Compliance check warnings seem to be false positives caused by macro expansions; no long lines actually present.
+> 
+>     * PR is ready for merge.
+
+Some of the long-line complaints are valid, e.g. 
+
+```c
+
+			zassert_equal_ptr(eps[i], mock_bap_unicast_server_cb_config_fake.arg1_history[i],
+```
+
+Which is 102 characters. Please address those first :)
+
+*--- Thalley (2025-11-11 12:03:59+00:00)
+Long line need to be fixed
+
+*--- dkushche (2025-11-11 19:08:07+00:00)
+Ahhh, using 8 spaces for a tab was the key to resolving my confusion. Thank you it's fixed!
+
+*--- dkushche (2025-11-11 20:13:58+00:00)
+* Rebased on main
+* Verified tests
+* Checked compliance (encountered some local Python errors after the rebase, but I believe this is fine)
+
+*--- dkushche (2025-11-11 21:40:45+00:00)
+@jhedberg Could you please approve PR 🙏
+
+*--- Thalley (2025-11-11 21:47:36+00:00)
+> @jhedberg Could you please approve PR 🙏
+
+Just FYI, we are in a hard freeze for the release this week (https://github.com/zephyrproject-rtos/zephyr/wiki/Release-Management), so reviews from most people are prioritized for any blockers for the upcoming release. Refactoring of unit tests is not probably going to be prioritized this week (and wouldn't get merged until next week in any case), so please have patience :)
+
+*--- dkushche (2025-11-25 16:36:22+00:00)
+> > @jhedberg Could you please approve PR 🙏
+> 
+> Just FYI, we are in a hard freeze for the release this week (https://github.com/zephyrproject-rtos/zephyr/wiki/Release-Management), so reviews from most people are prioritized for any blockers for the upcoming release. Refactoring of unit tests is not probably going to be prioritized this week (and wouldn't get merged until next week in any case), so please have patience :)
+
+Hi, hope you're doing well. Do we perhaps have an update on when we'll be able to merge this PR?
+
+*--- Thalley (2025-11-25 16:44:31+00:00)
+> Hi, hope you're doing well. Do we perhaps have an update on when we'll be able to merge this PR?
+
+It can be merged as soon as we get 1 more approval :) In Zephyr we have a rule that we require 2 approvals for each PR. Perhaps @larsgk want to take a look?
+
+*--- dkushche (2025-11-27 13:00:32+00:00)
+@jhedberg
+Could you please take a moment to approve the PR when you have time? You have reviewed it before, so it should be straightforward. Thank you!
+
+*--- dkushche (2025-12-02 15:57:42+00:00)
+@jhedberg @sjanc @asbjornsabo @larsgk @babrsn
+Hi, could you please review and approve this PR? 
+It requires two approvals to be merged, and it has been waiting for quite a while, so I'm starting to get conflicts with main.
+
+Would appreciate your help whenever you have a moment. Thanks!
+
+*--- Thalley (2025-12-02 17:08:13+00:00)
+```suggestion
+	test_drain_syswq(); /* Ensure that state transitions are completed */
+```
+
+*--- Thalley (2025-12-02 17:08:23+00:00)
+Please indent with tab :)
+
+*--- dkushche (2025-12-02 17:29:03+00:00)
+Sorry fixed it. 
+I assumed that merging on GitHub would save some time, but I was mistaken.
+
+*--- dkushche (2025-12-10 10:14:43+00:00)
+@asbjornsabo  @babrsn @fredrikdanebjer @jthm-ot @larsgk @nashif @niym-ot @sjanc @jhedberg
+All review comments have been addressed and the PR is now in a good and stable state. 
+
+When you have a moment, could one additional maintainer please take a look and provide the final approval so we can move forward with merging?🙏
+
+*--- dkushche (2025-12-16 14:53:39+00:00)
+<img width="350" height="457" alt="image" src="https://github.com/user-attachments/assets/566e4ee7-600e-4cb7-8295-11f4fbb9eeb5" />
+
+Please

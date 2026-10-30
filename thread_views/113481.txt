@@ -1,0 +1,14 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113481
+TITLE: twister: fix per test coverage collection
+
+*--- opening post by nashif (2026-07-14 11:03:17+00:00)
+A bad rebase made this feature regress, fix the issue..
+
+- **testsuite: coverage: don't index tagged per-test gcda dumps**
+- **twister: coverage: fail clearly on an empty tracefile merge**
+
+
+Fixes https://github.com/zephyrproject-rtos/zephyr/issues/113496
+
+*--- jonas-5ae29c (2026-07-14 13:05:58+00:00)
+Fixes #113496

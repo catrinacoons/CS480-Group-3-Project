@@ -1,0 +1,103 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114450
+TITLE:   arch: arm64: fix SMP hang when CONFIG_PRINTK_SYNC is enabled
+
+*--- opening post by kedareswararao (2026-07-24 05:30:03+00:00)
+## Problem
+
+  On an arm64 SMP target (AMD Versal Gen 2 APU, 2 cores), enabling
+  `CONFIG_PRINTK_SYNC` together with `CONFIG_SMP` produced an early-boot
+  hang with **no console output at all** — not even a partial crash dump —
+  and the secondary CPU never left reset. `CONFIG_PRINTK_SYNC=n` masked
+  the problem entirely, which made it look printk-specific at first, but
+  the actual trigger turned out to be architectural: any `printk()`/
+  `LOG_ERR()` call reachable from arm64 code that runs before the MMU is
+  enabled will fault, because `CONFIG_PRINTK_SYNC`'s spinlock executes an
+  atomic instruction that requires the MMU to already be active with
+  proper (shareable) memory attributes.
+
+  In this case the trigger was `set_mapping()` (arch/arm64/core/mmu.c)
+  logging a conflicting MMU region during `setup_page_tables()`, which
+  runs single-threaded on the primary core before the MMU comes up and
+  before any secondary CPU is released from reset. That first faulting
+  `LOG_ERR()` call recursed into `z_arm64_fatal_error()` trying to report
+  itself the same way, faulting again, until the stack overflowed — all
+  silently, since the printk hook is still a no-op stub this early
+  regardless.
+
+  Three separate, independently valid issues surfaced while chasing this
+  down:
+
+  1. **`lib: os: printk: avoid self-relock recursion when re-entered on
+     same CPU`** — with `CONFIG_SPIN_VALIDATE` enabled, if an assertion
+     fires while `vprintk()` already holds its own lock, reporting that
+     assertion re-enters `vprintk()`, which fails the same lock-ownership
+     check, asserts again, and recurses with no possible exit until the
+     stack overflows. Skip re-locking when the current CPU already owns
+     the lock.
+
+  2. **`arch: arm64: thread: populate stack_limit under
+     SAFE_EXCEPTION_STACK`** — `thread->arch.stack_limit` was only ever
+     initialized under `CONFIG_ARM64_STACK_PROTECTION`, which requires
+     `ARM_MPU`. On MMU-only Cortex-A targets that can never be selected,
+     so `current_stack_limit` stays zero forever and
+     `z_arm64_quick_stack_check()`'s overflow detection is silently dead
+     code — `CONFIG_ARM64_SAFE_EXCEPTION_STACK` allocates the safety net
+     but nothing was wiring it up. Populate the field whenever
+     `CONFIG_ARM64_SAFE_EXCEPTION_STACK` is enabled instead.
+
+  3. **`arch: arm64: mmu: let printk skip its lock before the MMU is
+     enabled`** — the actual fix for the hang. Adds
+     `arch_printk_sync_safe()`, a weak hook (default: always safe, no
+     behavior change on any other architecture) that `vprintk()` checks
+     before taking its lock. The arm64 implementation returns false
+     exactly when `SCTLR_EL1.M` is clear. Since no other CPU can be
+     running yet in that window either, skipping the lock is provably
+     safe — this covers *any* pre-MMU-enable printk/LOG call, not just
+     the specific one that exposed the bug.
+
+  ## Testing
+
+  - Reproduced the hang reliably on AMD Versal Gen 2 APU (2-core, SMP)
+    hardware with `CONFIG_SMP=y` + `CONFIG_PRINTK_SYNC=y`.
+  - Confirmed root cause via JTAG (XSDB): a breakpoint at
+    `z_arm64_fatal_error()` caught the first fault with
+    `ESR_EL1 = 0x96000410` (Data Abort, Synchronous External Abort) at
+    the `ldaddal` instruction inside `atomic_inc()`, called from
+    `k_spin_lock()`, called from a `LOG_ERR()` in `set_mapping()` during
+    `setup_page_tables()` — i.e. before `SCTLR_EL1.M` is set.
+  - With all three commits applied, the board boots cleanly with
+    `CONFIG_PRINTK_SYNC=y`, the secondary CPU comes up, and the full
+    `tests/kernel/smp` suite runs to completion, including
+    `test_fatal_on_smp`, which deliberately triggers a real kernel oops
+    on each CPU and now reports it correctly instead of hanging.
+
+*--- nashif (2026-07-28 10:24:39+00:00)
+3U is the wrong CPU-id mask on 64-bit. With MP_MAX_NUM_CPUS > 4 on arm64 this misidentifies the owner in both directions: owner CPU 4 while current is CPU 0 → false "self-owned" → printk skips the lock while another CPU holds it.
+
+*--- nashif (2026-07-28 10:27:56+00:00)
+Uninitialized k_spinlock_key_t passed by value, maybe add '= {0}'
+
+*--- Copilot (2026-07-28 10:32:37+00:00)
+The self-ownership check uses a hard-coded CPU-ID bitmask (`& 3U`), but spinlock validation encodes the CPU id in the low bits of `thread_cpu` with a mask that depends on pointer size (2 bits on 32-bit, 3 bits on 64-bit; see `kernel/spinlock_validate.c:10-12`). On 64-bit builds (arm64), `& 3U` will fail to match CPU IDs 4-7, so re-entrant printk on those CPUs can still recurse through spinlock validation instead of taking the intended fast-path.
+
+*--- Copilot (2026-07-28 10:32:37+00:00)
+`key` is left uninitialized when `printk_lock()` decides to skip locking (returns false). Even though `printk_unlock()` won’t use it when `locked` is false, passing an indeterminate `key` value is fragile and can trigger “maybe-uninitialized” warnings or become UB if the inlining assumptions change. Initializing `key` avoids this safely.
+
+This issue also appears on line 208 of the same file.
+
+*--- npitre (2026-07-29 00:07:59+00:00)
+I think the problem here is more general than arm64 and needs a more generic solution. I went through a few approaches before settling on one, and ended up filing #114812 for the problem and #114814 for a fix.
+
+The short version: printk gets an entry point that never locks, for callers that know in advance they cannot (the assertion path, the page table code that runs before the MMU is up), plus a switch that keeps printk on that path once a fatal error is being reported. Both mechanisms in this PR then become unnecessary, since nothing on those paths asks printk to lock any more.
+
+Two things worth passing on. The hook alone would not have fixed the crash you reported: that came from `LOG_ERR()` in `set_mapping()`, and the log core takes its own spinlock well before printk is reached. And your "no other CPU can be printing" argument does hold for the primary's window, the secondaries are still parked in reset.S at that point, but not for the later secondary bring-up.
+
+Your `stack_limit` commit (`2e76b44a`) is independent of all this and looks correct. Worth splitting out so it can land on its own.
+
+One favour if you still have the board: the abort does not reproduce under QEMU, so I could not verify the fix end to end. Confirmation that #114814 fixes your original failure would close that gap.
+
+*--- kedareswararao (2026-07-29 11:47:09+00:00)
+@npitre : thanks for the review and fix will test update the results here
+
+*--- kedareswararao (2026-07-30 05:14:19+00:00)
+@npitre pull request solving the issue mentioned in this pull request so closing this will raise seprate pull request for this commit https://github.com/zephyrproject-rtos/zephyr/pull/114450/changes/2e76b44a8d35afbd6381ce59a295895501b87019

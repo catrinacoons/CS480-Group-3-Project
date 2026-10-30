@@ -1,0 +1,255 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115307
+TITLE: net: if: preserve mcast groups on iface down
+
+*--- opening post by maass-hamburg (2026-08-04 11:59:27+00:00)
+When I set the socket option
+ZSOCK_IPV6_ADD_MEMBERSHIP or ZSOCK_IP_ADD_MEMBERSHIP I expect that that setting is valid for at least the time that the socket is open. As a udp does not close
+when the iface that it is attached to, goes down,
+it should not be removed from the iface on down.
+
+Just with the socket api I have no way to detect that the multicast membership no longer exists and then also no way to recover.
+
+If the summary I got from Codex about how it is in Linux, can be believed, in Linux they also don't remove the multicast groups on down:
+
+> On a normal `NETDEV_DOWN` / `NETDEV_UP` cycle, Linux usually remembers multicast memberships and re-joins them when the device comes back. The interface-level join is withdrawn on down, then reinstalled on up: IPv4 does that in net/ipv4/igmp.c, and IPv6 does the same in net/ipv6/mcast.c. So for a simple down/up, user space normally does not need to call `IP_ADD_MEMBERSHIP` or `IPV6_ADD_MEMBERSHIP` again.
+
+> The socket itself is not closed or automatically unbound by that event. The membership is stored on the socket and only torn down on explicit leave or socket close, not on interface down: see IPv4 join/close in net/ipv4/igmp.c and net/ipv4/igmp.c, and the IPv6 equivalents in net/ipv6/mcast.c and net/ipv6/mcast.c. While the interface is down, those sockets just stop receiving multicast from that interface; when it comes back and the memberships are reinstated, receive resumes.
+
+> The important caveat is that `down/up` is different from `unregister/destroy`. If the device is actually removed, Linux destroys the device multicast list instead of carrying it across, so a recreated interface may need fresh joins, especially if it comes back with a new `ifindex` (net/ipv4/igmp.c, net/ipv6/addrconf.c). Also, `bind()` to a multicast address alone is not the same thing as joining the group; the real receive membership comes from the multicast join socket options.
+
+*--- jukkar (2026-08-04 12:37:43+00:00)
+This is still a draft so I am a bit too early in the review. There has been lot of effort to get the join/leave functionality working and it would be nice if we can simplify things. I asked Claude for a review about this and it generated this report:
+
+# Review: PR #115307 — net: if: don't leave mcast groups on iface down
+
+- PR: https://github.com/zephyrproject-rtos/zephyr/pull/115307 (draft)
+- Author: Fin Maaß <f.maass@vogl-electronic.com>
+- Reviewed against: `main` at `f2b5ecd866f`
+- Commits on the branch:
+  1. `1ba58171e57` net: if: don't leave mcast groups on iface down (1 file, -43)
+  2. `6de54ba21cc` net: dns: remove rejoin (4 files, +8 -216)
+
+## Verdict
+
+The bug that commit 1 targets is real and worth fixing. The commit is not
+ready as it stands: it breaks an existing mDNS runtime-control test and it
+leaves offloaded and point-to-point interfaces without any join or leave
+notification across a down/up cycle.
+
+Commit 2 does not compile in `CONFIG_MDNS_RESPONDER_PROBE=y` builds and
+removes recovery behaviour that is still needed. It should be dropped or
+reduced to a much smaller change.
+
+## The underlying bug is real
+
+`net_if_down()` calls `net_ipv6_mld_leave()` / `net_ipv4_igmp_leave()`. Those
+do not merely mark the group unjoined, they call `net_if_ipv6_maddr_rm()` /
+`net_if_ipv4_maddr_rm()`, which drop a reference and free the record when the
+count reaches zero:
+
+```c
+int net_ipv6_mld_leave(struct net_if *iface, const struct net_in6_addr *addr)
+{
+	...
+	removed_addr = maddr->address;
+	if (!net_if_ipv6_maddr_rm(iface, addr)) {
+		/* Address still in use */
+		return 0;
+	}
+```
+
+Recovery on the way back up is `rejoin_multicast_groups()`, which only walks
+entries whose `is_used` flag is still set, so a freed record can never come
+back. An application's `IPV6_ADD_MEMBERSHIP` / `IP_ADD_MEMBERSHIP` is
+therefore destroyed by an administrative down, with no way for the
+application to notice or recover through the socket API. The report is
+accurate.
+
+There is a second, quieter consequence that the commit message does not
+mention. When two sockets joined the same group the record is not freed, but
+the reference count is still decremented, so the accounting is left
+permanently wrong and a later leave by one socket removes the group while the
+other still expects membership.
+
+Note that the operational-down path is already correct: `notify_iface_down()`
+calls `clear_joined_ipv{4,6}_mcast_groups()`, which only clears `is_joined`
+and keeps the record, and `notify_iface_up()` calls
+`rejoin_multicast_groups()`. Commit 1 makes the administrative path behave the
+same way. That symmetry is a good argument for the change and belongs in the
+commit message.
+
+## Findings — commit 1
+
+### 1. Breaks `test_runtime_disable_then_enable_iface` (blocking)
+
+`net.mdns.runtime_iface_allowlist::test_runtime_disable_then_enable_iface`
+fails with commit 1 applied on its own:
+
+```
+Expectation failed at tests/net/lib/mdns_responder/src/main.c:1154:
+	(ipv4_group_joined(iface1) is true)
+	iface1 still in the IPv4 mDNS group after disable
+Expectation failed at tests/net/lib/mdns_responder/src/main.c:1156:
+	(ipv6_group_joined(iface1) is true)
+	iface1 still in the IPv6 mDNS group after disable
+```
+
+Instrumenting the group reference count at that point:
+
+| | ref before disable | ref after disable |
+| --- | --- | --- |
+| baseline | 1 | -1 (record freed) |
+| commit 1 | 2 | 1 (still joined) |
+
+The responder joins the group again when its listener is re-initialised after
+the interface comes up. That join used to recreate a freed record at one
+reference; with the patch it adds a second reference to a record that
+survived. The single leave in `mdns_responder_disable_iface()` then no longer
+removes the interface from the group, so the responder keeps receiving mDNS
+traffic on an interface the application explicitly disabled.
+
+The existing `test_ipv{4,6}_group_ref_not_leaked_on_cycles` tests still pass,
+so this is not an unbounded leak per cycle, but the balance is wrong. Either
+the responder must not join again while it already holds a reference, or the
+disable path must drop every reference it holds.
+
+### 2. No MLD Done / IGMP Leave is sent anymore (needs a decision)
+
+Commit 1 removes the only place that emits a Done / Leave on administrative
+down, so nothing tells the querier or an IGMP/MLD-snooping switch that the
+node stopped listening; the switch has to age the state out. Linux keeps the
+membership across a link down but still sends the leave. Dropping the message
+may well be acceptable here, since the interface is being disabled anyway and
+it makes the administrative path match the carrier path, but the commit
+message should say so explicitly instead of being silent about it.
+
+### 3. Incomplete for offloaded and point-to-point interfaces (should fix)
+
+`notify_iface_down()` and `notify_iface_up()` both skip `clear_joined_*` and
+`rejoin_multicast_groups()` for offloaded and `NET_L2_POINT_TO_POINT`
+interfaces:
+
+```c
+	if (!net_if_is_offloaded(iface) &&
+	    !(l2_flags_get(iface) & NET_L2_POINT_TO_POINT)) {
+		rejoin_multicast_groups(iface);
+		...
+```
+
+For those interfaces the old destructive leave at least called
+`net_if_mcast_monitor(..., false)`, which is how offloaded drivers program
+their hardware multicast filters. After the patch such an interface cycles
+down and up with no monitor callback at all, so a Wi-Fi driver that clears its
+filter on down never gets it restored, and `is_joined` stays set so the core
+rejoin skips it as well. This is the platform where mDNS matters most.
+
+### 4. No test (should fix)
+
+Nothing in the tree covers the case the PR is actually about: a plain socket
+keeping its `IP_ADD_MEMBERSHIP` / `IPV6_ADD_MEMBERSHIP` across an
+administrative down and up. The mDNS suite only passes today because the
+responder carries its own rejoin workaround, which commit 2 then removes.
+
+## Findings — commit 2
+
+### 5. Does not build with `CONFIG_MDNS_RESPONDER_PROBE=y` (blocking)
+
+```c
+net_mgmt_init_event_callback(&mgmt_iface_cb, NET_EVENT_IF_UP, flags);
+```
+
+The handler and event-mask arguments are swapped, and the `uint64_t flags`
+local was deleted in the same hunk. `tests/net/lib/mdns_responder_probe`
+errors out with `error: flags undeclared (first use in this function)`.
+
+### 6. Removes recovery that is still needed (blocking)
+
+`test_ipv4_igmp_report_when_already_joined_on_if_up` fails in all five mDNS
+configurations. That test covers the case where the group is still marked
+joined when `NET_EVENT_IF_UP` arrives and a fresh membership report must be
+emitted anyway, so that a snooping switch which dropped its state during the
+outage starts forwarding again. Commit 1 does not address this: a plain join
+returns early when the group is already joined, and the core rejoin only fires
+for entries that `clear_joined_*` unmarked.
+
+On offloaded and point-to-point interfaces the responders' `IF_UP` handler is
+the only recovery path at all, since the core skips those (finding 3).
+
+The premise of commit 2 — that the rejoin is no longer needed — therefore
+holds only for native interfaces that went through a full operational down.
+In every other case it deletes the recovery. The same argument applies to the
+`llmnr_responder.c` handler and to `mdns_rejoin_groups()` in `resolve.c`,
+which covers the `MDNS_RESOLVER && !MDNS_RESPONDER` configuration.
+
+## Test results
+
+Run on `native_sim` with twister.
+
+| Suite | Baseline | Commit 1 only | Both commits |
+| --- | --- | --- | --- |
+| `tests/net/mld` | pass | pass | pass |
+| `tests/net/igmp` | pass | pass | pass |
+| `tests/net/lib/mdns_responder` | pass (5 configs) | 1 failure | 6 failures in 5 configs |
+| `tests/net/lib/llmnr_responder` | pass | pass | pass |
+| `tests/net/lib/mdns_responder_probe` | pass | pass | build error |
+
+Failing cases with both commits applied:
+
+```
+net.mdns.test_mdns_responder.ipv4_igmp_report_when_already_joined_on_if_up
+net.mdns.iface_allowlist.test_mdns_responder.ipv4_igmp_report_when_already_joined_on_if_up
+net.mdns.iface_denylist.test_mdns_responder.ipv4_igmp_report_when_already_joined_on_if_up
+net.mdns.runtime_iface.test_mdns_responder.ipv4_igmp_report_when_already_joined_on_if_up
+net.mdns.runtime_iface_allowlist.test_mdns_responder.ipv4_igmp_report_when_already_joined_on_if_up
+net.mdns.runtime_iface_allowlist.test_mdns_responder.runtime_disable_then_enable_iface
+```
+
+## Commit message notes
+
+Both subjects should follow the Zephyr convention of a capitalised imperative
+after the area prefix, for example `net: if: Do not leave mcast groups on
+iface down`. The body of commit 1 is written in the first person as an issue
+report ("When I set the socket option ... I expect"); it should describe the
+change, why it is correct, and how it was tested. `net: dns: remove rejoin` is
+too terse to review from the message alone.
+
+## Recommendation
+
+Drop commit 2, or reduce it to removing only the `-ENOENT` fallback that
+existed purely because the record used to be destroyed, keeping the rejoin
+that forces a fresh report.
+
+Keep commit 1, but fix the mDNS double-join so runtime disable keeps working,
+decide and document what happens to offloaded and point-to-point interfaces,
+and add a socket-level test for a membership surviving an administrative
+down/up.
+
+*--- maass-hamburg (2026-08-04 16:53:27+00:00)
+on net_if_down we now only send the leave, but don't really leave and leave the rest to ``update_operational_state`` with ``notify_iface_down`` that will clear the joined groups, like it also did and the cases where only the carrier was not up and we kept the multicast groups. A bit similar to the rejoin logic.
+
+*--- Copilot (2026-08-05 10:30:18+00:00)
+net_ipv6_mld_rejoin() marks the address as joined but no longer calls net_if_mcast_monitor(). On interfaces with L2 multicast hardware filtering (e.g. Ethernet), the monitor callback is what programs the device filter, so multicast reception may remain broken after a down/up rejoin even though the MLD report is sent.
+
+This issue also appears on line 328 of the same file.
+
+*--- Copilot (2026-08-05 10:30:18+00:00)
+net_ipv4_igmp_rejoin() sets the multicast address to joined but no longer calls net_if_mcast_monitor(). This breaks L2 multicast hardware filtering updates (e.g. Ethernet’s ethernet_mcast_monitor_cb), so multicast receive can fail after a down/up cycle even though the IGMP report is sent.
+
+This issue also appears on line 769 of the same file.
+
+*--- Copilot (2026-08-05 10:30:19+00:00)
+record_mcast_report() ignores the return value of net_pkt_read(). If the read fails, the test will compare/consume uninitialized data and can produce misleading results. The other reads in this helper already assert on failure.
+
+*--- maass-hamburg (2026-08-05 10:44:27+00:00)
+join already calls `net_if_mcast_monitor` (with join as true) and as we now only send the leave msg on iface down and don't really leave we there also no longer send `net_if_mcast_monitor` (with join as false) with a leave. Without this change we would mess up the reference.
+
+*--- maass-hamburg (2026-08-06 14:25:29+00:00)
+moved the `net_if_mcast_monitor` inside the add and remove mcast addresses function, so the iface get informed as soon as we add the address and not only after we send the join
+
+*--- maass-hamburg (2026-08-07 13:22:27+00:00)
+> moved the net_if_mcast_monitor inside the add and remove mcast addresses function, so the iface get informed as soon as we add the address and not only after we send the join
+
+removed these changes; net_if_mcast_monitor is now called every join, rejoin, leave and send_leave, just like before.
+
+*--- maass-hamburg (2026-08-07 13:28:26+00:00)
+btw `net_if_mcast_monitor` is not called on leave due to carrier up, but when it rejoins after carrier is up it is called, so the reference will be wrong. But that is a bug that existed before this PR and will be fixed on a separate PR.

@@ -1,0 +1,26 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/89971
+TITLE: tests: Bluetooth: Audio: Add RX check for each stream
+
+*--- opening post by Thalley (2025-05-14 20:12:56+00:00)
+Changed the generic global flag_audio_received flag to exist for each stream. This will help verify that each stream, if configured for RX, receives the expected data.
+
+*--- Copilot (2025-08-17 10:21:45+00:00)
+The printf format uses variable 'i' but the comment says 'j=%zu'. This should be 'j' to match the loop variable being printed.
+```suggestion
+			printk("\nRunning iteration j=%zu\n\n", j);
+```
+
+*--- Copilot (2025-08-17 10:21:46+00:00)
+The code clears flags for 'unicast_client_sink_streams' but waits for data on 'unicast_client_source_streams' in the wait_for_data() function. This mismatch could cause the test to wait indefinitely if the wrong streams are being monitored.
+```suggestion
+			ARRAY_FOR_EACH_PTR(unicast_client_source_streams, test_stream) {
+```
+
+*--- Thalley (2025-09-08 08:23:52+00:00)
+Fixed build issue after https://github.com/zephyrproject-rtos/zephyr/pull/85642 was merged
+
+*--- Thalley (2025-10-07 09:15:11+00:00)
+Test fails due to known assertion (https://github.com/zephyrproject-rtos/zephyr/issues/82399)
+
+*--- Thalley (2025-11-05 18:27:32+00:00)
+Disabled the failing test from this PR and created an issue for it: https://github.com/zephyrproject-rtos/zephyr/issues/98941

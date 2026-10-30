@@ -1,0 +1,49 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117467
+TITLE: boards: qemu: x86: Split board variants and cleanup
+
+*--- opening post by nashif (2026-08-26 12:30:24+00:00)
+boards/qemu/x86 had grown into one directory hosting four boards on two
+SoCs, with a board.cmake full of bitness conditionals and a
+Kconfig.defconfig made of four near-identical per-board blocks.
+
+Split it along the lines the build system already draws:
+
+- boards/qemu/x86: qemu_x86 (+ its atom variants) and qemu_x86_tiny, the
+  32-bit Atom boards that share one devicetree
+- boards/qemu/x86_64: qemu_x86_64 (+ nokpti), which is the same machine
+  in long mode with a second CPU and an SMBus controller
+- boards/qemu/x86_lakemont: the Lakemont SoC board, which shares no
+  devicetree with the others and needs its own PC-compatible overrides
+
+What the boards have in common now lives in one place each:
+
+- boards/qemu/common/qemu_x86.dtsi holds the q35 machine description
+  formerly in qemu_x86.dts; the qemu_x86 and qemu_x86_64 devicetrees
+  include it and add only what differs. The 64-bit nokpti variant now
+  includes qemu_x86_64.dts instead of re-declaring cpu@1 itself.
+- boards/common/qemu_x86.board.cmake derives the memory size, CPU
+  feature flags, virtio devices and machine flags from Kconfig and
+  devicetree, the same way qemu_riscv.board.cmake does for RISC-V. A
+  board's board.cmake is reduced to naming its QEMU CPU model.
+
+Kconfig defaults that merely restated what the arch, SoC or driver
+already provides are dropped: CPU_HAS_FPU (selected by CPU_ATOM and
+CPU_LAKEMONT_PERF), MULTIBOOT and X86_PC_COMPATIBLE on the Atom boards
+(arch defaults), FLASH_SIMULATOR (defaults on from the sim-flash node),
+and the qemu_x86_tiny KERNEL_VM_SIZE default that its defconfig sets
+anyway. QEMU_TARGET and HAS_COVERAGE_SUPPORT become selects on the board
+symbols, as the other QEMU boards do. The zefi post-build step is now
+unconditional in the qemu_x86_64 directory.
+
+qemu_x86_64 and qemu_x86_lakemont get their own board documentation;
+the UEFI boot instructions move from the qemu_x86 page to the
+qemu_x86_64 one, and the qemu_x86 overview no longer describes the
+board as a Lakemont CPU.
+
+Board identifiers, defconfigs and twister metadata are unchanged.
+Building samples/hello_world for all ten board targets before and after
+yields identical .config, zephyr.dts and QEMU command lines, except that
+qemu_x86_64/atom/nokpti now also carries the SMBus node.
+
+*--- edersondisouza (2026-08-26 22:09:14+00:00)
+Now that ethernet is mentioned, you can drop it from "Known Problems or Limitations".

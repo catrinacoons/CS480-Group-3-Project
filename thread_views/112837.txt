@@ -1,0 +1,187 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112837
+TITLE: [RFC] Driver: pwm: add batch capture api
+
+*--- opening post by juickar (2026-07-06 16:18:32+00:00)
+The goal of this PR is to introduce a new API to do batch capture of a PWM signal.
+The existing PWM capture API reports one sample per callback, which increases interrupt overhead at higher frequencies
+This new API lets drivers pass buffers and use DMA-based capture, so they can return one batch of samples and reduce callback overhead.
+
+*--- henrikbrixandersen (2026-07-06 19:09:03+00:00)
+CI-assigned this to me as author of the existing PWM capture API.
+
+*--- henrikbrixandersen (2026-07-06 19:10:44+00:00)
+@juickar Do you know of any other PWM capture peripherals capable of capturing multiple periods using DMA?
+
+*--- juickar (2026-07-07 06:59:01+00:00)
+> @juickar Do you know of any other PWM capture peripherals capable of capturing multiple periods using DMA?
+
+I have only validated this on STM32, since I only have ST hardware available. The API is generic and close to the current capture API, so I suppose other PWM drivers could adopt the same pattern if they support DMA-based capture.
+
+*--- juickar (2026-07-08 14:19:17+00:00)
+- Added cache invalidation instead of the __nocache attribute to ensure we read the real data written by DMA.
+- Modified the STM32 implementation to support both standard single input period and pulse capture and multi-channel period-only measurement.
+
+*--- erwango (2026-07-08 14:36:10+00:00)
+```suggestion
+config PWM_CAPTURE_WITH_DMA
+	bool "Provide API for PWM capture with DMA [EXPERIMENTAL]"
+	select EXPERIMENTAL
+```
+
+*--- erwango (2026-07-08 14:37:20+00:00)
+```suggestion
+	  This option extends the Zephyr PWM API with batch capture feature that uses DMA to capture
+```
+
+*--- erwango (2026-07-08 14:38:49+00:00)
+Use example section
+Remove flags that are not for user to select (as PERIPH_TO_MEMORY)
+
+*--- erwango (2026-07-08 14:40:29+00:00)
+s/user mode/user context.
+
+Though, I wonder what are the alternatives for an application.
+
+*--- erwango (2026-07-08 14:48:42+00:00)
+```suggestion
+	  a whole buffer of PWM period and/or pulse samples per interrupt, reducing CPU load.
+```
+
+*--- juickar (2026-07-09 14:34:40+00:00)
+done
+
+*--- juickar (2026-07-09 14:34:58+00:00)
+done
+
+*--- juickar (2026-07-09 14:35:10+00:00)
+done
+
+*--- juickar (2026-07-09 14:35:29+00:00)
+done
+
+*--- juickar (2026-07-09 14:36:08+00:00)
+done
+
+*--- juickar (2026-07-09 15:02:03+00:00)
+rebased
+
+*--- djiatsaf-st (2026-07-10 08:17:37+00:00)
+```suggestion
+  platform_allow:
+```
+
+Instead of adding `platform_allow` in the `common` property, I should prefer to create a dedicated scenario under the `tests` property. Also, if it is a loopback test, adding a fixture ( e.g : pwm_capture) like the one used here
+
+https://github.com/zephyrproject-rtos/zephyr/blob/cde0a961d820b34c2141792e22971573b52de3aa/tests/drivers/pwm/pwm_loopback/tests.yaml#L10-L11
+
+will help for testing purposes.
+
+*--- Copilot (2026-07-10 09:02:06+00:00)
+The Kconfig help says the DMA buffer size is the number of samples per completion callback, but the STM32 implementation invokes the batch callback with CONFIG_PWM_CAPTURE_DMA_BUFFER_SIZE/2 samples (half-buffer) per event. This is user-visible and will cause confusion when sizing buffers.
+
+*--- Copilot (2026-07-10 09:02:07+00:00)
+The pwm_configure_capture_batch() documentation states the callback is invoked with a full buffer on each DMA completion, but the STM32 driver calls the callback on both half- and full-buffer events and passes a half-buffer count. Please update the doc to match the API behavior (or vice-versa).
+
+*--- Copilot (2026-07-10 09:02:07+00:00)
+dma_cfg enables half/complete callbacks even when notify=false (secondary DMA stream). On many DMA drivers this still enables HT/TC interrupts, increasing interrupt load and undermining the point of batch capture. Gate the callback-enable flags on notify so only the primary stream generates DMA interrupts.
+
+*--- Copilot (2026-07-10 09:02:07+00:00)
+CAPTURE_INIT has excessive spacing and would be clearer (and less error-prone for future edits) if formatted like the other init macros with consistent indentation and line wrapping.
+
+*--- Copilot (2026-07-10 09:02:07+00:00)
+pwm_get_cycles_per_sec() returns an error code; ignoring it can leave cyc_per_sec uninitialized and later division (cyc_per_sec / avg_period) becomes unreliable. Handle the return value and fail early on error.
+
+*--- Copilot (2026-07-10 09:02:08+00:00)
+The README sample output text doesn't match what the code prints (it shows "avg: frequency" but the sample prints "avg frequency"). Keeping them aligned helps users verify expected output.
+
+*--- juickar (2026-07-15 11:38:20+00:00)
+Should I move it under the tests folder instead then ?
+
+*--- djiatsaf-st (2026-07-15 13:00:09+00:00)
+No, keep it in the sample folder.
+
+
+I meant something like that : 
+
+```suggestion
+sample:
+  name: PWM DMA batch capture
+  description: Demonstrates batch capture API with DMA streaming and internal PWM generator
+                      providing triangular frequency waves
+common:
+  tags:
+    - drivers
+    - pwm
+    - dma
+tests:
+     sample.drivers.pwm.dma.capture
+        depends_on:
+          - pwm
+          - dma
+        platform_allow:
+           -  xxxxx
+         harness_config:
+            fixture: pwm_capture
+```
+
+*--- juickar (2026-07-15 14:36:37+00:00)
+added
+
+*--- juickar (2026-07-15 14:37:36+00:00)
+done
+
+*--- juickar (2026-07-15 14:37:44+00:00)
+done
+
+*--- juickar (2026-07-15 14:37:52+00:00)
+done
+
+*--- juickar (2026-07-15 14:38:09+00:00)
+ignored
+
+*--- juickar (2026-07-15 14:38:18+00:00)
+done
+
+*--- juickar (2026-07-15 14:38:32+00:00)
+added
+
+*--- jsbatch (2026-07-16 18:19:55+00:00)
+Perhaps make this more generic, decoupling the API from the implementation (DMA in this case)?
+```suggestion
+config PWM_CAPTURE_BATCH
+```
+
+This would allow the API to be used portably for hardware with buffers for capture functionality, such as the TI eCAP.
+
+*--- jsbatch (2026-07-16 18:19:59+00:00)
+Rather than using a statically allocated buffer in the driver, as demonstrated by pwm_stm32.c:102, what about having the batch capture buffer be application owned.  Modeled similar to the ADC, this might look something like this:
+
+```
+struct pwm_capture_batch {
+        uint32_t channel;
+        pwm_flags_t flags;
+        uint32_t *period_buf;
+        uint32_t *pulse_buf;
+        size_t    buf_len_samples;
+        pwm_capture_batch_callback_handler_t callback;
+        void *user_data;
+};
+
+/* entry point mirrors adc_read() */
+typedef int (*pwm_configure_capture_batch_t)(const struct device *dev,
+                                             const struct pwm_capture_batch *seq);
+```
+
+Another thought that comes to mind, should the API provide for double buffering instead?  Since we don't know exactly when the next capture will come in continuous mode, that could help mitigate overruns.
+
+*--- jsbatch (2026-07-16 18:20:01+00:00)
+It might make sense to also report any dropped captures/overruns in the callback.
+
+*--- juickar (2026-07-21 09:20:33+00:00)
+done
+
+*--- juickar (2026-07-21 09:27:40+00:00)
+Application owned buffer added but the double buffering isn't yet implemented, Maybe we could use the half transfer interrupt to return half of the buffer to the application while the DMA is filling the other half ?
+
+*--- juickar (2026-07-27 09:02:34+00:00)
+rebased

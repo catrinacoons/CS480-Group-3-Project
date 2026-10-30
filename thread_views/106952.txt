@@ -1,0 +1,65 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/106952
+TITLE: scripts: west_commands: zspdx: rework meta file check
+
+*--- opening post by jeppenodgaard (2026-04-08 05:51:52+00:00)
+Remove meta file check. If `KERNEL_META_PATH` is not found the value is `""`. This does not trigger the check.
+
+Also `KERNEL_META_PATH` is set even if `CONFIG_BUILD_OUTPUT_META` is not, but the file does not exist. Therefore split up `YAMLError` and `FileNotFoundError` and move the `CONFIG_BUILD_OUTPUT_MEAT` error log to the latter.
+
+*--- Copilot (2026-04-15 13:55:32+00:00)
+`setupDocuments()` assumes `self.metaFile` always exists, but it’s only set in `getCacheFile()` when `parseCMakeCacheFile()` returns a truthy dict. If the CMakeCache can’t be read/parsed (parse returns `{}`), this will raise `AttributeError` at `open(self.metaFile)` which isn’t caught. Initialize `self.metaFile` to "" in `__init__` (or always set it in `getCacheFile()` even on parse failure) and keep the missing-file path handled as a normal `FileNotFoundError`/falsy check.
+
+*--- Copilot (2026-04-15 13:55:32+00:00)
+The `FileNotFoundError` message doesn’t include which meta file path couldn’t be opened (and `FileNotFoundError` can occur for reasons other than CONFIG_BUILD_OUTPUT_META being off, e.g. stale build dir). Include `self.metaFile` in the error (and optionally distinguish empty path vs missing file at a non-empty path) to make failures actionable.
+
+*--- jeppenodgaard (2026-04-15 14:37:06+00:00)
+I think the `CONFIG_BUILD_OUTPUT_META` hint is useful. I think the rest is too verbose.
+
+*--- jeppenodgaard (2026-04-15 14:38:16+00:00)
+I have not found a way to make `getCacheFile()`, but if it does `self.metaFile` is not declared.
+I added it to `__init__`.
+
+*--- marc-hb (2026-05-21 15:46:54+00:00)
+@jeppenodgaard would it possible to summarize the problem for people not familiar with zspdx? For instance, describing a use case that does not work without any reference to any variable name or other implementation detail.
+
+*--- jeppenodgaard (2026-06-08 13:22:02+00:00)
+> @jeppenodgaard would it possible to summarize the problem for people not familiar with zspdx? For instance, describing a use case that does not work without any reference to any variable name or other implementation detail.
+
+Like this https://docs.zephyrproject.org/latest/develop/west/zephyr-cmds.html#software-bill-of-materials-west-spdx?
+
+*--- marc-hb (2026-06-08 13:32:31+00:00)
+> > would it possible to summarize the problem [fixed by this PR]
+> > For instance, describing a use case that does not work
+
+> Like this https://docs.zephyrproject.org/latest/develop/west/zephyr-cmds.html#software-bill-of-materials-west-spdx?
+
+I'll take that as a "no".
+
+*--- jeppenodgaard (2026-06-08 13:40:49+00:00)
+> I'll take that as a "no".
+
+Ah now I think I understand your question. Sorry about that.
+
+The issue is that if you do not run step 2 in https://docs.zephyrproject.org/latest/develop/west/zephyr-cmds.html#software-bill-of-materials-west-spdx:
+
+> Enable CONFIG_BUILD_OUTPUT_META in your project.
+
+One would get:
+```python
+            _logger.error("cannot find a valid zephyr.meta required for SPDX generation; bailing")
+```
+
+But one should get:
+```python
+            _logger.error("CONFIG_BUILD_OUTPUT_META must be enabled to generate spdx files; bailing")
+```
+
+*--- marc-hb (2026-06-08 13:58:09+00:00)
+> The issue is that if you do not run step 2 in...
+
+Thanks! I would start the commit message (and PR description) with this short problem statement for the benefit of people not familiar with the implementation who might experience this issue, or be requested to backport this fix, etc.
+
+I would also phrase the commit subject after that problem statement (e.g. "fix error message when...") rather than jumping to how this was fixed.
+
+*--- marc-hb (2026-07-14 03:43:05+00:00)
+BTW there's been significant SPDX code changes and this PR unsurprisingly has git conflicts now. (Git conflicts that GitHub detects but does not notify people about; please upvote https://github.com/orgs/community/discussions/4335)

@@ -1,0 +1,53 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/104432
+TITLE: logging: swo: drain hardware pipeline in panic handler
+
+*--- opening post by JayToltTech (2026-02-23 23:17:53+00:00)
+The SWO log backend's `panic()` handler is a no-op. When `LOG_PANIC()`
+is called (e.g., before a bootloader jumps to an app, or during a fatal
+error), the logging subsystem flushes software buffers to the ITM FIFO,
+but the TPIU hardware pipeline still has bytes in-flight on the SWO pin.
+The debug probe loses these final messages.
+
+This patch:
+1. Spins on `ITM_TCR.BUSY` until the ITM formatter is idle
+2. Busy-waits for the TPIU output stage to clock remaining bytes out
+   at the configured SWO baud rate
+
+The drain time is estimated from `CONFIG_LOG_BACKEND_SWO_FREQ_HZ`
+(~200 bytes × 10 bits/byte with 50% margin). When the frequency is
+left at 0 (default = max supported), a conservative 2 ms fallback
+is used.
+
+Discovered while working on MCUboot, where SWO logs were lost during
+the transition from bootloader to app.
+
+Tested on nRF5340 with J-Link SWO viewer.
+
+*--- Copilot (2026-02-23 23:22:33+00:00)
+The calculation could result in a long wait time if CONFIG_LOG_BACKEND_SWO_FREQ_HZ is configured to a very low value. For example, at 100 kHz (a low but potentially valid frequency), this would wait for 30 milliseconds; at 10 kHz it would be 300 milliseconds. While this is acceptable in a panic scenario where thoroughness is more important than speed, consider documenting the expected range of wait times or adding a sanity check/cap to prevent unexpectedly long delays if the frequency is misconfigured.
+```suggestion
+ *
+ * To avoid excessively long busy-wait delays when the SWO frequency is
+ * misconfigured to a very low value, cap the drain wait to a reasonable
+ * upper bound.
+ */
+#define SWO_DRAIN_WAIT_MAX_US 50000UL
+
+#if CONFIG_LOG_BACKEND_SWO_FREQ_HZ > 0
+#define SWO_DRAIN_WAIT_US_RAW \
+	((200UL * 10 * 1500000) / CONFIG_LOG_BACKEND_SWO_FREQ_HZ)
+#if SWO_DRAIN_WAIT_US_RAW > SWO_DRAIN_WAIT_MAX_US
+#define SWO_DRAIN_WAIT_US SWO_DRAIN_WAIT_MAX_US
+#else
+#define SWO_DRAIN_WAIT_US SWO_DRAIN_WAIT_US_RAW
+#endif
+#else
+```
+
+*--- Copilot (2026-02-23 23:22:33+00:00)
+The empty while loop body is unusual and could be improved for code clarity. Consider adding a comment or explicit continue statement, or use a compound statement to make the intent clearer. Additionally, the timeout value of 100000 iterations appears arbitrary. Consider adding a comment explaining the rationale for this value, or deriving it from a known time constraint.
+
+*--- JayToltTech (2026-03-09 17:03:40+00:00)
+@dcpleung @nordic-krch Any thoughts here?
+
+From my perspective, this is a critical bug for people who use SWO, that log_backend_swo_panic is a noop rather than a proper log panic flush.

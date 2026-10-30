@@ -1,0 +1,117 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/88267
+TITLE: drivers: sensor: Add sensor driver for BH1790
+
+*--- opening post by MagpieEmbedded (2025-04-07 16:47:17+00:00)
+This PR adds a sensor driver for the BH1790 Heart Rate Sensor IC ([Datasheet](https://fscdn.rohm.com/en/products/databook/datasheet/ic/sensor/pulse_wave/bh1790glc-e.pdf)).
+
+I have used the BH1750 implementation as a starting point for the build setup and other sensors for implementation. Not all registers and configuration has been implemented. That can be done as part of this PR or as a follow up PR.
+
+A sample has been added which is combined with the MAX30101 heart rate sensor sample. I have separated this into a second commit for the time being so that it can be split into another PR if necessary.
+
+I have tried to follow the contribution guidelines and code style guides, but might have missed some things in the meantime.
+
+Happy to make changes as guided.
+
+Thanks,
+
+Tim
+Magpie Embedded
+
+*--- yperess (2025-04-07 23:16:19+00:00)
+nit: `const`
+
+*--- yperess (2025-04-07 23:17:05+00:00)
+This is writing 4 bytes, but `value_read_start_address` is 1 byte. You're writing random data to the device here.
+
+*--- yperess (2025-04-07 23:20:38+00:00)
+nit: use `led_off_data = sys_get_le16(&read_buffer[0]);`
+
+*--- yperess (2025-04-07 23:20:57+00:00)
+nit: use `led_on_data = sys_get_le16(&read_buffer[2]);`
+
+*--- yperess (2025-04-07 23:21:22+00:00)
+Why use the temporary variable and not assign directly to the data?
+
+*--- yperess (2025-04-07 23:29:47+00:00)
+These aren't correct. Green and "light" are measured in lumens, but you're returning the green and dark measurement counts. You'll need different channels, shouldn't the driver provide the heart rate?
+
+*--- MagpieEmbedded (2025-04-08 08:41:31+00:00)
+Hi @yperess, thanks for reviewing. I have made fixes to the code as you requested above.
+
+Regarding the channels, I chose this to match the other heart rate sensor currently in Zephyr, the MAX30101, in returning data on the Green light channel. The BH1790 also provides "OFF" data which is measuring ambient light. Neither channel on the BH1790 is associated directly with lumens according to the datasheet but this seemed like the best place to put it.
+
+The sensor only returns light readings, it does not return heart rate data directly. That requires further data analysis at the application level.
+
+This seemed like the best compromise to me based on what is already in Zephyr. I would be happy to make further changes to implement this in a better way.
+
+Thanks,
+
+Tim
+
+*--- Copilot (2025-04-08 10:43:52+00:00)
+Dereferencing dev->name when dev is NULL may lead to a crash. Consider reverting to a static device name in the error message or logging a more general error without referencing dev->name.
+```suggestion
+		printf("Could not get heart_rate_sensor\n");
+```
+
+*--- teburd (2025-04-08 11:53:47+00:00)
+This is wrong
+
+*--- MagpieEmbedded (2025-04-08 12:25:09+00:00)
+Fixed now 👍
+
+*--- MagpieEmbedded (2025-04-11 10:29:31+00:00)
+Hi @yperess, just following up on this review. Please let me know if there are any further changes required. Happy to discuss the above comment. Cheers, Tim
+
+*--- MagpieEmbedded (2025-04-17 09:39:54+00:00)
+Hi @yperess, thanks for your initial review. Pinging to ask if there are any further changes which need to be made.
+
+According to the [MAX30101 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max30101.pdf) (Page 3) and the [BH1790 datasheet](https://fscdn.rohm.com/en/products/databook/datasheet/ic/sensor/pulse_wave/bh1790glc-e.pdf) (Page 6), both sensors return "Counts", not lumens. I am open to adding an additional sensor channel for this. I chose not to make this change in the PR originally because I thought that might be overreaching.
+
+With respect to heart rate measurements, I think that needs to be left in the application layer rather than put into the driver as there are so many different ways of doing this, each with their own tradeoffs.
+
+Thanks,
+
+Tim
+
+*--- kartben (2025-05-07 08:35:38+00:00)
+you need to add at the bottom of the list and increment whatever is the last used register by 1. Here you're using 5b which is already taken by maxim,max31875 (and yeah, this means that the PR is then prone to merge conflicts, unfortunately :|)
+
+*--- MagpieEmbedded (2025-05-07 10:42:39+00:00)
+Thanks @kartben, I didn't realise that as there were no failure on the test pipelines. Should be fixed now 👍
+
+*--- MagpieEmbedded (2025-05-07 10:43:53+00:00)
+Hi @yperess, I would be happy to change the channel names and also make this change for the MAX30101 sensor so that they are aligned. Just want to make sure this is necessary before I go digging into it. Thanks, Tim
+
+*--- MaureenHelm (2025-05-07 13:55:26+00:00)
+Fix the malformed SPDX header
+
+*--- MaureenHelm (2025-05-07 13:56:02+00:00)
+```suggestion
+	  BH1790 Optical Sensor for Heart Rate Monitor IC.
+```
+
+*--- MaureenHelm (2025-05-07 13:58:11+00:00)
+Use `i2c_is_ready_dt`
+
+*--- MaureenHelm (2025-05-07 13:58:57+00:00)
+Fix the EOF
+
+*--- MaureenHelm (2025-05-07 14:00:55+00:00)
+Add license/copyright header
+
+*--- MagpieEmbedded (2025-05-08 10:20:52+00:00)
+@MaureenHelm Thanks for your comments, these should be addressed now 👍
+
+*--- MagpieEmbedded (2025-05-13 10:04:11+00:00)
+@MaureenHelm Thanks for your approval, is there anything else I can do to help this PR along? It looks like the merge is blocked on the review from @yperess ? Thanks, Tim
+
+*--- kartben (2025-05-15 21:30:23+00:00)
+@yperess please revisit
+
+*--- kartben (2025-05-27 18:56:29+00:00)
+rebased to address merge conflict in build_all/sensor/i2c.dtsi.
+@MaureenHelm please refresh +1 if you don't mind, this has been dragging for way too long IMO :) Thanks!
+
+*--- MagpieEmbedded (2025-05-27 21:51:05+00:00)
+Thanks for all the help @kartben, @MaureenHelm and @yperess!

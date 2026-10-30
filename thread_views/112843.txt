@@ -1,0 +1,135 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112843
+TITLE: boards: bliiot: add am62x_m4_bl350 BL350 board support
+
+*--- opening post by tinegachris (2026-07-06 17:03:45+00:00)
+﻿## Summary
+- Adds BL350 board support.
+- Registers valid board targets.
+- Adds board documentation.
+
+## What changed
+- Board metadata.
+- DTS/Kconfig/defconfig support.
+- Build/debug support files.
+- Documentation.
+
+## Validation
+- `west boards | grep am62x_m4_bl350`
+- `west build -b am62x_m4_bl350/am6254/m4 samples/hello_world`
+
+*--- Copilot (2026-07-06 17:10:24+00:00)
+CONFIG_OPENAMP_RSC_TABLE is not enabled. AM62x M4 boards typically require the OpenAMP resource table for Linux remoteproc to boot the firmware; without it, remoteproc/RPMsg may fail to start even though CONFIG_OPENAMP is enabled.
+
+*--- Copilot (2026-07-06 17:10:25+00:00)
+The IPC transport comment says this uses the Zephyr mailbox IPM driver instead of static-vrings, but the node uses compatible "zephyr,ipc-openamp-static-vrings". Please align the comment with the actual backend to avoid misleading future changes/debugging.
+
+*--- Copilot (2026-07-06 17:10:25+00:00)
+The declared RAM size (956 KB) doesn't match the DTS memory region exposed as zephyr,sram/zephyr,flash (m4f_mem is a 14 MB carveout). This value is used by tooling (e.g., Twister) and should reflect the actual usable RAM for this target.
+
+*--- Copilot (2026-07-06 17:10:25+00:00)
+This text implies the 400 MHz clock is configured via CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC, but other AM62x M4 board docs describe it as a fixed 400 MHz system clock (derived from DT). Suggest aligning this section to avoid pointing users at an unrelated Kconfig setting.
+
+*--- Copilot (2026-07-06 17:10:26+00:00)
+Board naming is inconsistent: the board identifier is am62x_m4_bl350, but full_name refers to "BL352BW" and "SK-AM62". Please align the marketing/model name across board.yml, the target YAML, DTS model/compatible, and the documentation so users can reliably identify the hardware this port targets.
+
+*--- nordicjm (2026-07-07 07:46:11+00:00)
+no fixup commits
+
+*--- nordicjm (2026-07-07 07:46:23+00:00)
+hwmv1 not valid
+
+*--- nordicjm (2026-07-07 07:46:39+00:00)
+not formatted validly
+
+*--- nordicjm (2026-07-07 07:46:58+00:00)
+not for what reserved memory is for
+
+*--- nordicjm (2026-07-07 07:47:21+00:00)
+ipc is needed for hello world to work?
+
+*--- nordicjm (2026-07-07 07:47:27+00:00)
+nope
+
+*--- tinegachris (2026-07-08 11:53:47+00:00)
+Squashed all changes into a single commit to adhere to the Zephyr contribution guidelines.
+
+*--- tinegachris (2026-07-08 11:53:48+00:00)
+Removed `Kconfig.defconfig` entirely since it's an HWMv1 artifact and no longer valid for HWMv2.
+
+*--- tinegachris (2026-07-08 11:53:50+00:00)
+Fixed the formatting by removing the extra spaces.
+
+*--- tinegachris (2026-07-08 11:53:51+00:00)
+Removed the `m4f-trace` node as it's not strictly necessary and shouldn't use reserved memory.
+
+*--- tinegachris (2026-07-08 11:53:53+00:00)
+Removed `CONFIG_IPC_SERVICE`, `CONFIG_MBOX`, and `CONFIG_OPENAMP` from the defconfig since they aren't needed for basic samples like hello_world. I kept `CONFIG_OPENAMP_RSC_TABLE=y` because Linux remoteproc requires it to load the firmware.
+
+*--- tinegachris (2026-07-08 11:53:54+00:00)
+Removed peripheral configurations (CAN, GPIO, WATCHDOG) to keep the base defconfig minimal.
+
+*--- Copilot (2026-07-08 12:08:51+00:00)
+The RSC_TABLE region at 0x9cbf0000 (4 KiB) lies inside the ipc_shm shared-dma-pool range (0x9cb00000..0x9cc00000). This makes the reserved-memory layout overlap, and the OpenAMP backend may overwrite the resource table when using the full ipc_shm region.
+
+*--- Copilot (2026-07-08 12:08:52+00:00)
+These main domain UART interrupt properties are wired up as GIC SPIs in the AM62x A53 devicetree (dts/arm64/ti/ti_am62x_a53.dtsi:88-116). Setting interrupt-parent to &nvic with IRQs 20/0 here is inconsistent with that description and risks using a non-existent/incorrect IRQ on the M4 side. If M4 interrupt routing isn’t available/validated, omit the interrupt properties and use polling.
+
+*--- Copilot (2026-07-08 12:08:52+00:00)
+These main domain UART interrupt properties are wired up as GIC SPIs in the AM62x A53 devicetree (dts/arm64/ti/ti_am62x_a53.dtsi:88-116). Setting interrupt-parent to &nvic with IRQs 21/0 here is inconsistent with that description and risks using a non-existent/incorrect IRQ on the M4 side. If M4 interrupt routing isn’t available/validated, omit the interrupt properties and use polling.
+
+*--- Copilot (2026-07-08 12:08:52+00:00)
+These main domain UART interrupt properties are wired up as GIC SPIs in the AM62x A53 devicetree (dts/arm64/ti/ti_am62x_a53.dtsi:88-116). Setting interrupt-parent to &nvic with IRQs 22/0 here is inconsistent with that description and risks using a non-existent/incorrect IRQ on the M4 side. If M4 interrupt routing isn’t available/validated, omit the interrupt properties and use polling.
+
+*--- Copilot (2026-07-08 12:08:52+00:00)
+These main domain UART interrupt properties are wired up as GIC SPIs in the AM62x A53 devicetree (dts/arm64/ti/ti_am62x_a53.dtsi:88-116). Setting interrupt-parent to &nvic with IRQs 23/0 here is inconsistent with that description and risks using a non-existent/incorrect IRQ on the M4 side. If M4 interrupt routing isn’t available/validated, omit the interrupt properties and use polling.
+
+*--- Copilot (2026-07-08 12:08:52+00:00)
+main_gpio1 is defined in the AM62x main domain DT and doesn’t describe NVIC interrupts. Adding interrupt-parent = <&nvic> here with an arbitrary IRQ risks an invalid interrupt mapping on the M4 side. If this GPIO controller is only usable in polling mode from M4, omit the interrupt properties.
+
+*--- Copilot (2026-07-08 12:08:53+00:00)
+This new file is missing the SPDX/REUSE-style machine-readable copyright line. Zephyr’s contribution guidelines recommend adding SPDX-FileCopyrightText and SPDX-License-Identifier at the very top of each file (doc/contribute/guidelines.rst:104-129).
+
+*--- Copilot (2026-07-08 12:08:53+00:00)
+This new documentation file is missing the SPDX/REUSE-style machine-readable copyright and license header. Zephyr’s contribution guidelines recommend adding SPDX-FileCopyrightText and SPDX-License-Identifier at the very top of each file (doc/contribute/guidelines.rst:104-129).
+
+*--- Copilot (2026-07-08 12:08:53+00:00)
+This new OpenOCD config file is missing the SPDX/REUSE-style machine-readable copyright line. Zephyr’s contribution guidelines recommend adding SPDX-FileCopyrightText and SPDX-License-Identifier at the very top of each file (doc/contribute/guidelines.rst:104-129).
+
+*--- tinegachris (2026-07-08 12:17:28+00:00)
+Reduced the size of `ipc_shm` to 960 KB (`0xf0000`) to avoid overlapping with the `rsc_table` at the top of the region.
+
+*--- tinegachris (2026-07-08 12:17:30+00:00)
+Removed the interrupt routing for the main domain UARTs, as they are not routed to the NVIC.
+
+*--- tinegachris (2026-07-08 12:17:32+00:00)
+Removed the interrupt routing for the main domain UARTs, as they are not routed to the NVIC.
+
+*--- tinegachris (2026-07-08 12:17:34+00:00)
+Removed the interrupt routing for the main domain UARTs, as they are not routed to the NVIC.
+
+*--- tinegachris (2026-07-08 12:17:36+00:00)
+Removed the interrupt routing for the main domain UARTs, as they are not routed to the NVIC.
+
+*--- tinegachris (2026-07-08 12:17:37+00:00)
+Removed the interrupt routing for this GPIO, as it's not routed to the NVIC.
+
+*--- tinegachris (2026-07-08 12:17:39+00:00)
+Added the SPDX/REUSE-style machine-readable copyright and license headers.
+
+*--- tinegachris (2026-07-08 12:17:41+00:00)
+Added the SPDX/REUSE-style machine-readable copyright and license headers.
+
+*--- tinegachris (2026-07-08 12:17:43+00:00)
+Added the SPDX/REUSE-style machine-readable copyright and license headers.
+
+*--- tinegachris (2026-07-10 07:00:46+00:00)
+Thanks for the earlier reviews. All requested changes have been addressed and the review threads resolved.
+
+Since the last round, the board was also tidied to mirror the in-tree AM62x-M4 sister board (`beagleplay`): the baseboard now exposes only the console UART, the OpenAMP mailbox and the watchdog, with the SRAM/XIP memory layout, ``clock and minimal defconfig matching it; application-specific peripherals were moved to a downstream overlay. The `.yaml` (`ram`/`toolchain`/`supported`) was corrected accordingly, and `hello_world` builds cleanly for `am62x_m4_bl350/am6254/m4`. CI is green.
+
+Would appreciate a re-review when you have a chance. Thanks!
+
+*--- tinegachris (2026-07-11 20:26:22+00:00)
+Superseded by #113302.
+
+This PR was opened from `main`; per the contribution guidelines the work has been moved to a topic branch (`boards/bliiot_bl350`) and rebased onto current `main` as a single signed-off commit. All review feedback here (including @nordicjm's) is incorporated, and the `KeepSorted` compliance issues in `dts/bindings/vendor-prefixes.txt` and `MAINTAINERS.yml` are fixed. Thanks for the reviews — continuing in #113302.

@@ -1,0 +1,279 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/80799
+TITLE: Add support ospi driver for Renesas RA8 devices
+
+*--- opening post by thaoluonguw (2024-11-03 19:06:49+00:00)
+Add support for ospi driver running on Renesas RA8 (RA8M1 and RA8D1)
+
+- boards: renesas: Add support for ospi on ek_ra8m1 and ek_ra8d1
+- drivers: flash: Add support for ospi_b driver
+- dts: arm: Add support for ospi
+- dts: bindings: Add support for ospi_b
+- tests: drivers: flash: common: Add support for ospi.
+- samples: drivers: jesd216: Add support for ospi
+- samples: drivers: spi_flash: Add support for ospi
+
+Note: This PR requires https://github.com/zephyrproject-rtos/zephyr/pull/79766 is merged
+
+*--- quytranpzz (2024-12-06 09:30:58+00:00)
+@GeorgeCGV : thanks for your comment and sorry for the late response, 
+just a confirmation, may I ask about the app you are building with that CMake warning? I didn't encounter that issue on my side.
+
+*--- thaoluonguw (2025-01-06 13:51:51+00:00)
+Rebase with main to solve conflicts.
+
+*--- thaoluonguw (2025-01-09 14:46:58+00:00)
+Hello @GeorgeCGV : Could you please help us review again? Thank you so much.
+
+*--- thaoluonguw (2025-01-14 14:41:30+00:00)
+Thank you for your feedback.
+For `get the size from the reg and remove the size`, I cannot get the size from reg with unknown reason. Building will be failed; it only recognizes to get the address.
+I updated to include flash-controller.yaml and change size to size-in-bytes to easy aware the unit.
+
+*--- thaoluonguw (2025-01-14 14:41:51+00:00)
+Thank you for your feedback, I updated as you suggest.
+
+*--- thaoluonguw (2025-01-14 14:45:04+00:00)
+Thank you for your feedback. I updated it. I removed the macro and checked error in the code.
+From my viewpoint, I don't prefer using goto.
+
+*--- thaoluonguw (2025-01-14 14:45:19+00:00)
+Thank you for your feedback. I updated it.
+
+*--- thaoluonguw (2025-01-14 14:45:44+00:00)
+Thank you for your feedback, I updated it.
+
+*--- thaoluonguw (2025-01-20 02:11:15+00:00)
+@GeorgeCGV : I updated as you suggested. Thank you.
+
+*--- thaoluonguw (2025-01-20 02:11:38+00:00)
+I updated as you suggested, could you please re-check? Thank you.
+
+*--- thaoluonguw (2025-01-21 14:15:30+00:00)
+Hello @GeorgeCGV , I updated as you advice, could you please recheck again? Thank you.
+
+*--- khoa-nguyen-18 (2025-03-17 02:07:47+00:00)
+Just rebased the main branch to resolve conflicts. The PR will need some updates, which will be pushed soon.
+
+*--- khoa-nguyen-18 (2025-03-17 09:25:00+00:00)
+- Seperate the `spi_nor.h` modification and reformating to another commit
+- Correct the naming of `Kconfig.renesas_ra_flash_ospi_b` file and `FLASH_OSPI_B_RENESAS_RA` config
+- Modify commit support test `flash/common` to add test case for OSPI
+
+*--- khoa-nguyen-18 (2025-03-17 09:31:00+00:00)
+> @thaoluonguw, thank you for the adaptations. It would be great to factor out the `spi_nor.h` modification and reformat to a standalone commit.
+
+Hi @GeorgeCGV, sorry to bother you again after a long time. I just rebased to resolve conflicts and added a minor modification that I mentioned above. Could you please take a look at this PR?
+
+*--- khoa-nguyen-18 (2025-03-25 10:33:18+00:00)
+rebase to solve conflicts
+
+*--- de-nordic (2025-03-25 11:39:00+00:00)
+Why not directly use `data` and get rid of the `p_src`?
+
+*--- de-nordic (2025-03-25 11:41:49+00:00)
+That is probably for vendor to decided, but I would put here LOG_DBG. Reason is that the message takes space, and chances that this will be logged, on well tested platform, is really low, which means that the log is only important for  debugging the issue and it does not actually log any fault, from the perspective of hardware, that has randomly occurred during run-time, rather problem with software that used the device.
+
+*--- de-nordic (2025-03-25 11:44:45+00:00)
+Here you may  consider LOG_DBG, again decision on vendor, but in here you have two places that return `-EIO` from different calls, so after user gets `-EIO`, it is not known which operation failed.
+
+*--- de-nordic (2025-03-25 11:45:54+00:00)
+Don't you want to do `LOG_DBG` on each of these returns?
+
+*--- khoa-nguyen-18 (2025-04-03 09:18:28+00:00)
+rebase main to solve conflicts
+
+*--- khoa-nguyen-18 (2025-04-03 09:20:28+00:00)
+> @khoa-nguyen-18 please avoid extensive reformatting of `spi_nor.h` to ensure commit [d150f56f2b3f7da718c317a11538a820fd8ef7ec](https://github.com/zephyrproject-rtos/zephyr/pull/80799/commits/d150f56f2b3f7da718c317a11538a820fd8ef7ec) reflects actual modifications and new lines.
+
+I understand. I will remove the formatting for the entire file and only format our additions
+
+*--- binhnguyen2434 (2025-04-03 14:10:02+00:00)
+There should be a new line above
+
+*--- binhnguyen2434 (2025-04-03 14:11:34+00:00)
+Similar
+
+*--- binhnguyen2434 (2025-04-03 14:12:14+00:00)
+Similar
+
+*--- binhnguyen2434 (2025-04-03 14:13:09+00:00)
+Similar
+
+*--- binhnguyen2434 (2025-04-03 14:13:49+00:00)
+Similar in this file
+
+*--- khoa-nguyen-18 (2025-04-04 01:43:43+00:00)
+Thank you, I have updated this line
+
+*--- khoa-nguyen-18 (2025-04-04 01:43:54+00:00)
+I have updated it
+
+*--- khoa-nguyen-18 (2025-04-04 01:44:11+00:00)
+I have updated it
+
+*--- khoa-nguyen-18 (2025-04-04 01:44:25+00:00)
+I have updated it one also
+
+*--- khoa-nguyen-18 (2025-04-04 01:44:36+00:00)
+I have updated it, thank you
+
+*--- khoa-nguyen-18 (2025-04-14 11:15:08+00:00)
+Hi @de-nordic, many thanks for your reviews, we really appreciate it. Our team will discuss your suggestions and ensure they align with the other driver. Would it be okay if we update your comments and suggestions in a separate PR?
+
+*--- khoa-nguyen-18 (2025-04-22 08:30:49+00:00)
+We use `p_src` to cast from `const void *` to `const uint8_t *` as input for the HAL API
+
+*--- khoa-nguyen-18 (2025-04-22 08:38:55+00:00)
+Thank you. After consideration, we use `LOG_DBG` in the child functions and `LOG_ERR` in the driver API.
+
+*--- khoa-nguyen-18 (2025-04-22 08:39:35+00:00)
+Thank you, I have added a `LOG_DBG` in here
+
+*--- khoa-nguyen-18 (2025-04-22 08:41:27+00:00)
+I have updated the code to add `LOG_DBG` for all `return err` statements.
+
+*--- soburi (2025-05-02 01:57:15+00:00)
+It would be better to align the indentation.
+
+*--- soburi (2025-05-02 01:57:20+00:00)
+It would be better to align the indentation.
+
+*--- khoa-nguyen-18 (2025-05-02 09:58:11+00:00)
+thank you, I have updated it
+
+*--- khoa-nguyen-18 (2025-05-02 09:58:23+00:00)
+thank you, I have updated it also
+
+*--- Copilot (2025-05-06 00:38:08+00:00)
+[nitpick] Consider adding inline documentation or comments to explain the different transfer configurations for SPI and OSPI modes to improve code maintainability.
+```suggestion
+	/* Write Enable command for SPI mode: Enables write operations on the flash device. */
+	[TRANSFER_WRITE_ENABLE_SPI] = {.command = SPI_NOR_CMD_WREN,
+				       .address = ADDRESS_DUMMY, /* No address required for this command. */
+				       .data = DATA_DUMMY,       /* No data payload for this command. */
+				       .command_length = COMMAND_LENGTH_SPI, /* Single-byte command. */
+				       .address_length = ADDRESS_LENGTH_ZERO, /* No address phase. */
+				       .data_length = DATA_LENGTH_ZERO,       /* No data phase. */
+				       .dummy_cycles = SPI_NOR_DUMMY_WR},     /* No dummy cycles. */
+	/* Write to Configuration Register 2 (CFR2V) in SPI mode. */
+	[TRANSFER_WRITE_CFR2V_SPI] = {.command = SPI_NOR_CMD_WR_WRARG,
+				      .address = SPI_NOR_CFR2V_ADDR, /* Address of CFR2V register. */
+				      .data = DATA_CFR2V_REGISTER,  /* Data to write to CFR2V. */
+				      .command_length = COMMAND_LENGTH_SPI, /* Single-byte command. */
+				      .address_length = ADDRESS_LENGTH_FOUR, /* 4-byte address phase. */
+				      .data_length = DATA_LENGTH_ONE,       /* 1-byte data payload. */
+				      .dummy_cycles = SPI_NOR_DUMMY_WR},    /* No dummy cycles. */
+```
+
+*--- Copilot (2025-05-06 00:39:42+00:00)
+[nitpick] The conditional check for EK_RA8 boards is repeated in multiple sections (offsets, sector sizes, and expected values). Consider defining a common macro (e.g., IS_EK_RA8_BOARD) to reduce duplication and improve maintainability.
+```suggestion
+#elif IS_EK_RA8_BOARD
+#define SPI_FLASH_TEST_REGION_OFFSET 0x40000
+#else
+#define SPI_FLASH_TEST_REGION_OFFSET 0xff000
+#endif
+#if IS_EK_RA8_BOARD
+```
+
+*--- Copilot (2025-05-06 00:39:43+00:00)
+[nitpick] The transfer mapping for both SPI and OSPI modes is comprehensive but complex; adding inline comments or grouping similar transfer configurations could enhance readability and future maintainability.
+```suggestion
+	/* SPI mode transfer configurations */
+	/* Write enable command for SPI mode */
+```
+
+*--- khoa-nguyen-18 (2025-05-08 01:52:17+00:00)
+rebase main to solve conflict
+
+*--- Copilot (2025-05-08 05:07:18+00:00)
+[nitpick] Consider adding a comment explaining why the storage partition node is being removed to improve future maintainability.
+```suggestion
+
+/* The storage_partition node is removed because it is not required for this board's configuration.
+ * This ensures compatibility with the s28hl512t flash memory.
+ */
+```
+
+*--- Copilot (2025-05-08 05:07:18+00:00)
+[nitpick] Add a comment describing the purpose and rationale behind the custom PLL2 configuration to aid maintainability.
+```suggestion
+
+/* 
+ * PLL2 configuration:
+ * - This PLL is used to generate a high-frequency clock for specific peripherals.
+ * - The input clock source is the external crystal oscillator (&xtal).
+ * - The multiplier (mul) is set to <80 0>, resulting in a base frequency of 400 MHz.
+ * - The divider (div) is set to <2>, providing a final output frequency of 200 MHz.
+ * - The pll2p sub-configuration further divides the frequency to 400 MHz for specific use cases.
+ */
+```
+
+*--- Copilot (2025-05-08 05:07:18+00:00)
+[nitpick] Consider adding inline documentation to the transfer_t enum and its usage to clarify the role of each entry for future maintainers.
+```suggestion
+	TRANSFER_WRITE_ENABLE_SPI = 0,  // Enable write operations for SPI.
+	TRANSFER_WRITE_CFR2V_SPI,      // Write to the CFR2V register using SPI.
+	TRANSFER_WRITE_CFR3V_SPI,      // Write to the CFR3V register using SPI.
+	TRANSFER_WRITE_CFR5V_SPI,      // Write to the CFR5V register using SPI.
+	TRANSFER_READ_STATUS_SPI,      // Read the status register using SPI.
+	TRANSFER_READ_CFR2V_SPI,       // Read the CFR2V register using SPI.
+	TRANSFER_READ_CFR3V_SPI,       // Read the CFR3V register using SPI.
+	TRANSFER_READ_CFR5V_SPI,       // Read the CFR5V register using SPI.
+	TRANSFER_READ_DEVICE_ID_SPI,   // Read the device ID using SPI.
+	TRANSFER_READ_SFDP_ID_SPI,     // Read the SFDP (Serial Flash Discoverable Parameters) ID using SPI.
+	TRANSFER_RESET_ENABLE_SPI,     // Enable reset operations for SPI.
+	TRANSFER_RESET_MEM_SPI,        // Reset the memory using SPI.
+
+	TRANSFER_WRITE_ENABLE_OSPI,    // Enable write operations for OSPI.
+	TRANSFER_WRITE_CFR2V_OSPI,     // Write to the CFR2V register using OSPI.
+	TRANSFER_WRITE_CFR3V_OSPI,     // Write to the CFR3V register using OSPI.
+	TRANSFER_WRITE_CFR5V_OSPI,     // Write to the CFR5V register using OSPI.
+	TRANSFER_READ_STATUS_OSPI,     // Read the status register using OSPI.
+	TRANSFER_READ_CFR2V_OSPI,      // Read the CFR2V register using OSPI.
+	TRANSFER_READ_CFR3V_OSPI,      // Read the CFR3V register using OSPI.
+	TRANSFER_READ_CFR5V_OSPI,      // Read the CFR5V register using OSPI.
+	TRANSFER_READ_DEVICE_ID_OSPI,  // Read the device ID using OSPI.
+	TRANSFER_READ_SFDP_ID_OSPI,    // Read the SFDP (Serial Flash Discoverable Parameters) ID using OSPI.
+	TRANSFER_RESET_ENABLE_OSPI,    // Enable reset operations for OSPI.
+	TRANSFER_RESET_MEM_OSPI,       // Reset the memory using OSPI.
+	TRANSFER_MAX                   // Maximum value for transfer operations.
+```
+
+*--- khoa-nguyen-18 (2025-05-15 01:20:08+00:00)
+hi @de-nordic, could you please revisit this PR?
+
+*--- de-nordic (2025-05-20 07:48:58+00:00)
+No. it fit his is S28Hx512T specific, it does not land here. Get your own header for that. Specifically that nothing of this is used in spi_nor.c
+
+*--- de-nordic (2025-05-20 07:49:15+00:00)
+Same here.
+
+*--- khoa-nguyen-18 (2025-05-22 02:06:06+00:00)
+thank you, I have separated it to another header
+
+*--- khoa-nguyen-18 (2025-05-27 03:18:17+00:00)
+hi @de-nordic, could you please confirm your requested change?
+
+*--- khoa-nguyen-18 (2025-05-27 03:18:49+00:00)
+fixed, thank you
+
+*--- de-nordic (2025-06-05 09:00:58+00:00)
+> hi @de-nordic, could you please confirm your requested change?
+
+I re-assigning the PR to @KhiemNguyenT as Renesas representative.
+
+*--- bricle (2026-05-08 08:02:57+00:00)
+@thaoluonguw @duynguyenxa @KhiemNguyenT  @thenguyenyf  Hello, dear RENESAS dev team! May i ask is there a plan to extend OSPI driver support to new RA8 devices such as RA8P1 and RA8D2, currently these new parts lack on-board ospi nor flash driver support. Thanks a lot for any feedback!
+
+*--- thenguyenyf (2026-05-08 08:25:22+00:00)
+> @thaoluonguw @duynguyenxa @KhiemNguyenT @thenguyenyf Hello, dear RENESAS dev team! May i ask is there a plan to extend OSPI driver support to new RA8 devices such as RA8P1 and RA8D2, currently these new parts lack on-board ospi nor flash driver support. Thanks a lot for any feedback!
+
+@bricle It was sent out recently. Please visit https://github.com/zephyrproject-rtos/zephyr/pull/108730
+
+*--- bricle (2026-05-08 08:44:49+00:00)
+> > @thaoluonguw @duynguyenxa @KhiemNguyenT @thenguyenyf Hello, dear RENESAS dev team! May i ask is there a plan to extend OSPI driver support to new RA8 devices such as RA8P1 and RA8D2, currently these new parts lack on-board ospi nor flash driver support. Thanks a lot for any feedback!
+> 
+> @bricle It was sent out recently. Please visit #108730
+
+Thanks! This is very fast.👍

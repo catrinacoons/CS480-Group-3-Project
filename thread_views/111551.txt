@@ -1,0 +1,5 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111551
+TITLE: Infineon: PSE84 bluetooth support
+
+*--- opening post by sreeramIfx (2026-06-18 00:37:58+00:00)
+Enable BLE support across all CPU cores of the kit_pse84_eval and kit_pse84_ai boards, adding HCI wiring where missing.

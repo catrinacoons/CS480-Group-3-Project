@@ -1,0 +1,47 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112411
+TITLE: scripts: zspdx: scanner: fully leverage REUSE for license and copyright scan, including modules
+
+*--- opening post by erwango (2026-06-30 15:22:15+00:00)
+- Updated `hal_stm32` to comply with REUSE spec that should be parse-able with new spdx 3.0 SBOM geneation command.
+- Drop custom license extraction code to fully rely on `reuse-tool` instead
+- Ensure reuse-tool sees each module as a project so that any reuse.toml file it may contain is properly read
+
+Assisted-by: GitHub Copilot (Claude Sonnet 4.6)
+Assisted-by: Claude:sonnet-5
+
+*--- erwango (2026-07-01 13:34:56+00:00)
+Added a test on module REUSE file parsing, implemented initially on top of my branch, it is failing on top of this modified branch. I'm checking what could be the issse.
+
+*--- etienne-lms (2026-07-01 15:33:19+00:00)
+Config file usually also have a SPDX license ID. IMHO, a companion SPDX copyritght ID would be nice too.
+
+*--- etienne-lms (2026-07-01 15:35:12+00:00)
+Could you add another dummy file with another licese, and check it really takes precedence on the one defined at package level? Would it make sense?
+
+*--- kartben (2026-07-01 15:47:30+00:00)
+i would just extend the original test suite. Here this is adding lots of duplicated boilerplate code when in fact you only want to add a handful of test cases?
+
+*--- kartben (2026-07-01 15:49:59+00:00)
+not quite happy with these kind of comments, just drop? I mean, "failure here" could be anything, the only thing that's certain is that the test doesn't pass :)
+
+*--- kartben (2026-07-01 15:51:58+00:00)
+ditto - just keep all these messages to the minimum
+
+*--- kartben (2026-07-01 15:53:09+00:00)
+it should specifically assert if copyright text != "Copyright (c) 2026 Dummy Corp". And again, message is very misleading; who knows if it's the scanner that didn't read it, serializer that didn't write it, encoding issue, etc..
+
+*--- kartben (2026-07-01 15:54:41+00:00)
+tests focusing on modules independently of any license/reuse stuff can be in a different PR
+
+*--- kartben (2026-07-01 15:55:12+00:00)
+recommend `s/Dummy/Acme/` - the former is not the most inclusive term
+
+*--- erwango (2026-07-02 10:15:27+00:00)
+> test case will need some additional love - if you want I can try to initiate a PR adding module tests into the existing testsuite (ie. introducing the phony module, which btw doesn't need to carry "reuse" in its name IMO) and then we can extend its contents to add REUSE usage.
+
+As you prefer. So I'm dropping this commit ?
+
+*--- kartben (2026-07-02 12:30:58+00:00)
+> As you prefer. So I'm dropping this commit ?
+
+If you don't mind, yes. I should have the test lined up shortly

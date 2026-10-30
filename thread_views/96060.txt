@@ -1,0 +1,60 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/96060
+TITLE: drivers: flash: npcx: support NPCKn flash driver and GDMA mode
+
+*--- opening post by alvsun (2025-09-16 08:58:38+00:00)
+1. Add NPCKn flash driver (GDMA mode included).
+2. Support NPCXn flash driver with GDMA mode
+3. Refactor flash driver mutex handling to enhance concurrency safety,
+preventing other threads from preempting erase/write operations during
+UMA until mutex release.
+
+*--- alvsun (2025-09-19 05:15:28+00:00)
+Add https://github.com/zephyrproject-rtos/zephyr/pull/96249 to solve twister build error
+
+*--- fabiobaltieri (2025-09-22 14:34:22+00:00)
+bit confused by the naming, should this and the one below mention v1 and v2?
+
+*--- fabiobaltieri (2025-09-22 14:39:44+00:00)
+drop the initializer, not needed
+
+*--- alvsun (2025-09-23 02:06:49+00:00)
+Done
+
+*--- alvsun (2025-09-23 02:06:54+00:00)
+Done
+
+*--- Copilot (2025-09-23 09:06:45+00:00)
+The error message "Get GDMA Channel Fail" uses non-standard grammar. It should be "Failed to get GDMA channel status" to be more descriptive and grammatically correct.
+```suggestion
+		LOG_ERR("Failed to get GDMA channel status");
+```
+
+*--- Copilot (2025-09-23 09:06:45+00:00)
+The error message should be more descriptive. Consider changing to "GDMA channel is busy" or "GDMA channel %u is busy", dma->channel to provide better context.
+```suggestion
+		LOG_ERR("GDMA channel %u is busy", dma->channel);
+```
+
+*--- Copilot (2025-09-23 09:06:46+00:00)
+The error message "GDMA Configure Invalid" uses incorrect grammar. It should be "GDMA configuration failed" or "Invalid GDMA configuration" to be grammatically correct and more descriptive.
+```suggestion
+		LOG_ERR("GDMA configuration failed");
+```
+
+*--- Copilot (2025-09-23 09:06:46+00:00)
+The error message "GDMA Transaction Fail" uses incorrect grammar. It should be "GDMA transaction failed" to be grammatically correct.
+```suggestion
+		LOG_ERR("GDMA transaction failed");
+```
+
+*--- Copilot (2025-09-23 09:06:46+00:00)
+The error message has grammatical errors. It should be "GDMA transaction not supported" (removing the exclamation mark and fixing the grammar).
+```suggestion
+		LOG_ERR("GDMA transaction not supported");
+```
+
+*--- Copilot (2025-09-23 09:06:46+00:00)
+The error message "GDMA transaction fail" uses incorrect grammar. It should be "GDMA transaction failed" to be grammatically correct.
+```suggestion
+		LOG_ERR("GDMA transaction failed");
+```

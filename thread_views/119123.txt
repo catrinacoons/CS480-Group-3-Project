@@ -1,0 +1,353 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/119123
+TITLE: Bluetooth: Kconfig: Only restrict system workqueue priority when needed
+
+*--- opening post by waihongtam (2026-09-15 03:52:32+00:00)
+Enabling `CONFIG_BT` restricts `SYSTEM_WORKQUEUE_PRIORITY` to the cooperative
+range for every build, but the requirement comes from the individual
+components that submit work to the system workqueue, not from Bluetooth being
+enabled. This adds a hidden `BT_SYSTEM_WORKQUEUE_COOP` symbol and applies the
+range only when one of those components is enabled. See the commit message for
+the reasoning.
+
+Motivated by an out-of-tree application that drives an external controller and
+deliberately runs the system workqueue as its lowest-priority thread, so that
+the watchdog it services is only fed while the whole system is still making
+progress. Today that application cannot enable `CONFIG_BT` at all.
+
+### Testing
+
+Built against `main` with Zephyr SDK 1.0.1.
+
+| Configuration | Board | `BT_HCI_RAW` | `BT_CTLR_PRIVACY` | `BT_SYSTEM_WORKQUEUE_COOP` | `SYSTEM_WORKQUEUE_PRIORITY` |
+| :--- | :--- | :-: | :-: | :-: | :-: |
+| `samples/bluetooth/hci_uart_3wire` | nrf52840dk/nrf52840 | y | y | y | -1 |
+| `samples/bluetooth/hci_uart` | nrf52840dk/nrf52840 | y | y | y | -1 |
+| `samples/bluetooth/peripheral` | nrf52840dk/nrf52840 | n | y | y | -1 |
+| minimal app, `BT_HCI_RAW=y` + userchan, asking for `SYSTEM_WORKQUEUE_PRIORITY=10` | native_sim | y | n | **n** | **10** |
+
+The first three are unaffected by this patch; note that two of them are
+`BT_HCI_RAW` builds that still require the cooperative range, which they get
+through `BT_CTLR_PRIVACY`. The fourth is the case being addressed.
+
+Reverting only `subsys/bluetooth/Kconfig` to `main` and rebuilding that fourth
+configuration fails, as expected:
+
+```
+warning: user value 10 on the int symbol SYSTEM_WORKQUEUE_PRIORITY (defined at
+kernel/Kconfig:536, subsys/bluetooth/Kconfig:40,
+subsys/ipc/ipc_service/lib/Kconfig.icmsg:92) ignored due to being outside the
+active range ([-256, -1]) -- falling back on defaults
+error: Aborting due to Kconfig warnings
+```
+
+*--- jhedberg (2026-09-15 09:09:51+00:00)
+@alxelax With the PR as written nothing changes for Mesh: `BT_MESH` lives under `if BT_HCI_HOST`, and the clamp stays for every build that has the Host (`!BT_HCI_RAW`). Only Host-less builds (HCI raw and controller-only images, apart from the drivers listed) get the application's priority back.
+
+Your point holds for where this is heading, though. The Host's own dependence on cooperative scheduling is what the threading rework (#116316) is removing, and once the Host no longer selects the option, Mesh would lose the clamp without anyone having audited it for that. With the `select` shape I asked for above, `BT_MESH` should select `BT_SYSTEM_WORKQUEUE_COOP` itself, so the assumption is recorded where it lives and stays until you decide to drop it. Other Host users that submit to the system workqueue (audio, for one) can get theirs when the Host's select goes.
+
+*--- Thalley (2026-09-15 09:38:58+00:00)
+What if `CONFIG_COOP_ENABLED=n`?
+
+*--- jhedberg (2026-09-15 09:41:44+00:00)
+@Thalley how has that behaved with the existing clamp?
+
+*--- Copilot (2026-09-15 09:42:06+00:00)
+`!BT_HCI_RAW` is also true when the `BT_CUSTOM` stack is selected, because `BT_HCI_RAW` is only active for the HCI stack. As a result, a custom non-HCI stack still forces the cooperative range even when none of the listed workqueue users is enabled, contrary to the new comment and the PR's component-based restriction. Gate this branch on the HCI stack as well.
+
+*--- jhedberg (2026-09-15 09:43:42+00:00)
+As mentioned in https://github.com/zephyrproject-rtos/zephyr/pull/119123#pullrequestreview-5206034507 this can be ignored due to the deprecation. (side note: seems Copilot could do a better job if it also read the existing discussion in the PR and not just the diff itself).
+
+*--- alxelax (2026-09-15 09:48:17+00:00)
+@jhedberg, shouldn't such changes be coherent. I really see here problem. If you adapt some down sitting component then you have to adjust up sitting components too. 
+This is the reason I joined as Host collaborator since I had to fix Mesh post factum after changes in Host.
+
+*--- jhedberg (2026-09-15 10:30:44+00:00)
+@alxelax Agreed, and I take back the "later" part. Coherent means every in-tree component that puts work on the system workqueue and relies on it being cooperative selects the option in this PR, not only the Host: `BT_MESH`, `BT_AUDIO`, `BT_ETS`, `BT_OTS` and `MCUMGR_TRANSPORT_BT` all do, next to the Host and the drivers. Then the Host dropping its own select changes nothing for anyone until that component's maintainers drop theirs.
+
+The other half of your point is the one that matters for the threading rework (#116316): Host callbacks are delivered from the system workqueue in several paths (sent, disconnected, recycled, timeouts, GATT service changed), so their context is part of the Host's contract with Mesh and the other users. Any change to that context gets the in-tree users adapted in the same series, with you and the audio maintainers reviewing, not after the fact. This PR does not touch it: every build with the Host keeps the clamp.
+
+*--- Thalley (2026-09-15 11:18:13+00:00)
+I assume it generally just broke everything :D Maybe BT should have a `depends on COOP_ENABLED`? :P
+
+*--- Thalley (2026-09-15 11:23:27+00:00)
+Why do we set this range here in the first place actually? 
+
+Shouldn't the range just be defined by the original definition?
+
+*--- kartben (2026-09-15 12:40:31+00:00)
+Please rebase to address the documentation CI failure. Sorry about the inconvenience.
+
+*--- jhedberg (2026-09-15 15:21:02+00:00)
+@Thalley this is the "clamp" I mentioned in my other comment. It restricts the valid range of `SYSTEM_WORKQUEUE_PRIORITY` strictly to cooperative values. Of course it's defined in the original definition, but it's been cleaner to do this as an overlay in Bluetooth Kconfig files rather than polluting kernel files with subsystem references (would constitute a circular dependency since subsystems depend on the kernel but not the other way around)
+
+*--- waihongtam (2026-09-15 18:31:27+00:00)
+Updated:
+- inverted to selects, `BT_SYSTEM_WORKQUEUE_COOP` is promptless so `git grep 'select BT_SYSTEM_WORKQUEUE_COOP'` is the list
+- host, mesh, audio, ETS, OTS, MCUmgr transport, H:5, STM32WB0, NXP, BT_CTLR_PRIVACY
+- BT_CUSTOM untouched
+- release note added
+- rebased
+
+I grepped the bluetooth trees for submits to `k_sys_work_q` and those 10 guards cover all of them. Went with `BT_OTS` rather than `BT_OTS_CLIENT`, the client files don't submit. `hci_uart`, `hci_uart_3wire`, `peripheral` and the mesh sample on nrf52840dk all still select it, the two raw ones via `BT_CTLR_PRIVACY`, so nothing in tree loses the range.
+
+@alxelax Mesh and Audio select it themselves now, so the Host dropping its select later won't take them with it. The mesh sample above has the Host in it too so it doesn't isolate `BT_MESH`, but the select is there. Could you re-review?
+
+*--- waihongtam (2026-09-15 18:50:07+00:00)
+Had to go check. `COOP_ENABLED=n` means there's nothing in `[-256, -1]` to pick, so `CONFIG_BT=y` already fails to configure today:
+```
+warning: default value 0 on SYSTEM_WORKQUEUE_PRIORITY ... clamped to -1
+         due to being outside the active range ([-256, -1])
+error: Aborting due to Kconfig warnings
+```
+
+Still true after this PR for anything selecting `BT_SYSTEM_WORKQUEUE_COOP`. What changes is that a build selecting none of them works: `BT_HCI_RAW` on native_sim with `CONFIG_NUM_COOP_PRIORITIES=0` builds clean at `SYSTEM_WORKQUEUE_PRIORITY=0`.
+
+Tried `depends on COOP_ENABLED` on BT, it's noisier: BT goes n and every BT option in prj.conf then reports its own unsatisfied dependency. Plus the USB HCI classes select BT. Happy to file an issue if you want to dig into it.
+
+*--- waihongtam (2026-09-15 20:28:06+00:00)
+> Looks good now. Thanks.
+> 
+> The last paragraph of the PR description still describes the central list.
+
+Removed the last paragraph from the description, thanks.
+
+Also repushed: moved `BT_SYSTEM_WORKQUEUE_COOP` above `if BT` because CI caught an unmet-dependency failure in the audio CCP unit tests, which mock the host (`BT_AUDIO=y` with `BT=n`).
+
+*--- waihongtam (2026-09-15 21:47:19+00:00)
+One more push after the last one: compliance flagged `menuconfig BT` as having no children, because `BT_SYSTEM_WORKQUEUE_COOP` ended up sitting between it and `if BT`. Moved it above `menuconfig BT` instead. Everything is green now, twister included.
+
+@jhedberg the pushes dismissed your approval, could you take another look when you get a chance?
+
+*--- Thalley (2026-09-17 09:30:04+00:00)
+By ensuring that this is negative, but it doesn't take into account the value of `NUM_COOP_PRIORITIES`:
+```
+config NUM_COOP_PRIORITIES
+	int "Number of coop priorities" if MULTITHREADING
+	default 1 if !MULTITHREADING
+	default 16
+	range 0 128
+	help
+	  Number of cooperative priorities configured in the system. Gives access
+	  to priorities:
+
+		K_PRIO_COOP(0) to K_PRIO_COOP(CONFIG_NUM_COOP_PRIORITIES - 1)
+
+	  or seen another way, priorities:
+
+		-CONFIG_NUM_COOP_PRIORITIES to -1
+
+	  This can be set to zero to disable cooperative scheduling. Cooperative
+	  threads always preempt preemptible threads.
+
+	  The total number of priorities is
+
+	   NUM_COOP_PRIORITIES + NUM_PREEMPT_PRIORITIES + 1
+
+	  The extra one is for the idle thread, which must run at the lowest
+	  priority, and be the only thread at that priority.
+```
+
+So shouldn't this have been
+`range -NUM_COOP_PRIORITIES -1` (if that was possible in Kconfig)? 
+And if `CONFIG_COOP_ENABLED=n` then the above is also nonsense
+
+*--- Thalley (2026-09-17 09:40:18+00:00)
+How is it with promptless Kconfig options and APIs? 
+
+Should we make it `experimental` so we don't end up with this option being considered stable right away (just before a release)? 
+I also see that something like BT_OTS, which should be considered a user of the host, `select`s this. 
+
+Are applications expected to select this?
+
+*--- jhedberg (2026-09-17 10:01:09+00:00)
+@Thalley
+
+> So shouldn't this have been `range -NUM_COOP_PRIORITIES -1` (if that was possible in Kconfig)?
+> And if `CONFIG_COOP_ENABLED=n` then the above is also nonsense
+
+You're right that the fixed lower bound doesn't validate the configured cooperative range, and the zero-cooperative-priorities case needs proper handling too. Both problems predate this PR, which narrows where the existing restriction applies. I'd address them in a follow-up rather than make this change depend on solving them. Kconfig doesn't support the symbolic negation above, so it isn't a straightforward replacement.
+
+> Shouldn't the range just be defined by the original definition?
+
+A kernel-owned helper selected by subsystems could express the requirement without the kernel naming Bluetooth. My earlier explanation was too categorical: the overlay isn't the only way to avoid that dependency. That would be worth considering with the kernel maintainers alongside the range validation.
+
+*--- jhedberg (2026-09-17 10:01:23+00:00)
+@Thalley
+
+> How is it with promptless Kconfig options and APIs?
+>
+> Should we make it `experimental` so we don't end up with this option being considered stable right away (just before a release)?
+
+Being promptless doesn't by itself make it private: applications can still select it from their own Kconfig. I'd keep this as an internal compatibility helper, not a new public interface, and make that explicit in the help text. I wouldn't add `select EXPERIMENTAL` just to express that distinction, since it would also mark ordinary Host builds as using an experimental feature.
+
+> I also see that something like BT_OTS, which should be considered a user of the host, `select`s this.
+>
+> Are applications expected to select this?
+
+No, not merely because they use the Host or submit work. The OTS select is intended to retain the existing restriction for that implementation until its dependencies are audited, not establish a rule for applications implementing GATT services. Submitting work alone doesn't prove a need for cooperative scheduling; the selects are conservative compatibility guards, not evidence that every selected configuration needs the restriction.
+
+*--- jhedberg (2026-09-17 10:01:35+00:00)
+@Thalley
+
+> nor do I agree with the overall approach that BT uses to do this.
+
+I agree that using cooperative scheduling as implicit locking is something to remove, not turn into a broader application contract. My support here is for relaxing an unnecessary restriction in Host-less builds while preserving existing behavior elsewhere. The selects don't solve the underlying problem: keeping Mesh's system workqueue cooperative would not preserve its synchronization assumptions if Host callbacks became preemptible. That still requires the coordinated client audit and adaptations discussed above as part of #116316.
+
+*--- alxelax (2026-09-17 10:48:59+00:00)
+If you add Experimental tag on it that means Bluetooth subsystem becomes experimental in Zephyr in general. I do not think I will approve this.
+
+*--- Thalley (2026-09-17 12:38:37+00:00)
+If `BT_OTS` is considered a user/application (or `BT_AUDIO` or `BT_MESH` for that matter) of the BT host, and they now have to set `select BT_SYSTEM_WORKQUEUE_COOP` to maintain existing behavior, then this PR is also a breaking API change, is it not? 
+
+> Being promptless doesn't by itself make it private: applications can still select it from their own Kconfig. 
+
+I guess that then also implies that there are no such thing as private/internal Kconfig optiosn, and your argument then is that application can e.g. `select BT_CONN` when both `BT_CENTRAL` and `BT_PERIPHERAL` are not selected, and we are supposed to handle such configurations? 
+
+w.r.t. the experimental flag, I think you have a good point @alxelax, and one "solution" to that would be to reverse the option from `BT_SYSTEM_WORKQUEUE_COOP` to `BT_SYSTEM_WORKQUEUE_PREMPT`, make that `default n` and mark that as experimental. That way no existing users will need to `select BT_SYSTEM_WORKQUEUE_COOP` either.
+
+*--- jhedberg (2026-09-17 14:01:41+00:00)
+@waihongtam
+
+Discussed with @Thalley offline. Two changes to the shape:
+
+1. Drop the Mesh, Audio, ETS, OTS and MCUmgr selects. All of them need the Host, so they are redundant while `BT_HCI_HOST` selects the symbol, and they are what made it look like an application interface. They belong to the series that removes the Host's select, together with the client audit. With the audio select gone the symbol can move back under `if BT`.
+
+2. Give `BT_SYSTEM_WORKQUEUE_COOP` a prompt and make it default on (`imply` from `BT`), so a raw build keeps today's restriction unless the application opts out with `CONFIG_BT_SYSTEM_WORKQUEUE_COOP=n`. Your application then sets that together with the priority. The Host, the three drivers and `BT_CTLR_PRIVACY` keep selecting it. `depends on` does not work in their place: with it, `CONFIG_BT_SYSTEM_WORKQUEUE_COOP=n` on `hci_uart` silently drops `BT_CTLR_PRIVACY` with no warning at all, and on a Host build drops the Host behind a page of warnings about other symbols, none naming the option. With `select` Kconfig keeps them and prints one warning naming the option.
+Depending on the priority instead, as MCUmgr does, trips kconfiglib's loop detection through icmsg's range condition and the Mesh shell.
+
+The help text then reads from the application's side: what disabling it means, and that it only takes effect when nothing in the build that runs on the system workqueue relies on cooperative scheduling. Release note and commit message accordingly.
+
+@alxelax this reverses the client selects I asked for on the 15th. They only make a difference once the Host's select goes, and that series adapts the clients anyway, with you reviewing.
+
+*--- Thalley (2026-09-17 14:10:49+00:00)
+I'm considering a simpler approach, which would be to remove
+
+```
+# The Bluetooth subsystem requires the system workqueue to execute at
+# a cooperative priority.
+config SYSTEM_WORKQUEUE_PRIORITY
+	range -256 -1
+``` 
+from `bluetooth/Kconfig` and add `depends on SYSTEM_WORKQUEUE_PRIORITY < 0` to
+
+```
+config BT_HCI_HOST
+	# Hidden option to make the conditions more intuitive
+	bool
+	default y
+	depends on !BT_HCI_RAW
+	select UUID
+```
+
+This will still ensure that SYSTEM_WORKQUEUE_PRIORITY is cooperative for the host (and upper layers like Mesh, Audio, OTS, etc.) while allowing builds that does not enable `BT_HCI_HOST` to set any priority for `SYSTEM_WORKQUEUE_PRIORITY`. 
+
+This won't build as is, since there is some circular dependencies from `ipc`, but maybe they should get the same treatment. 
+
+I think the above will fix the issue the author here is trying to solve, while keeping the changes minimum and keep the requirement as a configuration requirement, without introducing any new Kconfig options and removing this override. It's also easy to extend or remove in the future if we want to support PREMPT priorities in the `BT_HCI_HOST`.
+
+*--- jhedberg (2026-09-17 14:44:44+00:00)
+@Thalley
+
+Our comments crossed, but they are close: dropping the upper-layer selects is the same conclusion.
+
+I tried your shape. The `depends on` direction is where it breaks down.
+
+icmsg can't get the same treatment. `IPC_SERVICE_BACKEND_ICMSG_WQ_ENABLE` is defined inside `if IPC_SERVICE_ICMSG`, so the clause on the library loops on its own. Putting it on the backend symbol inverts the meaning, because an unmet `depends on` makes it `n`, which removes the dedicated workqueue instead of requiring it. "If you enable X, the priority must be cooperative" only has a non-circular home on the priority.
+
+With icmsg's requirement deleted the tree does configure, and then:
+
+- `samples/bluetooth/peripheral` with `CONFIG_SYSTEM_WORKQUEUE_PRIORITY=0` configures fine, drops `BT_HCI_HOST`, and fails in the compiler with `'CONFIG_BT_MAX_PAIRED' undeclared` in `gatt.h`. The warnings name `BT_SMP`, `BT_SETTINGS` and a dozen others, never the priority. That is the failure mode d62117e5b84 replaced with the range in 2018.
+- `samples/bluetooth/hci_uart` with `CONFIG_SYSTEM_WORKQUEUE_PRIORITY=10` builds and links with `CONFIG_BT_CTLR_PRIVACY=y`, so `ull_filter.c` runs its RPA work on a preemptible workqueue. `main` and this PR both reject that configuration. `BT_H5`, `BT_STM32WB0` and `BT_H4_NXP_CTLR` have the same hole, and those are raw builds, so `BT_HCI_HOST` doesn't cover them.
+
+So the range stays, and something has to carry the condition for the drivers. What you want from the shape is in the version I asked for: the restriction is gone for Host-less builds, no upper layer selects anything, and when the Host no longer needs it we delete one line from `BT_HCI_HOST`.
+
+*--- Thalley (2026-09-17 17:39:42+00:00)
+> * `samples/bluetooth/peripheral` with `CONFIG_SYSTEM_WORKQUEUE_PRIORITY=0` configures fine, drops `BT_HCI_HOST`, and fails in the compiler with `'CONFIG_BT_MAX_PAIRED' undeclared` in `gatt.h`. The warnings name `BT_SMP`, `BT_SETTINGS` and a dozen others, never the priority.
+
+That is interesting. Most/all of `CONFIG_BT_PERIPHERAL` does not need `CONFIG_BT_HCI_HOST`, and I think that is what is causing this. So you can have a `CONFIG_BT_PERIPHERAL=y` build with `CONFIG_BT_HCI_HOST=n` (because the former is also shared with the controller). I don't think this indicates an issue with my suggestion, but rather that `CONFIG_BT_HCI_HOST=n` does not give a configuration or build warning/error for all builds that actually need a HCI host (and why things like `CONFIG_BT_MAX_PAIRED` actually triggers this instead. 
+
+> That is the failure mode https://github.com/zephyrproject-rtos/zephyr/commit/d62117e5b84dcbab00c2cc248bda6447767cc6f4 replaced with the range in 2018.
+
+I don't agree with that. That commit changed it from a BUILD_ASSERT to a Kconfig dependency, so that the missing dependency is found during configuration, instead of build. That is nicer in terms of it being found "earlier", but at the cost of missing flexibility in ensuring correctness in configuration (Kconfig is more limited here than BUILD_ASSERT). Returning to BUILD_ASSERT would also be a simple alternative to this PR. 
+
+> So the range stays, and something has to carry the condition for the drivers. What you want from the shape is in the version I asked for: the restriction is gone for Host-less builds, no upper layer selects anything, and when the Host no longer needs it we delete one line from BT_HCI_HOST.
+
+I would probably be OK with that version, although it relies on `select` over `depends on` which is not ideal for handling dependencies
+
+*--- jhedberg (2026-09-17 18:11:54+00:00)
+@Thalley
+
+> That commit changed it from a BUILD_ASSERT to a Kconfig dependency
+
+You're right, and the commit is clearer than my summary: it deleted `BUILD_ASSERT(CONFIG_SYSTEM_WORKQUEUE_PRIORITY < 0)` from `common/dummy.c`, so what it removed was an explicit assert naming the priority, not a confusing macro error.
+
+> Returning to BUILD_ASSERT would also be a simple alternative to this PR.
+
+`dummy.c` is compiled in every `CONFIG_BT` build, so a single assert there needs the same central component condition the selects replaced. Per-component asserts avoid that, at the price of the configure-time detection. Where BUILD_ASSERT is clearly the better tool is what Kconfig cannot say: the `-256` bound, the `NUM_COOP_PRIORITIES` range and `COOP_ENABLED=n`. That deleted assert only tested `< 0`, so it never covered those either. I'd add one in the validation follow-up rather than swap the configure-time check for it.
+
+> I don't think this indicates an issue with my suggestion, but rather that `CONFIG_BT_HCI_HOST=n` does not give a configuration or build warning/error for all builds that actually need a HCI host
+
+Agreed, and that part is a pre-existing gap: `BT_MAX_PAIRED` and its neighbours are inside `if BT_HCI_HOST` and the host sources are gated on it, while `BT_PERIPHERAL` sits under `if BT_HCI` with `default y if BT_HCI_RAW`, shared with the controller. Worth its own fix.
+
+It doesn't rescue `depends on` here, though, and that case isn't about `BT_HCI_HOST`: on `hci_uart`, `CONFIG_BT_SYSTEM_WORKQUEUE_COOP=n` drops `BT_CTLR_PRIVACY` with no warning at all. Without the range the same hole appears from the other side, with `hci_uart` at priority 10 building and linking with `CONFIG_BT_CTLR_PRIVACY=y`.
+
+> although it relies on `select` over `depends on` which is not ideal for handling dependencies
+
+Fair, and it's avoidable. Hidden `BT_SYSTEM_WORKQUEUE_COOP_REQUIRED` selected by the Host, the three drivers and `BT_CTLR_PRIVACY`; prompted `BT_SYSTEM_WORKQUEUE_COOP`, `default y`, prompt only `if !BT_SYSTEM_WORKQUEUE_COOP_REQUIRED`, carrying the range. The only `select` target is then a helper with no prompt and no dependencies, which is the case tips.rst endorses. I tried it: `peripheral` and `hci_uart_3wire` refuse `COOP=n` with one warning naming the option, a raw build takes priority 10, and the Kconfig checks are clean.
+
+*--- jhedberg (2026-09-17 19:13:31+00:00)
+@Thalley @waihongtam
+
+Withdrawing the prompted option I asked for, `BT_SYSTEM_WORKQUEUE_COOP_REQUIRED` variant included. A `default` is not enforcement: an earlier definition of the option, in a board `Kconfig.defconfig` or an application `Kconfig`, takes precedence over a later `default y`. Give it `default n` there and a build with `CONFIG_BT=y`, `BT_HCI_HOST=y` and the helper selected ends up with the option off, accepting `CONFIG_SYSTEM_WORKQUEUE_PRIORITY=10` without a warning. The same configuration on the current head fails at Kconfig as it should, because a `select` is a lower bound on the value while a `default` is not.
+
+That settles the `select` question too. tips.rst warns against selecting symbols that have prompts or dependencies, and `BT_SYSTEM_WORKQUEUE_COOP` as it stands has neither, which is the case the same page says to select as much as you like. The prompt I asked for is what would have turned it into the discouraged kind.
+
+It also bought nothing. On the current head an HCI-raw build with no requirer takes priority 10 with zero warnings and the option simply unset, which is the configuration this PR is for, and an explicit `CONFIG_BT_SYSTEM_WORKQUEUE_COOP=n` on a Host build already errors out naming the option.
+
+@waihongtam so v4 is v3 with the `BT_MESH`, `BT_AUDIO`, `BT_ETS`, `BT_OTS` and `MCUMGR_TRANSPORT_BT` selects dropped and nothing else: help text and release note as they stand. The symbol can move back under `if BT` now that audio no longer selects it, but that is cosmetic. Sorry for the back and forth.
+
+*--- waihongtam (2026-09-17 22:22:16+00:00)
+@jhedberg Pushed v4: the Mesh, Audio, ETS, OTS and MCUmgr selects are gone and nothing else changed. Help text and release note are untouched, the symbol is still promptless, and I moved it under if BT now that audio no longer selects it.
+
+@alxelax this removes the Mesh and Audio selects you asked. Nothing changes for them in practice: the mesh sample on nrf52840dk still comes out `CONFIG_BT_SYSTEM_WORKQUEUE_COOP=y` and `CONFIG_SYSTEM_WORKQUEUE_PRIORITY=-1`, because the Host selects the option and Mesh needs the Host. They get their own selects in the series that drops the Host's.
+
+Ran the audio CCP tests, compliance and checkpatch locally, all clean.
+
+*--- waihongtam (2026-09-17 22:32:44+00:00)
+@Thalley v4 answers your questions on the option too. Applications aren't expected to select it, and after v4 nothing outside the Host and the drivers does, so OTS, Audio and Mesh don't have to add anything to keep today's behaviour and it isn't a breaking change. It stays promptless, so the `BT_SYSTEM_WORKQUEUE_PREEMPT` inversion isn't needed. Thanks for pushing on this.
+
+*--- Thalley (2026-09-18 08:06:33+00:00)
+If we truly intend on keeping this override of this Kconfig option, rather than doing a larger and arguably proper fix for this (several alternatives have been lined out in this PR), then we should either
+A) Fix this override so that it takes `CONFIG_NUM_COOP_PRIORITIES` into account. The range `-256 to -1` is factual incorrect given that the maximum value of `CONFIG_NUM_COOP_PRIORITIES` is 128. 
+B) What is outlined in A, but just created as GH issue for a future fix-up
+
+*--- Thalley (2026-09-18 08:10:04+00:00)
+Unless something overrides `CONFIG_NUM_COOP_PRIORITIES` somewhere else making the range of `CONFIG_NUM_COOP_PRIORITIES` different of course. 
+
+I know Kconfig does not support `range -NUM_COOP_PRIORITIES -1` but that's is what we arguable need to do here, and which is why I think a redesign of this is the right path. This solution is not flexible nor future proof
+
+*--- Copilot (2026-09-18 08:59:51+00:00)
+The NXP driver's only system-workqueue item is the optional LED blink, and every declaration, submission, and initialization is compiled only with `CONFIG_BT_NXP_CTRL_WAKE_ON_BT_LED_BLINK` (`hci_nxp_setup.c:83-115,1833-1838`). With that option disabled, this unconditional select still prevents an HCI-raw NXP build from choosing a preemptible priority even though the driver submits no work. Gate the requirement on the feature that introduces the work item.
+
+*--- Copilot (2026-09-18 08:59:52+00:00)
+`BT_CTLR_PRIVACY` is also enabled by the ESP32 and Silabs EFR32 controllers, but their drivers contain no system-workqueue use; `ull_filter.c`, which owns the privacy work, is only linked under `CONFIG_BT_LL_SW_SPLIT` (`subsys/bluetooth/CMakeLists.txt:14-15`). The unconditional select therefore still rejects a preemptible system workqueue for raw builds using those vendor controllers. Restrict this requirement to the LL split implementation; STM32WB0 keeps its separate driver-level select.
+
+*--- jhedberg (2026-09-18 09:03:44+00:00)
+@waihongtam this looks valid, doesn't it?
+
+*--- waihongtam (2026-09-18 17:40:35+00:00)
+Yes it is valid. On an ESP32 raw build you get `BT_CTLR_PRIVACY=y` with `BT_LL_SW_SPLIT=n`, so `ull_filter.c` isn't in the build at all and the priority still gets clamped to -1. EFR32 does the same thing, they both select `BT_CTLR_PRIVACY_SUPPORT`.
+
+`if BT_LL_SW_SPLIT` covers it. The line above already gates the accept list that way, and that's the other half of the guard around the work submission. nRF doesn't change.
+
+I re-checked the other three selects the same way and they hold, and I looked for the opposite problem and came up empty. Everything else in the tree that touches the system workqueue needs `BT_HCI_HOST`, so the Host select already has it.
+
+*--- waihongtam (2026-09-18 17:41:06+00:00)
+It is valid too. It is the default build rather than a corner case. `BT_NXP_CTRL_WAKE_ON_BT_LED_BLINK` has no `default y` and also needs a `led0` alias, so the work item usually isn't compiled at all, while `BT_H4_NXP_CTLR` is `default y`.
+
+I moved the select onto the LED option instead of adding a condition here, so it sits with the code that declares the `k_work`.
+
+*--- waihongtam (2026-09-18 17:54:57+00:00)
+B works for me.  The `-256` bound doesn't track `NUM_COOP_PRIORITIES` and `COOP_ENABLED=n` is still broken, but I'd rather not drag either into a PR that's only narrowing where the clamp applies.
+
+Filed as #119617

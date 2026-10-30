@@ -1,0 +1,57 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117456
+TITLE: drivers: serial: esp32: source ESP32-C6 UART clock from XTAL
+
+*--- opening post by rlinus (2026-08-26 11:36:13+00:00)
+On the ESP32-C6, `UART_SCLK_DEFAULT` resolves to PLL_F80M, and programming the UART clock mux/divider while the PLL is still settling after a cold boot can latch a wrong effective clock. When it happens, the port corrupts essentially every frame for the entire session: CRC failures at the frame rate with recognizable-but-wrong bytes, occasional merged frames when a delimiter byte is among the corrupted ones.
+
+Evidence gathered on custom C6 hardware (uart1 @ 115200, framed inter-MCU link with CRC16, counters on every CRC failure):
+
+- Cold-path resets only (power-on / flash reset): ~50% of cold boots storm under affected conditions; warm `sys_reboot` never does (8/8 across storm conditions) — the same code path runs both ways, only the PLL's physical starting state differs.
+- A storm session runs corrupt for its whole life (observed 5+ min at ~8 fails/s) and heals **instantly** when `uart_configure()` is re-run with *identical* values once the clock tree is stable (measured: first valid frame 130 ms after the re-configure). The fault is the latch, not the computed values.
+- Note `uart_esp32_config_get()` cannot be used to read-modify-write out of this state: it computes the baud back through the broken divider, the 0.1% standard-baud snap fails, and re-configuring would faithfully re-program the wrong rate.
+
+Fix: source the C6 UART from the always-stable XTAL, which exists as `UART_SCLK_XTAL` on this SoC. This follows the same reasoning as the existing P4 handling directly above (keep a settle-independent clock source; IDF likewise does not switch the UART clock source during driver init, and uses XTAL sourcing under DFS). The fractional divider keeps standard rates within ~0.02% of nominal from the 40 MHz XTAL.
+
+Scope note: kept deliberately C6-only, matching the P4 precedent. XTAL sourcing lowers the achievable maximum baud versus PLL_F80M; if maintainers prefer, this could instead be exposed as a `clock-source` devicetree property (as `spi_esp32` gained in #113713) with XTAL as the C6 default — happy to rework in that direction.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+https://claude.ai/code/session_01Te9GLmNNXbmSKRvMENv98X
+
+*--- sylvioalves (2026-08-26 16:23:33+00:00)
+```suggestion
+	 * On C6, UART_SCLK_DEFAULT is PLL_F80M while the reset default
+	 * and ROM selection are XTAL, so this switch moves a live port
+	 * onto the PLL right after cold-boot PLL bring-up, which
+	 * intermittently latches a wrong effective clock: the port then
+	 * corrupts essentially every frame for the whole session. Warm
+	 * resets never reproduce it (PLL already settled), and re-running
+	 * this configure with identical values once the clock tree is
+	 * stable heals the port instantly - the fault is the latch, not
+	 * the values. Keep the UART on the always-stable XTAL instead;
+	 * the fractional divider keeps standard rates within ~0.1%.
+```
+
+*--- sylvioalves (2026-08-26 16:24:16+00:00)
+@rlinus thanks for the patch, it is correct. Only suggested an update in the comment about it.
+
+*--- raffarost (2026-08-26 17:07:46+00:00)
+should we check if this is also valid for other SoC's of the family?
+
+*--- sylvioalves (2026-08-26 17:47:44+00:00)
+I think we can land this one as is and we do a follow up and test in H2/C5 that possibly needs similar (and additional) changes.
+
+*--- rlinus (2026-08-27 11:22:58+00:00)
+Applied verbatim in dbc1081 — thank you, the reset-default/ROM-selection fact is a real improvement to the story (it makes clear the old code was actively moving a live port onto the PLL, not just picking a source).
+
+*--- rlinus (2026-08-27 11:23:00+00:00)
+Agreed with landing C6-only and following up. For the follow-up's scoping: the mechanism should apply wherever UART_SCLK_DEFAULT is PLL-derived while the reset/ROM source is XTAL (H2's PLL_F48M and C5 look like candidates on paper) — but we only characterized C6, on one hardware design (~50% of cold boots in affected conditions), and have no sibling hardware to test. Happy to share the validation method if useful: a CRC-failure counter on a framed UART link plus a power-replug repro made both the fault and the fix measurable in minutes.
+
+*--- rlinus (2026-08-27 11:23:01+00:00)
+Review suggestion applied in dbc1081. Thanks for the quick review!
+
+*--- sylvioalves (2026-09-05 13:34:47+00:00)
+@rlinus please rebase.
+
+*--- rlinus (2026-09-05 19:35:39+00:00)
+Rebased on main. The only conflict was with dde217c (the ESP32-C61 guard on the same line); resolved with the C6 branch unchanged and the fallback keeping the new `!P4 && !C61` guard. The review reword is squashed into the commit, so it's a single commit again.

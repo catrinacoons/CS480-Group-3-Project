@@ -1,0 +1,84 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/103255
+TITLE: scripts: checkpatch: add support for UTF-8 in line length check
+
+*--- opening post by josuah (2026-01-30 23:24:49+00:00)
+Uses the wcswidth C function, wrapped in mbswidth perl function to check the monospace line length.
+
+Thanks to [wcswidth](https://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c) technology (present in Perl).
+
+*--- Thalley (2026-01-31 09:04:06+00:00)
+I noticed this issue as well (but only managed to ask in the #sca channel https://discord.com/channels/720317445772017664/1370016223236194315/1460295547280691264)
+
+@josuah does this change the check from number of bytes per lines, to number of characters?
+
+The reason why I didn't pursue the issue further myself, was that I was unsure about UTF8 characters that are wider than aschii characters in monospace fonts like 🌍.
+
+I think it makes sense to just treat these as any other character, and then just accept that lines containing these may be wider than 100 spaces.
+
+*--- josuah (2026-01-31 22:05:29+00:00)
+> I noticed this issue as well (but only managed to ask in the #sca channel https://discord.com/channels/720317445772017664/1370016223236194315/1460295547280691264)
+
+From the thread: "fix as some UTF characters, even with a monospace font, are wider than ascii characters" i.e. `𠜎` (2 columns) vs `a` (columns)
+
+> @josuah does this change the check from number of bytes per lines, to number of characters?
+
+More "number of terminal columns" than "number of characters". [wcwidth(3)](https://www.man7.org/linux/man-pages/man3/wcwidth.3.html) Probably what teminal emulator and code editors use too? I haven't checked.
+
+> I think it makes sense to just treat these as any other character, and then just accept that lines containing these may be wider than 100 spaces.
+
+`wcwidth()` supports CJK characters among others, and possibly emojis like 🌍 too even though this does not pass review so far?
+
+If I did not screw up the implementation, this seems like it would work.
+
+*--- Thalley (2026-01-31 22:33:48+00:00)
+> If I did not screw up the implementation, this seems like it would work.
+
+At least it will be better / good enough. Just did some quick testing and `mbswidth` seems to return `2` for both 🌍 and 𠜎, but `1` for 𐦙. I've also noticed that at least my editor (VScode), and Github render some of these characters differently
+
+```
+🌍🌍🌍
+𠜎𠜎𠜎
+𐦙𐦙𐦙
+aaa
+```
+
+*--- josuah (2026-01-31 22:40:34+00:00)
+This `𐦙` is also 1 column per character in Konsole as quick check.
+The [python wrapper](https://wcwidth.readthedocs.io/en/latest/unicode_version.html) says it is in the Unicode standard.
+
+*--- josuah (2026-01-31 22:43:46+00:00)
+- Font-based alignment (web browser, most text rendering engines) does not enforce alignment on a grid, just print the next character after the end of the previous one, (maybe after some kering).
+
+- Cell-based alignment (terminal emulators) does enforce alignment on a grid, and will not depend on the particular font in use.
+
+Maybe that's just this being observed?
+
+*--- Thalley (2026-02-03 10:26:37+00:00)
+@josuah One of my PRs needs this change to pass compliance (https://github.com/zephyrproject-rtos/zephyr/pull/95317). To verify that it fixes the issues, I attempted to run it locally, but saw 
+
+```
+1 check(s) failed
+1 check(s) with warnings only
+ERROR   : Test Checkpatch failed: 
+Can't locate Text/CharWidth.pm in @INC (you may need to install the Text::CharWidth module) (@INC entries checked: /home/thalley/perl5/lib/perl5/x86_64-linux-thread-multi /home/thalley/perl5/lib/perl5 /usr/lib/perl5/5.42/site_perl /usr/share/perl5/site_perl /usr/lib/perl5/5.42/vendor_perl /usr/share/perl5/vendor_perl /usr/lib/perl5/5.42/core_perl /usr/share/perl5/core_perl) at /home/thalley/dev/nordic/zephyrproject/zephyr/scripts/checkpatch.pl line 17.
+BEGIN failed--compilation aborted at /home/thalley/dev/nordic/zephyrproject/zephyr/scripts/checkpatch.pl line 17.
+WARNING : Test LicenseAndCopyrightCheck warning: 
+```
+
+Looks like the function used in the script isn't installed by default on some platform (like Arch Linux). So you may need to add something to https://github.com/zephyrproject-rtos/zephyr/blob/main/scripts/requirements-compliance.txt or something else
+
+*--- Copilot (2026-02-04 22:30:16+00:00)
+The comparison operator should be `!=` (numeric inequality) instead of `ne` (string inequality) since `mbswidth()` returns a numeric value representing the display width. While Perl's automatic type conversion makes this work, using the correct numeric comparison operator is more semantically accurate and follows best practices.
+```suggestion
+			if (mbswidth($oldindent) != mbswidth($newindent)) {
+```
+
+*--- josuah (2026-02-04 23:30:49+00:00)
+For the example of Arch, this might become [`perl-text-charwidth`](https://archlinux.org/packages/extra/x86_64/perl-text-charwidth/). Inconvenient to break everyone's ability to reproduce CI errors I agree.
+
+There is no list of perl requirements, and given Ubuntu (used in the doc as example) has it by default, this means there is no place where to document that extra dependency?
+
+Should an alternative that only counts the number of codepoints be used as a workaround?
+
+*--- Thalley (2026-04-19 17:10:54+00:00)
+Not sure about this PR :) The addition of a requirement for checkpatch that isn't covered by the setup instructions is one thing, but I'm also not sure if the function added is the right one for UTF8, but as mentioned earlier it's definitely better than the current situation :D @keith-zephyr what do you think as the maintainer her?

@@ -1,0 +1,241 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108706
+TITLE: drivers: i3c: i3c_dw: Add platform hooks and Infineon hook implementations
+
+*--- opening post by stites-infineon (2026-05-07 23:20:26+00:00)
+I'm on the fence if this should be split into multiple PRs - e.g. one for hook infrastructure and one for Infineon hook implementation (and related dts).  I've left it as one for now, since I think seeing how/why the hooks are used is relevant for arguing over adding new hook infrastructure which I imagine will be a long discussion.
+
+
+I've based this heavily on the USB DW in Zephyr - same situation of a Synopsis IP which many vendors wrap in their own registers that must be configured in tandem.  The goal has been to keep everything 100% backwards compatible so any devices already using this driver are not impacted.
+
+
+Validation:
+Driver <-> Sensor: Used this driver to communicate w/ a BMM350 (but that'll need two additional PRs, there's a bug in the Zephyr (and Bosche's own) BMM350 driver and I3C itself needs customizable bus timing.
+Driver <-> Driver: Validated across two boards, PR: https://github.com/zephyrproject-rtos/zephyr/pull/109253 .  It's controller focused w/ light target testing, will be writing the inverse soon.
+Driver <-> I2C has **not** been validated
+
+*--- stites-infineon (2026-05-07 23:51:35+00:00)
+Just noticed I used an infineon-centric name here - will rename "dw_i3c_get_regs" tomorrow + rerun my tests.
+
+*--- ifx-rmcs (2026-05-11 19:55:06+00:00)
+Is this right? Doesn't this mean that the registers are 128 bits? I would have expected it to be 1.
+
+*--- ifx-rmcs (2026-05-11 20:01:18+00:00)
+It says "SS" here and then "SM" in the comment below. It seems that you want a timing number that is meant to work for I2C comms at 100K or below. Unless sub-400K data rate is necessary, this set of changes may not be needed.
+
+*--- ifx-rmcs (2026-05-11 21:11:25+00:00)
+This might be needed for other vendors.
+
+*--- ifx-rmcs (2026-05-11 21:12:13+00:00)
+There's no status bit to check?
+
+*--- ifx-rmcs (2026-05-11 21:34:25+00:00)
+Isn't this allowed only from the secure CM33 core?
+
+*--- ifx-rmcs (2026-05-11 21:35:12+00:00)
+Should it be moved to here or must it always happen at pre kernel?
+
+*--- ifx-rmcs (2026-05-11 21:35:49+00:00)
+You shouldn't need to reprogram the perigroupslave.
+
+*--- stites-infineon (2026-05-11 22:39:59+00:00)
+It's 3 cells wide, but it's actually one static address and one 48-bit PID.  This comes from the i3c-device.yaml binding
+
+*--- stites-infineon (2026-05-11 22:56:27+00:00)
+Ah it's supposed to be SS all around, not SM.  Updated the comment block.  They both mean the same thing just come from different specs.  This IP is based off MIPI which uses SS/FM/FMP.
+
+I was experimenting with SS vs FM while testing, and I think it's worthwhile to keep this to save the next person from spending time on this too.
+
+*--- stites-infineon (2026-05-11 23:03:23+00:00)
+It's there still, I just moved it after the reset.  Having the pins enabled through reset seems like a good way to accidentally dump garbage on the bus
+
+*--- stites-infineon (2026-05-11 23:11:18+00:00)
+There is, but I don't think it gives us much over the 1us wait.  Afaik Zephyr doesn't have sub-1us delay functions, so we'd need a waitless loop to spin and waste CPU cycles
+
+*--- stites-infineon (2026-05-11 23:13:24+00:00)
+The cm55 setup makes everything non-secure, and it seems to have worked fine
+
+*--- stites-infineon (2026-05-11 23:16:47+00:00)
+I think that's a larger issue we need to address as part of the "fix the clock mess" effort.  I don't think it strictly has to happen pre kernel, but that's automatic with our current implementation of clocks.
+
+I've reworded the comment to just say Infineon peri dividers are already setup and don't support clock_on.
+
+*--- stites-infineon (2026-05-11 23:19:29+00:00)
+Removed
+
+*--- ifx-rmcs (2026-05-13 18:42:20+00:00)
+I actually meant 96 bits (32 *3). I do see that the i3c-device.yaml has 3 fields.
+
+*--- ifx-rmcs (2026-05-13 18:47:15+00:00)
+I2C has Standard Mode, Fast Mode, Fast Mode Plus etc. I'm not familiar with SS (Standard Speed?). I thought it's some I3C terminology.
+
+*--- ifx-rmcs (2026-05-13 18:50:33+00:00)
+I2C has pull-ups to prevent any such glitching. I would've expected I3C to do the same.
+
+*--- ifx-rmcs (2026-05-13 18:53:03+00:00)
+It's usually good to rely on register status bits for these sorts of waiting operations so that they're synchronous and predictable. Relying on CPU delays is not advisable.
+
+*--- ifx-rmcs (2026-05-13 18:54:20+00:00)
+ok
+
+*--- ifx-rmcs (2026-05-13 18:54:55+00:00)
+ok
+
+*--- ifx-rmcs (2026-05-13 18:55:11+00:00)
+ok
+
+*--- stites-infineon (2026-05-16 00:32:29+00:00)
+I'm going to be out for a couple months.  @mcatee-infineon has agreed to take over managing this PR.
+
+*--- teburd (2026-05-16 14:49:58+00:00)
+@XenuIsWatching @dcpleung please take a look when you have some time
+
+*--- XenuIsWatching (2026-05-17 16:52:54+00:00)
+IIRC this IP looks at the I2C LVR magic bit and selects this if that is set. What's the intent of this if you have the `i2c-sc-hz` set but then the majority of time it will follow the FM+ above as most targets will be supporting FM+?
+
+*This IP really should of had a 'user' speed register*
+
+*--- XenuIsWatching (2026-05-17 16:55:12+00:00)
+Is this really needed?
+
+*--- XenuIsWatching (2026-05-17 16:55:41+00:00)
+nit: comment probably not needed here
+
+*--- dcpleung (2026-05-18 17:23:24+00:00)
+Personally, I think it would be a good idea to hide all the new OPs behind non-prompted kconfig. If people don't need this, they don't have to pay the price of extra code and data.
+
+*--- XenuIsWatching (2026-05-28 21:10:00+00:00)
+yes, this is standard for all i3c nodes, the first field is the static address, and the other 2 are the pid for i3c devices
+
+*--- teburd (2026-05-28 21:13:49+00:00)
+WAIT_FOR() is intended for this sort of thing, you can poll a status register with a relaxation step (e.g. k_busy_wait()/k_sleep()) and a cycle accurate us timeout.
+
+*--- XenuIsWatching (2026-05-28 21:14:46+00:00)
+The I2C specification uses "Standard Mode", but this is more of nitpick here to change to "SM", i don't see anything in the i3c specification about "standard mode", it really just talks about "fast mode", and "fast mode plus".
+<img width="1404" height="582" alt="image" src="https://github.com/user-attachments/assets/39db753e-cd15-4ac0-b916-6b71802b593c" />
+<img width="1129" height="987" alt="image" src="https://github.com/user-attachments/assets/06d77f59-37f4-46d3-9439-0d27f01075b0" />
+
+*--- XenuIsWatching (2026-05-28 21:16:01+00:00)
+I3C is much more complicated for how it expects pull ups to be handled, i see the pinctrl is still there... just moved
+
+*--- XenuIsWatching (2026-07-29 18:06:25+00:00)
+@stites-infineon  @mcatee-infineon are you back? do you plan on picking this up?
+
+*--- stites-infineon (2026-07-29 18:34:08+00:00)
+@XenuIsWatching I'm back, but I3C got put on the backburner and then shifted over to @keithmwheeler while I was away.  He is doing active work on it, namely debugging this driver <-> i3c sensor (I had only validated this driver <-> i2c driver and this driver <-> this driver).
+
+I believe the new plan is to wait until he's validated all our target use cases before resuming the PR process, rather than the original piecemeal PR approach
+
+*--- stites-infineon (2026-09-14 21:09:03+00:00)
+Not sure where I got the Standard Speed terminology from then, maybe an Infineon document or some forum?  Regardless - all the I2C-legacy mode related changes have been removed (see other comment after PR revival), this along with it.
+
+*--- stites-infineon (2026-09-14 21:09:19+00:00)
+Swapped all the busy_waits for WAIT_FORs
+
+*--- stites-infineon (2026-09-14 21:09:50+00:00)
+@dcpleung Added a I3C_DW_PLATFORM_OPS KConfig to toggle the whole thing on/off
+
+*--- stites-infineon (2026-09-14 21:10:44+00:00)
+Some four months later I can't remember the fine details - but roughly this was an attempt to support I2C-legacy mode communicating with a broken I2C driver.  I wasn't aware of the latter at the time.  I've removed all the I2C-legacy stuff from this PR since the Infineon I2C driver itself currently under rework, this along with it
+
+*--- stites-infineon (2026-09-14 21:12:23+00:00)
+It was, and there was a bit in the databook that said to wait X cycles or something here.  That said, post rework this is no longer present, so either it was incidentally fixed by the microchip additions or Keith moved it elsewhere/is now a WAIT_FOR
+
+*--- stites-infineon (2026-09-14 21:12:37+00:00)
+Removed
+
+*--- stites-infineon (2026-09-14 21:14:32+00:00)
+I serve at the schedules of my employer, who has decided I'm back on I3C development.  Took this back over from Keith (who did a terrific rework and bug squash) and wrapped it up.
+
+This one is a bit bulkier - the earlier PR was purely I3C's I2C-legacy support which was pretty feature limited.  This is the whole I3C-I3C communication support for PSE84 on top of the hook additions.  I wasn't aware of it at the time but I2C was broken on the PSE84, so some of my I3C updates turned out to be hacks trying to force I2C to work.  That's all been stripped out.
+
+I see microchip added an addition to this driver - maybe after this infrastructure is merged I can bug them to rework their changes to use it too.  I don't have access to the hardware to validate it myself, so I've tried to avoid touching anything microchip-related.
+
+**Validation:**
+Driver <-> Sensor: Used this driver to communicate w/ a BMM350 (but that'll need two additional PRs, there's a bug in the Zephyr (and Bosche's own) BMM350 driver and I3C itself needs customizable bus timing.
+Driver <-> Driver: Validated across two boards, will revive the test PR for that soon.  It's controller focused w/ light target testing, will be writing the inverse soon.
+Driver <-> I2C has **not** been validated
+
+*--- kartben (2026-09-15 12:38:36+00:00)
+Please rebase to address the documentation CI failure. Sorry about the inconvenience.
+
+*--- ifx-rmcs (2026-09-15 18:59:42+00:00)
+You can remove this declaration and instead move the definition above dw_i3c_infineon_program_clk_if_if_compatible().
+
+*--- ifx-rmcs (2026-09-15 19:01:39+00:00)
+`assigned` isn't used anywhere. Either check the return value or cast to (void).
+
+*--- ifx-rmcs (2026-09-15 19:03:21+00:00)
+Is this conditional meant to take some action (error)?
+
+*--- ifx-rmcs (2026-09-15 19:05:06+00:00)
+Consider dropping `irq_num` if it isn't used anywhere.
+
+*--- ifx-rmcs (2026-09-15 19:06:25+00:00)
+Update the copyright to match the current form.
+
+*--- stites-infineon (2026-09-17 15:08:03+00:00)
+Fixed - also added to i3c_dw.c, since if this goes in I suspect we'll have made enough changes to warrant it
+
+*--- stites-infineon (2026-09-17 15:08:12+00:00)
+Removed
+
+*--- stites-infineon (2026-09-17 15:08:43+00:00)
+Actually realized dw_i3c_infineon_program_clk_if_if_compatible is unreachable and redundant with the initial enable, so removed it (and removed all the bits that supported it). Now all the consumers of enable_pclk are downwind of the definition so I removed this forward declaration too
+
+*--- stites-infineon (2026-09-17 15:09:06+00:00)
+Aye - but this function was incidentally removed so that resolved it
+
+*--- stites-infineon (2026-09-17 15:09:41+00:00)
+Removed - left-over from an earlier design, that Get function is a pure read so it's a no-op
+
+*--- Copilot (2026-09-17 17:00:57+00:00)
+The recovery result is discarded before retrying. On Infineon, the light recovery can return `-ETIMEDOUT` when the wrapper gate or reset bits do not become usable; immediately calling `start_xfer()` after that can access an unavailable core. Abort the transfer when recovery fails instead of marking it recovered and retrying.
+
+This issue also appears on line 1394 of the same file.
+
+*--- Copilot (2026-09-17 17:00:57+00:00)
+If this pre-CCC recovery fails, the code still submits the CCC. In particular, an Infineon hook timeout means core register access may not be safe. Check the return and leave through `error` before calling `start_xfer()`.
+
+This issue also appears on line 2980 of the same file.
+
+*--- Copilot (2026-09-17 17:00:58+00:00)
+Continuing after `pm_resume` fails can fault: the Infineon hook returns an error when it cannot enable the peripheral clock or reopen the wrapper gate, yet the next statement accesses core registers. Propagate the failure after releasing the mutex, as the normal PM resume path already does.
+
+*--- Copilot (2026-09-17 17:00:58+00:00)
+This assigns the Infineon hooks to every `snps,designware-i3c` instance whenever any enabled Infineon node selects the Kconfig option. In a devicetree containing both an Infineon-wrapped instance and a plain DesignWare instance, the plain instance will run Infineon MMIO/clock code and fail or access unrelated registers. Select the ops per instance based on that node's compatible.
+
+*--- Copilot (2026-09-17 17:00:58+00:00)
+This readiness check occurs before taking `data->mt`. With concurrent callers, another transfer can run and leave the controller halted while this caller waits for the mutex, after which this caller starts without rechecking. Take the mutex first and perform the readiness check while holding it so the state being validated cannot change before submission.
+
+*--- Copilot (2026-09-17 17:00:58+00:00)
+This is a broadcast DISEC, so it disables interrupts, controller-role requests, and hot-join events on every addressed target—not only `newdevs`. A runtime DAA triggered by hot join will therefore silently disable IBIs previously enabled on existing targets while the driver still treats those IBIs as enabled. Limit DISEC to newly assigned targets (for example with directed CCCs), or do it only in the bus-initialization phase that already broadcasts DISEC before DAA.
+
+*--- Copilot (2026-09-17 17:00:59+00:00)
+A full reset is transparent recovery, but these writes reject all SIR/MR requests and the DAT replay below also forces `SIR_REJECT`. Any targets for which the application previously called `i3c_ibi_enable()` stop delivering IBIs after recovery, with no software state change or notification. Snapshot and restore the reject masks and per-DAT IBI bits rather than resetting them to the init defaults.
+
+This issue also appears on line 3365 of the same file.
+
+*--- stites-infineon (2026-09-18 22:33:47+00:00)
+Fixed
+
+*--- stites-infineon (2026-09-18 22:33:52+00:00)
+Fixed
+
+*--- stites-infineon (2026-09-18 22:34:06+00:00)
+Fixed
+
+This also had me notice the comment block above the ifx pm_resume was stale - fix this and rechecked all the other comment blocks
+
+*--- stites-infineon (2026-09-18 22:34:09+00:00)
+> In a devicetree containing both an Infineon-wrapped instance and a plain DesignWare instance
+
+This isn't a concern - the wrapper is a vendor integrating the external IP with their own IP.  I can't imagine that a vendor would use another vendor's wrapper, or have a mix of vendor-wrapped and raw DW IP (if they could, why would they bother wrapping one of them)?
+
+*--- stites-infineon (2026-09-18 22:34:14+00:00)
+Moved this inside the k_mutex_lock
+
+*--- stites-infineon (2026-09-18 22:34:20+00:00)
+Updated to be targeted at whatever target was just added by add_slave_from_daa
+
+*--- stites-infineon (2026-09-18 22:34:24+00:00)
+Updated this to snapshot current configuration and re-apply it after

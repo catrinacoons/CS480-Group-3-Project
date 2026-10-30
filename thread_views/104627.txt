@@ -1,0 +1,173 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/104627
+TITLE: Bluetooth: CAP: Make CAP cancel thread safe
+
+*--- opening post by Thalley (2026-02-26 20:11:19+00:00)
+The functions bt_cap_commander_cancel and
+bt_cap_initiator_unicast_audio_cancel were not thread safe, and calling these while handling e.g. a notifications or a write response could cause fatal errors.
+
+This commit modifies active_proc so that all access to it is guarded by a mutex.
+
+Fixes https://github.com/zephyrproject-rtos/zephyr/issues/104273
+
+*--- Copilot (2026-02-26 20:13:52+00:00)
+The duplicate declaration of `cap_commander_broadcast_reception_start` at line 350 should be removed. Only one declaration is needed.
+
+*--- Copilot (2026-02-26 20:13:52+00:00)
+Corrected spelling of 'hander' to 'handover'.
+```suggestion
+/** Completes the handover procedure. This also unlocks the active_proc_mutex. */
+```
+
+*--- Copilot (2026-02-26 20:13:53+00:00)
+Changing from 'return' to 'break' here alters the control flow. After the break, execution continues to line 1632 which unlocks the mutex. However, if the procedure was just completed at line 1625, the mutex may have already been unlocked by `cap_initiator_unicast_audio_proc_complete`. This could result in double-unlocking the mutex.
+
+*--- Copilot (2026-02-26 20:13:53+00:00)
+The error message says 'Failed to lock mutex' but this is in the unlock function. The message should say 'Failed to unlock mutex'.
+```suggestion
+	__ASSERT(err == 0, "Failed to unlock mutex: %d", err);
+```
+
+*--- Copilot (2026-02-26 20:13:53+00:00)
+Setting `err = -ENOEXEC` without returning means execution continues to line 372 which returns `err`. However, when an error occurs at line 361, the mutex should be unlocked before returning. The current code doesn't unlock the mutex on this error path.
+```suggestion
+		bt_cap_common_unlock_proc(active_proc);
+
+		return -ENOEXEC;
+```
+
+*--- Copilot (2026-02-26 20:45:25+00:00)
+cap_commander_broadcast_assistant_recv_state_cb() has an early `return` when a subgroup has `bis_sync != 0` (just above this block) but the active_proc mutex is already held at that point. That early-return path needs to release the mutex (or be refactored to a single exit path) to avoid deadlocking future CAP operations.
+
+*--- Copilot (2026-02-26 20:45:26+00:00)
+bt_cap_common_unlock_proc() doesn't use its `proc` parameter. With -Wextra/-Werror this can become a build failure. Either remove the parameter from the API, or mark it unused (e.g., ARG_UNUSED(proc) / (void)proc) and consider asserting `proc == &active_proc` if that's the intended contract.
+
+*--- Copilot (2026-02-26 20:45:26+00:00)
+bt_cap_common_clear_proc() unlocks `active_proc_mutex` before clearing the struct. That reintroduces a race where another thread can read/modify `active_proc` while it is being memset, and it also mixes non-atomic writes with atomic reads of `proc_state_flags`. Clear the procedure while still holding the mutex (and preferably clear `proc_state_flags` via atomic operations), then unlock afterwards.
+```suggestion
+	/* Clear state flags atomically before clearing the rest of the struct */
+	(void)atomic_clear(&proc->proc_state_flags);
+
+	(void)memset(proc, 0, sizeof(*proc));
+
+	bt_cap_common_unlock_proc(proc);
+```
+
+*--- Copilot (2026-02-26 20:45:26+00:00)
+bt_cap_initiator_unicast_audio_start() takes the active_proc mutex via bt_cap_common_get_active_proc(), but on the -EBUSY path it returns without unlocking. This will leave active_proc_mutex locked and can deadlock all subsequent CAP procedures.
+```suggestion
+
+		bt_cap_common_unlock_proc(active_proc);
+```
+
+*--- Copilot (2026-02-26 20:45:26+00:00)
+The comment says the mutex needs to be unlocked before calling bt_cap_initiator_codec_configured(), but the code calls it while still holding the mutex. Either update the comment to reflect the actual locking behavior (including any intended recursive locking), or unlock/re-lock around the callback to match the comment and avoid confusion.
+```suggestion
+		/* If proc_param is NULL then this step is a no-op and we can skip to the next step.
+		 * In this case we immediately notify that the codec has been configured for the
+		 * first stream and then return. The callback is invoked in the current locking
+		 * context; any mutex handling or recursive locking considerations must therefore
+		 * be handled by the caller and/or within the callback implementation.
+		 */
+		bt_cap_initiator_codec_configured(active_proc->proc_param.initiator[0].stream);
+```
+
+*--- Copilot (2026-02-26 21:12:02+00:00)
+This code calls bt_cap_initiator_qos_configured() while still holding active_proc_mutex. bt_cap_initiator_qos_configured() also locks the same mutex and may clear the procedure, which can violate bt_cap_common_clear_proc()'s lock_count==1 assertion. Unlock before invoking the next-stage handler, or refactor to a non-locking internal helper.
+```suggestion
+		bt_cap_common_unlock_proc();
+		bt_cap_initiator_qos_configured(active_proc->proc_param.initiator[0].stream);
+```
+
+*--- Copilot (2026-02-26 21:12:03+00:00)
+In bt_cap_handover_unicast_to_broadcast(), bt_cap_common_test_and_set_proc_active() is executed before taking active_proc_mutex (bt_cap_common_get_active_proc()). With the new mutex-based protection, this creates a window where another thread can observe the proc as active (or call cancel) while active_proc has not yet been initialized under the mutex. Align with the other CAP APIs by taking the mutex first, then test_and_set, and unlocking on -EBUSY.
+
+*--- Copilot (2026-02-26 21:12:03+00:00)
+In the proc_param == NULL path, bt_cap_initiator_codec_configured() is invoked while active_proc_mutex is still held. codec_configured() also locks the same mutex and may complete/clear the procedure, which can trip bt_cap_common_clear_proc()'s lock_count==1 assert under recursive locking. Unlock the mutex before calling codec_configured(), or refactor to a non-locking internal helper that reuses the already-locked active_proc.
+```suggestion
+		 */
+		k_mutex_unlock(&active_proc_mutex);
+```
+
+*--- Copilot (2026-02-26 21:12:03+00:00)
+cap_commander_broadcast_assistant_recv_state_cb() locks active_proc_mutex, then calls bt_cap_handover_receive_state_updated(), which currently locks/unlocks the same mutex again. This nested locking can break bt_cap_common_clear_proc() (lock_count assertion) if the handover helper completes/clears the procedure. Consider changing bt_cap_handover_receive_state_updated() to take active_proc as an argument (no internal locking) and pass the already-locked active_proc from here.
+
+*--- Copilot (2026-02-26 21:12:04+00:00)
+bt_cap_initiator_codec_configured() calls bt_cap_initiator_released() while holding active_proc_mutex. bt_cap_initiator_released() locks the same mutex again and may call cap_initiator_unicast_audio_proc_complete() -> bt_cap_common_clear_proc(), which asserts if lock_count != 1. Avoid calling a locking handler while already holding the mutex (inline the RELEASE case here, or introduce a non-locking released-handler taking active_proc).
+```suggestion
+		 *
+		 * Note: bt_cap_initiator_released() performs its own locking, so we must
+		 * release the active procedure lock before calling it to avoid nested
+		 * locking and lock_count mismatches.
+		 */
+		bt_cap_common_unlock_proc();
+		bt_cap_initiator_released(cap_stream);
+```
+
+*--- Copilot (2026-02-26 21:12:04+00:00)
+In the no-op ENABLE step, bt_cap_initiator_enabled() is called while active_proc_mutex is still held. bt_cap_initiator_enabled() takes the same mutex and may clear the procedure, which can trigger bt_cap_common_clear_proc()'s lock_count==1 assertion under recursive locking. Unlock before calling into bt_cap_initiator_enabled(), or use a non-locking internal helper that reuses active_proc.
+
+*--- Copilot (2026-02-26 21:12:04+00:00)
+In the no-op CONNECT step, bt_cap_initiator_connected() is called while active_proc_mutex is still held. bt_cap_initiator_connected() also locks the same mutex and may clear the procedure, which can trigger bt_cap_common_clear_proc()'s lock_count==1 assertion under recursive locking. Unlock before calling bt_cap_initiator_connected(), or refactor to a non-locking internal handler that reuses active_proc.
+
+*--- Copilot (2026-02-26 21:12:04+00:00)
+bt_cap_handover_receive_state_updated() takes active_proc_mutex internally, but its current caller (cap_commander_broadcast_assistant_recv_state_cb) already holds the same mutex. If this error path calls bt_cap_handover_complete(active_proc) -> bt_cap_common_clear_proc(), the lock_count==1 assertion can fire due to recursive locking. Refactor receive_state_updated to take the already-locked active_proc (no internal locking) and adjust the caller accordingly.
+```suggestion
+
+					/* Release the active_proc lock before completing to avoid
+					 * recursive locking in bt_cap_handover_complete() ->
+					 * bt_cap_common_clear_proc().
+					 */
+					bt_cap_common_unlock_proc();
+```
+
+*--- Copilot (2026-02-27 12:53:24+00:00)
+bt_cap_common_get_active_proc() asserts on k_mutex_lock() failure but does not otherwise handle non-zero return codes. In builds where __ASSERT is disabled, a timeout (-EAGAIN) would still return a pointer even though the mutex was not taken, reintroducing data races. Consider using K_FOREVER for the lock, or change the API to propagate lock failures (e.g., return NULL / error code) so callers can avoid accessing active_proc without the mutex.
+
+*--- Thalley (2026-02-27 12:56:21+00:00)
+The idea is that the check would not be necessary in release builds where ASSERT may be disabled
+
+*--- Copilot (2026-02-27 13:38:49+00:00)
+In bt_cap_handover_broadcast_source_stopped(), the error path for the broadcast-to-unicast case writes to proc_param->unicast_to_broadcast.broadcast_source. Since is_unicast_to_broadcast is false here, this should use the broadcast_to_unicast member (or avoid writing through the inactive union member), otherwise it can corrupt the union state and leave broadcast_to_unicast.broadcast_source unchanged.
+```suggestion
+			proc_param->broadcast_to_unicast.broadcast_source = NULL;
+```
+
+*--- Copilot (2026-02-27 13:38:49+00:00)
+CAP_ACTIVE_PROC_SEM_TIMEOUT is used for a k_mutex timeout, but the name suggests a semaphore. Renaming it to something like CAP_ACTIVE_PROC_MUTEX_TIMEOUT would make the intent clearer and avoid confusion when reading the locking code.
+```suggestion
+#define CAP_ACTIVE_PROC_MUTEX_TIMEOUT K_MSEC(10000U)
+/* Backward-compatibility alias; prefer CAP_ACTIVE_PROC_MUTEX_TIMEOUT */
+#define CAP_ACTIVE_PROC_SEM_TIMEOUT   CAP_ACTIVE_PROC_MUTEX_TIMEOUT
+```
+
+*--- Copilot (2026-02-27 13:38:49+00:00)
+bt_cap_common_clear_proc() asserts that active_proc_mutex.lock_count == 1, but the mutex is recursive and there are call paths that re-lock it (e.g., a callback holds the lock and calls another helper that calls bt_cap_common_get_active_proc() again). If a procedure completes from such a nested context, this assert will fire even though the locking is valid. Consider relaxing this to assert lock_count > 0 (or removing the assert) so clear/unlock works even when lock_count > 1, or refactor so completion/clear is only invoked at the outermost lock level.
+
+*--- Thalley (2026-02-27 13:53:59+00:00)
+This is intentional. The complete should always be the one doing the final unlock so that new CAP procedures can be restarted in the following callbacks.
+
+*--- Thalley (2026-02-27 14:20:39+00:00)
+Fixed in https://github.com/zephyrproject-rtos/zephyr/pull/104674
+
+*--- Thalley (2026-02-27 14:37:19+00:00)
+There is a followup PR https://github.com/zephyrproject-rtos/zephyr/pull/104680 adding an additional check. This is not part of this PR since it requires rethinking the unit tests, as the mocks used for the BAP unicast client does not work well with the design implemented here, as all remote procedures are calling the callbacks locally, thus when the complete functions are called, the mutex has been taken many times: 
+
+```
+[00:00:00.000,000] <dbg> bt_cap_initiator: bt_cap_initiator_started: Stream 0xf610176c started (3/4 streams done)
+[00:00:00.000,000] <dbg> bt_bap_stream: bt_bap_stream_start: stream 0xf61017c4 ep 0x806a4e4
+[00:00:00.000,000] <dbg> bt_cap_common: bt_cap_common_get_active_proc: Took active_proc_mutex (count: 13)
+[00:00:00.000,000] <dbg> bt_cap_initiator: bt_cap_initiator_cp_cb: cap_stream 0xf61017c4
+[00:00:00.000,000] <dbg> bt_cap_common: bt_cap_common_unlock_proc: Released active_proc_mutex
+[00:00:00.000,000] <dbg> bt_cap_common: bt_cap_common_get_active_proc: Took active_proc_mutex (count: 13)
+[00:00:00.000,000] <dbg> bt_cap_initiator: bt_cap_initiator_started: cap_stream 0xf61017c4
+[00:00:00.000,000] <dbg> bt_cap_initiator: update_proc_done_cnt: proc 1 subproc 5: 4/4
+[00:00:00.000,000] <dbg> bt_cap_initiator: bt_cap_initiator_started: Stream 0xf61017c4 started (4/4 streams done)
+ASSERTION FAIL [active_proc_mutex.lock_count == 1U] @ WEST_TOPDIR/zephyr/subsys/bluetooth/audio/cap_common.c:67
+	Unexpected active_proc_mutex.lock_count: 13
+@ WEST_TOPDIR/zephyr/lib/os/assert.c:43
+[00:00:00.000,000] <err> os: >>> ZEPHYR FATAL ERROR 4: Kernel panic on CPU 0
+[00:00:00.000,000] <err> os: Current thread: 0x806b7a0 (test_initiator_unicast_start)
+[00:00:00.000,000] <err> os: Halting system
+```
+
+All the other tests pass though, so the implementation should be OK without the additional verification here.

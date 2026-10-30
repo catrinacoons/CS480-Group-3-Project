@@ -1,0 +1,37 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113797
+TITLE: drivers: clock_monitor: add NXP ANACTRL freq-measure back-end
+
+*--- opening post by FelixWang47831 (2026-07-17 09:11:38+00:00)
+Add a clock_monitor back-end for the frequency-measurement feature of the NXP ANACTRL module. ANACTRL measures a target clock against a reference clock; both are routed through INPUTMUX and selected from devicetree "reference-sources" / "target-sources" child nodes.
+    
+ANACTRL has no completion interrupt, so a one-shot MEASURE is kicked in start() and polled from a k_work_delayable; a stuck target clock is bounded by a retry budget and reported as CLOCK_LOST. Only MEASURE mode is supported.
+
+*--- Copilot (2026-07-20 07:25:24+00:00)
+`default-source` is a boolean property that is present only on the default child; using `DT_PROP(node, default_source)` will not compile for children that omit the property. Use `DT_NODE_HAS_PROP(node, default_source)` (or `DT_PROP_OR(..., 0)`) when deriving `is_default`.
+
+*--- Copilot (2026-07-20 07:25:24+00:00)
+The default-source count macro uses `DT_PROP(node, default_source)`, which will fail to compile for non-default children because the boolean property is omitted. Use `DT_NODE_HAS_PROP(node, default_source)` so the BUILD_ASSERT summation works across all children.
+
+*--- Copilot (2026-07-20 07:25:25+00:00)
+Use unsigned suffixes for numeric constants in these dt-binding macros to avoid signed arithmetic/shift warnings and align with Zephyr's common integer-constant conventions.
+
+*--- Copilot (2026-07-20 07:25:25+00:00)
+These register-offset constants are used in left shifts when building connection cookies; make them explicitly unsigned to avoid implementation-defined signed shifts.
+
+*--- Copilot (2026-07-20 07:25:25+00:00)
+Cast the selector and shifted register-offset terms to `uint32_t` when building cookies so the result type is well-defined even when `sel` is an un-suffixed literal or enum.
+
+*--- FelixWang47831 (2026-07-20 08:34:50+00:00)
+False positive. It's a type: boolean DT property — DT_PROP compiles fine and evaluates to 0 when absent.
+
+*--- FelixWang47831 (2026-07-20 08:34:57+00:00)
+False positive. It's a type: boolean DT property — DT_PROP compiles fine and evaluates to 0 when absent.
+
+*--- FelixWang47831 (2026-07-20 08:35:29+00:00)
+Fixed.
+
+*--- FelixWang47831 (2026-07-20 08:35:44+00:00)
+Fixed.
+
+*--- FelixWang47831 (2026-07-20 08:36:23+00:00)
+These macros are only used inside .dtsi files, parsed by the devicetree compiler (dtc), not GCC — dtc's expression grammar doesn't understand C casts, so it failed with parse error: expected number or parenthesized expression

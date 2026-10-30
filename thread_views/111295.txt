@@ -1,0 +1,30 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111295
+TITLE: net: ipv6: decrement hop limit only for actually forwarded packets
+
+*--- opening post by Cristib05 (2026-06-15 11:49:44+00:00)
+Hop limit should only be decremented if a route is found and if the packet is actually forwarded.
+
+Fixes #111277
+
+*--- Cristib05 (2026-06-15 11:50:06+00:00)
+Possible fix for #111277
+
+*--- rlubos (2026-06-15 13:50:24+00:00)
+I think this will need some more complex fix, the issue is we're still modifying the orignal pkt hop_limit in the header, plus this function uses shallow clone, so the orignal pkt and the new one share the same buffer. And also if we decrement the orignal header's hop_limit in the loop, it may happen several times in case of multiple interface.
+
+I'd suggest to:
+* keep the original decrement above,
+* use `net_pkt_clone()` instead of `net_pkt_shallow_clone()`, so that the cloned packet get it's own buffer, with already decremented hop_limit value in the IP header.
+* and then restore the hop_limit in the original packet for further processing after the loop.
+
+*--- rlubos (2026-06-15 13:51:55+00:00)
+Also note (noticed this after push), `net_pkt_set_ipv6_hop_limit()` just updates the pkt metadata, doesn't change the actual value in the IP header
+
+*--- Copilot (2026-06-15 13:56:43+00:00)
+`net_pkt_set_ipv6_hop_limit()` only updates the net_pkt metadata; it does not modify the IPv6 header in the packet buffer. With the current `net_pkt_shallow_clone()` usage, forwarded multicast packets will keep the original on-wire hop limit (no decrement). To actually decrement hop limit only for forwarded packets, clone the packet buffer (deep clone) and update `NET_IPV6_HDR(pkt_cpy)->hop_limit` before sending.
+
+*--- rlubos (2026-06-16 07:58:51+00:00)
+Hmm but the header is already updated in the line above, and we still need to update pkt metadata. So this line was fine, same in the hop limit restoration below.
+
+*--- Cristib05 (2026-06-16 08:08:46+00:00)
+Please let me know if I have correctly understood your proposal.

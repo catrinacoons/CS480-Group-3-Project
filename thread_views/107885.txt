@@ -1,0 +1,48 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107885
+TITLE: Bluetooth: Audio: Convert int to essentially Boolean type checks
+
+*--- opening post by Thalley (2026-04-24 11:27:34+00:00)
+Modify checks such as `if (err)` to be `if (err != 0)` as per our coding guidelines
+
+*--- Copilot (2026-04-24 12:24:09+00:00)
+In reset(), bt_le_per_adv_sync_delete(pa_sync) is called without assigning its return value to err, but the following check uses err. This can read an uninitialized/stale value and also ignores deletion failures. Assign the return value (e.g., err = bt_le_per_adv_sync_delete(pa_sync);) before checking it.
+```suggestion
+		err = bt_le_per_adv_sync_delete(pa_sync);
+```
+
+*--- Thalley (2026-04-24 12:27:40+00:00)
+Not related to this PR
+
+*--- jhedberg (2026-04-27 05:52:33+00:00)
+@Thalley seems like you have a merge conflict that needs fixing. Otherwise looks good to me.
+
+One small thing about the title: IMO it's not quite appropriate to use `bool` since as per the C standard the type of something like `err != 0` is still `int` and not `bool` :)
+
+*--- Thalley (2026-04-27 06:23:17+00:00)
+> @Thalley seems like you have a merge conflict that needs fixing. Otherwise looks good to me.
+> 
+> One small thing about the title: IMO it's not quite appropriate to use `bool` since as per the C standard the type of something like `err != 0` is still `int` and not `bool` :)
+
+Are you referring to the title of the PR, or the commits? The PR title is a lot easy to update to be more accurate, but given the limit of commit header titles, it's hard to be more accurate than "bool" (I guess the correct term is "essential boolean type" as per our coding guidelines)
+
+*--- jhedberg (2026-04-27 06:39:30+00:00)
+@Thalley thanks for the update My issue was specifically with "bool" since that gives a strong indication that you're referring to the type of the same name, but that's not your intention. Anything else, like "boolean" or "essentially boolean type" would have been fine with me.
+
+*--- Thalley (2026-04-27 09:01:11+00:00)
+> @Thalley thanks for the update My issue was specifically with "bool" since that gives a strong indication that you're referring to the type of the same name, but that's not your intention. Anything else, like "boolean" or "essentially boolean type" would have been fine with me.
+
+Sure, I can change `bool`->`boolean` :) But as you mentioned earlier, `err != 0` is still an int since C(17) does not have a `bool` type, and as such I think you comments are slightly contradictory since C(17) does not have a `bool` type, so `bool` (as a shorthand for boolean) cannot refer to the type as it doesn't exist ;)
+
+*--- jhedberg (2026-04-27 09:34:21+00:00)
+> C(17) does not have a `bool` type, and as such I think you comments are slightly contradictory since C(17) does not have a `bool`
+
+From the perspective of "normal" code it does. I'd bet not everyone realizes that `bool` is a typedef to something else.
+
+*--- Thalley (2026-04-27 09:39:11+00:00)
+> > C(17) does not have a `bool` type, and as such I think you comments are slightly contradictory since C(17) does not have a `bool`
+> 
+> From the perspective of "normal" code it does. I'd bet not everyone realizes that `bool` is a typedef to something else.
+
+Possibly :D But they would probably also assume that `err != 0` is a `bool` then ;) 
+
+In any case, the commits now use the term `boolean` instead

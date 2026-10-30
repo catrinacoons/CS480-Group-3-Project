@@ -1,0 +1,120 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116355
+TITLE: Bluetooth: CAP: add subprocedure callbacks for unicast start and stop
+
+*--- opening post by Thalley (2026-08-15 07:34:37+00:00)
+The CAP unicast audio start and stop procedures consist of several subprocedures, and applications may need to know when each of these have completed, e.g. to reconfigure the unicast group after the streams have been codec configured but before they are QoS configured.
+
+Add new callbacks to bt_cap_initiator_cb for each subprocedure of the unicast audio start and unicast audio stop procedures. The callbacks are only called if at least one request was sent to a CAP acceptor as part of the subprocedure, so that subprocedures that are skipped because all streams are already in the requested state do not trigger a callback. To support this a new subproc_initiated field has been added to the common procedure struct, which is reset whenever a new subprocedure is set.
+
+The unit tests have been extended to verify both that the callbacks are called when the subprocedures are performed, and that they are not called when the subprocedures are skipped, and the BSIM CAP initiator unicast test now waits for the new callbacks as part of the start and stop procedures.
+
+Assisted-by: Copilot:claude-opus-4.5
+
+fixes https://github.com/zephyrproject-rtos/zephyr/issues/103425
+
+*--- Copilot (2026-08-15 07:41:33+00:00)
+Application callbacks run before the state machine advances, but every caller assumes `active_proc` is still intact afterward. A callback can legally call `bt_cap_initiator_unicast_audio_cancel()` while this procedure is active; the recursive mutex permits it, cancellation clears `active_proc` and invokes the overall completion callback, and the terminal start/stop paths then invoke completion again with `PROC_TYPE_NONE`, triggering the assertion (other paths continue from cleared state). Revalidate the active procedure after each callback—e.g. return a status from this helper and have callers unlock/return when cancellation occurred—and cover cancellation from a subprocedure callback.
+
+*--- koffes (2026-08-17 12:47:22+00:00)
+From the fact that this is CAP, it is implicit, but what do you think about adding `_all_` to these names?
+
+*--- koffes (2026-08-17 12:48:09+00:00)
+- Or, `_done` as a suffix?
+
+*--- koffes (2026-08-17 12:57:16+00:00)
+For all parts of the new structure: I am wondering if this will pose some limitation later.
+It is worth considering if this callback should be executed anyway, with an EALREADY value.
+
+*--- koffes (2026-08-17 12:58:53+00:00)
+What will happen if a user chooses to do so anyway?
+
+*--- koffes (2026-08-17 13:04:04+00:00)
+Is this related to the other changes in this PR?
+
+*--- koffes (2026-08-17 13:16:57+00:00)
+Nit: Should this be some other value? EINVAL sounds like the user has submitted a wrong argument, but it is the state which is wrong.
+
+*--- koffes (2026-08-17 13:22:07+00:00)
+I have not verified this active_proc->subproc_initiated true/false.
+Feel free to give me a ping, and we can look over those together.
+
+*--- Thalley (2026-08-17 20:37:25+00:00)
+`configured_done` doesn't sound right :D `unicast_start_codec_configuration_done` could work, but it's IMO already implied. 
+
+I don't think `_all_` is semantically correct; some streams in the parameters may not be affected by the sub procedure
+
+*--- Thalley (2026-08-17 20:38:49+00:00)
+`EALREADY` is an error value, and probably shouldn't be used for informative purposes. 
+
+We could have a `bool performed` (or `bool skipped`) argument in the callbacks, to indicate whether the sub procedure was actually performed. Do you have a use case in mind for this?
+
+*--- Thalley (2026-08-17 20:39:36+00:00)
+`@retval -EBUSY if a CAP procedure is already in progress` :)
+
+*--- Thalley (2026-08-17 20:41:28+00:00)
+Sort of; during the implementation of this, there was a bug found in the unit test that then exposed this issue. It's a separate commit, but if you prefer I can move it to a separate PR and move this back into draft until that has been merged.
+
+*--- Thalley (2026-08-17 20:42:28+00:00)
+Good question. We have used `EBADMSG` for invalid stream states, so we could do that here too. Do you prefer that?
+
+*--- Thalley (2026-08-17 20:43:41+00:00)
+It's a fairly simpler internal state to simply determine if the callback should be skipped or not. If we refactor that based on https://github.com/zephyrproject-rtos/zephyr/pull/116355#discussion_r3796531502 then this would be removed again. 
+
+I can some documentation in the internal struct to better describe what this covers
+
+*--- koffes (2026-08-18 07:51:11+00:00)
+Fair. Resolved
+
+*--- koffes (2026-08-18 07:53:00+00:00)
+That is a good idea. We can always handle that in a separate PR if required.
+
+*--- koffes (2026-08-18 07:53:53+00:00)
+Yes.
+
+*--- Thalley (2026-08-18 08:53:00+00:00)
+Wait, this is just a mock function xD It should follow the API's behavior, so this should be -EINVAL as that is what the API function does. 
+
+If we want to change the API, then I suggest that is done in a separate PR after this has been merged.
+
+*--- Thalley (2026-08-18 08:53:43+00:00)
+Oh, there is already documentation for it :) 
+```c
+	/* Whether any request has been sent to a peer device for the current subprocedure */
+	bool subproc_initiated;
+```
+
+*--- koffes (2026-08-18 12:37:06+00:00)
+If this is EALREADY, should this then be set to false?
+
+*--- Thalley (2026-08-18 12:46:51+00:00)
+Good catch! No I think it should actually remain `true` as we will get the `connected` callback from BAP that should call the CAP callback.
+
+*--- alexsven (2026-08-19 07:25:10+00:00)
+This code is repeated 8 times in this file, once per subproc. Suggest you make a static function, will increase maintainability.
+
+*--- Thalley (2026-08-19 10:30:26+00:00)
+Hmm, I see what you mean. 
+
+Some of it could be moved, but the 
+```c
+		cap_initiator_unicast_audio_proc_complete(active_proc);
+
+		return;
+```
+
+Part shall remain. CAP follows an fairly important design that the function that calls `bt_cap_common_get_active_proc` shall be the one to unlock the `active_proc` again, either by `cap_initiator_unicast_audio_proc_complete` or `bt_cap_common_unlock_proc();` Let me try to see if I can find a decent way to pack the 
+
+```
+	/* Let upper layers know that the subprocedure is done for all streams. Since the upper
+	 * layers may call bt_cap_initiator_unicast_audio_cancel(), perform an extra check
+	 * afterwards to ensure that we should continue or not
+	 */
+	cap_initiator_unicast_subproc_complete(active_proc);
+	if (bt_cap_common_proc_is_aborted()) {
+		__ASSERT(bt_cap_common_proc_all_handled(),
+			 "CAP procedure is aborted but not all subprocs were handled after "
+			 "subproc_complete: %u != %u",
+			 active_proc->proc_done_cnt, active_proc->proc_cnt);
+```
+
+part into a meaningful function

@@ -1,0 +1,78 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107570
+TITLE: modbus: rtu: fix buffer overrun in cb_handler_rx
+
+*--- opening post by diegosolano (2026-04-20 07:34:53+00:00)
+## Summary
+
+`cb_handler_rx()` in `subsys/modbus/modbus_serial.c` uses strict equality (`==`) to check whether `uart_buf[]` is full. If `uart_buf_ctr` ever advances past `CONFIG_MODBUS_BUFFER_SIZE` by even one byte — for any reason — the equality misses forever, `modbus_serial_rx_disable()` is never called again, and every subsequent received byte is written to `*uart_buf_ptr++` at an unbounded offset, silently corrupting adjacent static data.
+
+This PR:
+
+1. Changes the bounds check from `==` to `>=` so the disable still fires on any overshoot, regardless of how the counter got past the buffer size.
+2. Loops `uart_fifo_read()` until it returns fewer bytes than requested, per the documented Zephyr UART API contract in `include/zephyr/drivers/uart.h`: *"once uart_irq_rx_ready() is detected, uart_fifo_read() must be called until it reads all available data in the FIFO."*
+3. Bails on a negative return from `uart_fifo_read()` (the documented `-ENOSYS` / `-ENOTSUP` cases) without advancing buffer state.
+
+## Field reproducer
+
+Observed on an nRF9151 product reading Modbus RTU over RS485 with an auto-direction transceiver (no DE/RE# pin exposed) that echoes every transmitted byte back into RX. With back-to-back probes and short inter-frame gaps, the RX buffer overflowed before the RTU inter-frame timer fired, the bounds check was bypassed, and `uart_buf_ptr` walked past `uart_buf[]` into the adjacent `timestamp_func` symbol in the logging subsystem's `.data`. The next `LOG_*()` `BLX`'d a garbage address and faulted.
+
+The exact mechanism by which `uart_buf_ctr` overshot 256 on this configuration (`CONFIG_UART_INTERRUPT_DRIVEN=y` with `uart_nrfx_uarte`) is not fully pinned down — `uarte_nrfx_fifo_read()` reads at most one byte per call, so a spec-compliant driver should not advance the counter by more than 1 per IRQ. The `>=` change catches the overshoot regardless of cause and was sufficient to eliminate the field crash; the drain loop separately makes the code conform to the documented API contract.
+
+## Impact
+
+Affects any Zephyr Modbus RTU user where `uart_buf_ctr` can ever cross `CONFIG_MODBUS_BUFFER_SIZE` — most plausibly on auto-direction RS485 transceivers where self-echo makes high-rate fill paths reachable on otherwise idle buses.
+
+## Test plan
+
+- [x] Built on nRF9151; the prior `SECURE_FAULT` is no longer reproducible on the same hardware and Modbus traffic pattern that previously triggered it reliably within minutes.
+- [ ] No unit test added — the bug requires an early-missed overrun or a long-running burst that the current Modbus test fixtures do not produce. Open to suggestions on a mock UART driver setup.
+
+Signed-off-by: Diego Solano <diegosolano@gmail.com>
+
+*--- Copilot (2026-04-20 07:39:38+00:00)
+`uart_fifo_read()` can return a negative error (e.g. -ENOSYS/-ENOTSUP). Returning immediately here means RX interrupts may stay pending (no FIFO drain/ack) and the ISR can be retriggered continuously. Consider at least logging the error and disabling RX (and/or draining if possible) to avoid an interrupt storm and a stuck Modbus interface.
+```suggestion
+		if (n < 0) {
+			LOG_ERR("uart_fifo_read failed with %d", n);
+			modbus_serial_rx_disable(ctx);
+```
+
+*--- Copilot (2026-04-20 07:39:39+00:00)
+UART API documentation states that once `uart_irq_rx_ready()` is detected, `uart_fifo_read()` should be called until it returns fewer bytes than requested (FIFO drained / interrupt ack), because RX-ready may be edge-triggered. This handler only reads once per ISR, which can drop data or leave RX interrupts unacknowledged on some drivers; consider looping reads until `n < requested` or the Modbus buffer is full.
+
+*--- Copilot (2026-04-20 07:39:39+00:00)
+`uart_fifo_read()` takes an `int size` parameter, but `space` is a `size_t`. Consider using an `int` for the requested read length (or an explicit cast with bounds checking) to avoid implicit narrowing/conversion issues and keep types consistent with the UART API.
+
+*--- Copilot (2026-04-20 07:39:39+00:00)
+This change adds defensive handling for UART drivers that misreport `uart_fifo_read()` return values and for buffer-full detection (`>=`). There’s currently no automated regression test exercising these paths (e.g., a stub UART `fifo_read` that returns a value larger than the requested size, and/or returns a negative error). Consider extending `tests/subsys/modbus` with a mock/emulated UART driver to cover the clamp and error-path behavior so this doesn’t regress.
+
+*--- pdgendt (2026-04-20 08:58:00+00:00)
+This sounds like a bug in those drivers instead? Which one did you use?
+
+*--- diegosolano (2026-05-04 17:19:23+00:00)
+The target was an nRF9151 using the nrfx UARTE interrupt-driven driver (`drivers/serial/uart_nrfx_uarte.c`, `CONFIG_UART_NRFX_UARTE`).
+
+I agree that a driver which reports/copies more than the requested FIFO read length should be fixed in the driver. I still think Modbus should be defensive here for two reasons:
+
+1. `cb_handler_rx()` owns the `uart_buf_ptr`/`uart_buf_ctr` invariant, so it should not allow any UART API inconsistency or negative return to move the Modbus buffer state out of bounds.
+2. Once the equality check misses, every later ISR can write via an already-invalid pointer, so the Modbus failure mode is unbounded memory corruption rather than just a dropped frame.
+
+I pushed an update that keeps the UART API sizes in `int`, loops reads until FIFO drain or buffer full, and disables RX on negative `uart_fifo_read()` so the ISR cannot keep retriggering without a drain/ack.
+
+*--- jfischer-no (2026-05-04 22:54:44+00:00)
+uart_fifo_read() return number of bytes read, means that the code below cannot fix what has already gone wrong. IMO, the documentation is quite clear. All this tinkering around uart_fifo_read() because of an apparent bug in the driver implementation seems suspicious. Could you please point me to the line in the driver that explains this behavior?
+
+*--- diegosolano (2026-05-14 04:46:21+00:00)
+@jfischer-no Thanks for the pushback — you're right and I owe a correction.
+
+I went back to `drivers/serial/uart_nrfx_uarte.c`. The interrupt-driven `uarte_nrfx_fifo_read()` (around line 2803) reads at most one byte per call from `poll_in_byte`, returns 0 or 1, and never negative. So the "driver returns FIFO depth" claim that was in my commit message and PR body wasn't actually supported by the driver source, and the clamp on `n > space` was defending against behavior this driver does not exhibit. Apologies for the unproven assertion.
+
+I have narrowed the patch to what I can defend:
+
+1. `==` → `>=` on the buffer-full check. This is the load-bearing change for the field crash; it catches the overshoot regardless of mechanism.
+2. Loop `uart_fifo_read()` until it returns less than requested, because `include/zephyr/drivers/uart.h` documents that contract explicitly for edge-triggered RX-ready (the previous one-shot read didn't honor it).
+3. Bail on a negative return from `uart_fifo_read()` (the documented `-ENOSYS`/`-ENOTSUP` cases) without advancing buffer state.
+
+Dropped: the clamp on `n > space`, the warning logs, and the `modbus_serial_rx_disable()` on those error paths.
+
+The exact mechanism by which `uart_buf_ctr` ended up past 256 on our configuration (`CONFIG_UART_INTERRUPT_DRIVEN=y` with `uart_nrfx_uarte`) is still not pinned down — if it turns out to be a driver bug it belongs in the driver as you said, not papered over here. The `>=` change is defensible either way and was sufficient to eliminate the field crash. PR body and commit message updated.

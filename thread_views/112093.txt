@@ -1,0 +1,66 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112093
+TITLE: samples: bluetooth: peripheral_esp: read real temperature sensor
+
+*--- opening post by vignesh-aerlync (2026-06-26 09:39:59+00:00)
+The Environmental Sensing sample only published simulated values. Add an optional ESP_USE_HARDWARE_SENSOR Kconfig that, when set, reads a real temperature from a Devicetree alias instead.
+
+ess_simulate() is renamed to ess_update_data(). It resolves ambient-temp0 first, then die-temp0, fetches a sample and converts `SENSOR_CHAN_AMBIENT_TEMP` (falling back to `SENSOR_CHAN_DIE_TEMP`) into the 0.01 degree C units of the ESS Temperature characteristic. Any fetch or read failure falls back to the original simulated data, so the default build is unchanged.
+
+Fixes: #112091
+
+*--- asmellby (2026-06-26 12:34:01+00:00)
+Several boards have a `dht0` alias for a digital humidity and temperature sensor. Should it be considered too?
+
+*--- asmellby (2026-06-26 12:36:48+00:00)
+Should this option be `default y` if the devicetree node exists?
+
+The `peripheral_ht` sample achieves the same goal in a different way: https://github.com/zephyrproject-rtos/zephyr/blob/main/samples/bluetooth/peripheral_ht/Kconfig#L7
+
+In my opinion the two samples should have the same behavior, whether that is to default to a hardware sensor OOTB or not. It would also be good for the implementations to be consistent to communicate a clear best practice.
+
+*--- vignesh-aerlync (2026-06-26 13:32:57+00:00)
+That is a good suggestion! I checked the codebase and saw  `dht0`  is used by many boards. I will updated the PR to resolve aliases in the order of  ambient-temp0  ->  dht0  ->  die-temp0 . Thanks for the suggestion!
+
+*--- vignesh-aerlync (2026-06-26 14:03:35+00:00)
+Agreed! I've updated the Kconfig to  `default y`  if the devicetree alias exists to match  peripheral_ht , and used  select `SENSOR` .
+
+*--- vignesh-aerlync (2026-06-27 07:39:25+00:00)
+Hi @sreeramIfx @teburd, could you please review this PR when you get a chance? Thanks!
+
+*--- sreeramIfx (2026-06-28 18:00:16+00:00)
+redundant to check `device_is_ready(temp_dev)` here, already checked in main()
+
+*--- sreeramIfx (2026-06-28 18:03:22+00:00)
+Since the only difference is how we get the val, I would suggest to refactor this function to have conditional code just for getting the value and have a single copy of `update_temperature(NULL, &ess_svc.attrs[2], val, &sensor_1);`
+
+Maybe helper inline functions to get_xxx()?
+
+*--- sreeramIfx (2026-06-28 18:15:59+00:00)
+```suggestion
+```
+
+*--- sreeramIfx (2026-06-28 18:19:21+00:00)
+```suggestion
+static const struct device *const temp_dev = DEVICE_DT_GET(TEMP_NODE);
+```
+
+*--- sreeramIfx (2026-06-28 18:21:38+00:00)
+please move the declarations to the beginning of the function
+
+*--- vignesh-aerlync (2026-06-29 10:17:59+00:00)
+Done. I've refactored the function to evaluate all the values (hardware or simulated) at the top, and unified the  update_temperature  calls at the bottom.
+
+*--- Copilot (2026-06-29 16:00:27+00:00)
+Grammar: "an physical" should be "a physical" since "physical" begins with a consonant sound.
+
+*--- Copilot (2026-06-29 16:00:28+00:00)
+The device readiness result is only printed at startup and never used to gate hardware reads. When `temp_dev` is not ready (e.g. the underlying bus/driver failed to initialize), `ess_update_data()` still calls `sensor_sample_fetch(temp_dev)` every second, which is the case the startup message warns about. The closely related `peripheral_ht` sample avoids this by treating an unready device as "no device" and falling back to simulation. Guarding the fetch with `device_is_ready()` makes the fallback to simulated data actually take effect when the sensor isn't ready.
+
+*--- Copilot (2026-06-29 16:00:28+00:00)
+Optional: the inline conversion from `struct sensor_value` to 0.01-degree units is duplicated here (and for humidity below) and uses 32-bit arithmetic. The sensor API already provides `sensor_value_to_centi()` (include/zephyr/drivers/sensor.h), which performs exactly this conversion using `int64_t`. Reusing it removes the duplication and avoids potential overflow in the intermediate multiplication.
+
+*--- Copilot (2026-06-29 16:00:28+00:00)
+Convention: other sample Kconfig files place `source "Kconfig.zephyr"` at the end, after the application-specific config symbols (see samples/bluetooth/peripheral_ht/Kconfig:16 and samples/bluetooth/peripheral_hids/Kconfig:13). Here it is sourced before the `ESP_USE_HARDWARE_SENSOR` definition. Consider moving `source "Kconfig.zephyr"` below the config block to match the established layout.
+
+*--- vignesh-aerlync (2026-06-30 18:39:06+00:00)
+Hi, @sreeramIfx   [here](https://github.com/zephyrproject-rtos/zephyr/pull/112093#discussion_r3488309483) You are completely right, checking `device_is_ready()` inside the 1-second update loop is redundant.  But this is also valid point. To resolve both issues cleanly without adding overhead to the loop, I will updated `main()` to simply set `temp_dev = NULL` if it fails the readiness check at boot. The update loop now just checks `if (temp_dev != NULL)`, which safely bypasses the hardware fetch and triggers the fallback without any redundant readiness checks.

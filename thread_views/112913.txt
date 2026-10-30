@@ -1,0 +1,29 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112913
+TITLE: scripts: zspdx: SPDX NTIA compliance improvements
+
+*--- opening post by kartben (2026-07-07 14:14:43+00:00)
+When running SBOMs generated using `west spdx` through `sbomqs score`, a few easy-to-fix compliance issues get flagged, which this series of commits address:
+
+- Missing SBOM author and tool version in SPDX Creator fields
+- Missing package supplier and revision-pinned PURL on Zephyr and module packages
+- Source and dependency packages lacking descriptive comments explaining their role since it's not obvious what all these `xxx-deps` and `xxx-sources` packages are and what's the difference between them...
+
+Also, although not necessarily an NTIA compliance issue, CMake UTILITY targets (`run`, `flash`, `menuconfig`, …) were unnecessarily polluting the build SBOM so they've been dropped.
+
+*--- kartben (2026-07-08 22:38:03+00:00)
+~~I'll update the MAINTAINERS file so that the SBOM testsuite falls under the SPDX area like it should ~~. Well, it is, but I guess zephyrbot picked Build system maintainer as next-in-line assignee since the overall `application_development` folder falls under Build. Given the scope of the proposed changes I'm confident it should be fine that I would be the proper assignee.
+
+*--- sylvioalves (2026-07-10 12:34:37+00:00)
+would you also update this comment? now the first pass emits external ref, right?
+
+*--- sylvioalves (2026-07-10 12:37:09+00:00)
+The test hard-asserts the first module-deps supplier is Zephyr's org..but `_supplier_from_url` returns the raw namespace for any repo not under `zephyrproject-rtos`. I think this can break downstream repos or forks? Can you evaluate?
+
+*--- Copilot (2026-07-10 14:33:50+00:00)
+`has_relationship()` matches relationship types via substring search on `str(rel.relationship_type)`, which is brittle and can produce false positives/negatives depending on how `RelationshipType.__str__` is implemented. Since the rest of this test module already compares `RelationshipType` enums directly, normalize `rel_type` to a `RelationshipType` (when passed as a string) and compare with `==`.
+
+*--- Copilot (2026-07-10 14:33:50+00:00)
+`zephyr_version()` parses only MAJOR/MINOR/PATCHLEVEL, but `zspdx`’s version parsing (`walker._read_zephyr_version`) appends `EXTRAVERSION` when set. This mismatch will make the creator/tool-version assertions fail on release candidates or any build where `EXTRAVERSION` is non-empty. Parse and append `EXTRAVERSION` here too so the test matches the generator behavior.
+
+*--- kartben (2026-08-03 18:19:24+00:00)
+I plan on improving supplier/originator handling as a follow-up

@@ -1,0 +1,155 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/103303
+TITLE: coap: implement edhoc/oscore support
+
+*--- opening post by mkschreder (2026-02-01 13:26:11+00:00)
+Let's get edhoc/oscore fully working with standard zephyr samples!
+
+What is the best test suit that we can use in order to verify compliance with all of the RFCs? Shall we perhaps make one based on libcoap client and bats? What do you guys think? 
+
+I have been able to get to the following so far in this branch:
+
+Build coap server with oscore:
+```
+west build -b qemu_x86 samples/net/coap/coap_server/ -T sample.net.sockets.coap_server.oscore
+```
+
+Then start the server. 
+
+Run shell script to test it with default compiled in values:
+
+```
+bash samples/net/coap/test-oscore.sh
+```
+
+This runs a few requests against the sample server. 
+
+The config for coap client looks like this:
+```
+# Master Secret (same for client + server)
+master_secret,hex,"0102030405060708090a0b0c0d0e0f10"
+
+# Master Salt (optional, but if you use it, must match server)
+master_salt,hex,"9e7ca92223786340"
+
+# Sender ID (THIS device, i.e. the client)
+sender_id,ascii,"client"
+
+# Recipient ID (remote peer, i.e. the server)
+recipient_id,ascii,"server"
+
+# Replay window (usually 32)
+replay_window,integer,32
+
+# AEAD algorithm (default is 10 = AES-CCM-16-64-128, but be explicit)
+aead_alg,integer,10
+
+# HKDF algorithm (default is -10 = direct+HKDF-SHA-256, optional but can be explicit)
+hkdf_alg,integer,-10
+```
+
+So far so good.
+
+*--- stgloorious (2026-02-01 14:51:17+00:00)
+This documentation seems redundant, I would personally remove the long comment.
+
+*--- stgloorious (2026-02-01 15:01:04+00:00)
+Maybe we should check here for the OSCORE option again with `coap_oscore_msg_has_oscore`? RFC8613, section 4.1.3.7:
+
+> Nested use of OSCORE is not supported: If OSCORE processing detects an OSCORE option in the original CoAP message, then processing SHALL be stopped.
+
+*--- stgloorious (2026-02-01 15:05:03+00:00)
+I would rename this to `coap_oscore_has_payload` for clarity. For me `validate` suggests more processing, maybe already the decryption.
+
+*--- mkschreder (2026-02-01 18:12:18+00:00)
+> Hi @mkschreder
+> 
+> Thank you very much for this excellent PR. I could not verify it in absolute detail, but in general it looks very good. I only have few minor comments. In the past weeks I was working on something similar #101126, but obviously your implementation is much more complete and mature.
+> 
+> I think you should add a `Signed-Off-By:` line to your commits by using `git commit -s` to comply with the [Guideline](https://docs.zephyrproject.org/latest/contribute/guidelines.html#dco-sign-off).
+> 
+> Also linking #101110, which I think can definitely be closed now given how much effort went into this OSCORE/EDHOC integration.
+> 
+> Also CCing @StefanHri, author and maintainer of uedhoc-uoscore.
+
+Yes I will add signed off by to all commits. Thanks for the heads up!
+
+*--- Copilot (2026-02-02 02:26:51+00:00)
+match_queries_edhoc()` takes `num_queries` but only evaluates the single `query` pointer, so requests with multiple Uri-Query options can be incorrectly accepted/rejected (unlike the existing resource query matching which considers all queries). Update this helper to iterate over all query options (e.g., accept only if every query matches the synthetic EDHOC attributes, or mirror the semantics used by `match_queries_resource()` / `match_attributes()` for real resources).
+
+*--- Copilot (2026-02-02 02:26:51+00:00)
+match_queries_edhoc()` takes `num_queries` but only evaluates the single `query` pointer, so requests with multiple Uri-Query options can be incorrectly accepted/rejected (unlike the existing resource query matching which considers all queries). Update this helper to iterate over all query options (e.g., accept only if every query matches the synthetic EDHOC attributes, or mirror the semantics used by `match_queries_resource()` / `match_attributes()` for real resources).
+
+*--- Copilot (2026-02-02 02:26:51+00:00)
+coap_no_response_check()` implements RFC 7967 suppression bits for 2.xx/4.xx/5.xx but omits 3.xx handling. RFC 7967 also defines a suppression bit for 3.xx responses; add a `case 3:` mapping (and corresponding `COAP_NO_RESPONSE_SUPPRESS_3_XX` bit) so redirection responses can be suppressed as requested.
+
+*--- Copilot (2026-02-02 02:26:51+00:00)
+For a "check" helper, returning `-ENOENT` when the option is absent forces all callers to special-case the “no option” path even though it’s not an error condition. Consider returning `0` with `*suppress = false` when the option is absent, and reserve negative returns for actual parse/validation failures (e.g., invalid length). This makes the API easier to consume and less error-prone.
+```suggestion
+		return (ret < 0) ? ret : 0;
+```
+
+*--- Copilot (2026-02-02 02:26:52+00:00)
+The sequence increment is atomic, but the returned token buffer is a single shared static array that is written on every call. Concurrent calls can race and overwrite the same buffer contents, causing callers to observe corrupted/duplicated tokens. Prefer an API that writes into a caller-provided buffer (or return a thread-local buffer), or protect the write with a lock if the API contract allows.
+```suggestion
+	static _Thread_local uint8_t token[COAP_TOKEN_MAX_LEN];
+```
+
+*--- Copilot (2026-02-02 02:26:52+00:00)
+The sequence increment is atomic, but the returned token buffer is a single shared static array that is written on every call. Concurrent calls can race and overwrite the same buffer contents, causing callers to observe corrupted/duplicated tokens. Prefer an API that writes into a caller-provided buffer (or return a thread-local buffer), or protect the write with a lock if the API contract allows.
+
+*--- Copilot (2026-02-02 02:26:52+00:00)
+This README states unprotected requests are accepted by default, but the sample code in `src/main.c` sets `coap_server.data->require_oscore = true;`, which will reject unprotected requests. Update the README to match the actual default behavior (or adjust the sample default to match the documented behavior).
+```suggestion
+By default, the sample server requires OSCORE for all requests (``require_oscore = true``).
+To accept both OSCORE-protected and unprotected requests, set ``require_oscore`` to ``false`` in the source code.
+```
+
+*--- Copilot (2026-02-02 02:26:53+00:00)
+New RFC-facing behaviors were added (e.g., Block vs Q-Block mixing validation, CBOR missing-block list encode/decode, No-Response processing, Hop-Limit parsing/update). Since this is protocol compliance logic, please add unit tests that cover valid/invalid combinations and boundary cases (e.g., mixed Block/Q-Block rejection, duplicate/out-of-order missing-blocks handling, No-Response mask behavior per class).
+
+*--- Copilot (2026-02-02 02:26:53+00:00)
+New RFC-facing behaviors were added (e.g., Block vs Q-Block mixing validation, CBOR missing-block list encode/decode, No-Response processing, Hop-Limit parsing/update). Since this is protocol compliance logic, please add unit tests that cover valid/invalid combinations and boundary cases (e.g., mixed Block/Q-Block rejection, duplicate/out-of-order missing-blocks handling, No-Response mask behavior per class).
+
+*--- Copilot (2026-02-02 02:26:53+00:00)
+The OSCORE option parser is security- and interoperability-critical and has multiple validation branches (reserved bits, reserved n values, truncation checks, presence/absence of kid/kid-context). Add unit tests that feed in representative OSCORE option values and assert correct `kid` extraction and correct errno returns for malformed inputs.
+
+*--- Copilot (2026-02-02 02:26:53+00:00)
+The OSCORE option parser is security- and interoperability-critical and has multiple validation branches (reserved bits, reserved n values, truncation checks, presence/absence of kid/kid-context). Add unit tests that feed in representative OSCORE option values and assert correct `kid` extraction and correct errno returns for malformed inputs.
+
+*--- Copilot (2026-02-02 02:26:54+00:00)
+The OSCORE option parser is security- and interoperability-critical and has multiple validation branches (reserved bits, reserved n values, truncation checks, presence/absence of kid/kid-context). Add unit tests that feed in representative OSCORE option values and assert correct `kid` extraction and correct errno returns for malformed inputs.
+
+*--- Copilot (2026-02-02 02:26:54+00:00)
+The OSCORE option parser is security- and interoperability-critical and has multiple validation branches (reserved bits, reserved n values, truncation checks, presence/absence of kid/kid-context). Add unit tests that feed in representative OSCORE option values and assert correct `kid` extraction and correct errno returns for malformed inputs.
+
+*--- Copilot (2026-02-02 02:26:54+00:00)
+The OSCORE option parser is security- and interoperability-critical and has multiple validation branches (reserved bits, reserved n values, truncation checks, presence/absence of kid/kid-context). Add unit tests that feed in representative OSCORE option values and assert correct `kid` extraction and correct errno returns for malformed inputs.
+
+*--- rlubos (2026-02-02 10:56:07+00:00)
+That's a massive contribution, probably will take some time to review this :)
+
+Some early requests - the branch likely needs a rebase to be able to run the CI, also regarding the commits, every commit needs some description. As for the commit titles, please use the following prefixes:
+* `net: coap: ` for commits touching implementation,
+* `samples: net: coap: ` for commits updating samples,
+* `tests: net: coap: ` for commits updating tests.
+
+*--- rlubos (2026-02-02 11:46:14+00:00)
+I totally agree with copilot suggestion here, missing `No response` option should be treated as if the option was present and empty, i.e. no response suppression. That way the function would only fail if the option was malformed.
+
+*--- rlubos (2026-02-02 12:03:23+00:00)
+It'd still send `COAP_RESPONSE_CODE_REQUEST_TOO_LARGE` below though (line 223)?
+
+*--- rlubos (2026-02-02 12:19:35+00:00)
+If you include token, it's no longer an empty ack. Pity there doesn't seem to be a CON example in the RFC, but it's likely not needed to reply with the token at all if no response is expected?
+
+*--- rlubos (2026-02-02 12:20:19+00:00)
+Also, perhaps replying an empty ACK could be implemented in the server as a helper function to avoid code duplication.
+
+*--- rlubos (2026-02-02 12:22:36+00:00)
+Again, where would the 4.02 response be sent? Perhaps that'd also be implemented in a form of a helper function and just use it here (and quit early)?
+
+*--- rlubos (2026-02-02 13:48:35+00:00)
+Shouldn't the application send 4.02 in such case? That said, I wonder if this functionality (checking for No response option and sending empty ACK) shouldn't be abstracted into some helper function at the server level. Every single resource in the sample seems to be handling this case in a same way (which I believe should be **the** standard way to handle this). So we could just have a single function call + early return if the No response case was handled positively.
+
+*--- stgloorious (2026-03-23 13:06:18+00:00)
+@mkschreder Any updates on this? Let me know if you need any support from me.

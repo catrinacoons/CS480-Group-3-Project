@@ -1,0 +1,136 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115877
+TITLE: Bluetooth: Fix CSRK sign counter handling and persistence
+
+*--- opening post by jhedberg (2026-08-11 06:57:59+00:00)
+This PR started out as a fix for missing sign counter persistence (#115879) and grew related fixes for issues found along the way, covering the handling of CSRK sign counters for ATT Signed Write Commands. One commit per fix, in the order below.
+
+### SMP: Verify signed data using the received sign counter
+
+bt_smp_sign_verify() substituted the locally expected sign counter value into the received PDU before running the Signing Algorithm, effectively requiring the peer's counter to match the expected value exactly. The Core Specification instead requires authentication to be performed with the received counter value, with replay protection provided by rejecting counter values that have already been used (Core Spec v6.2, Vol 3, Part C, Section 10.4.2 and Vol 3, Part H, Section 2.4.5 — v6.2 being the last version to specify the data signing feature, before its removal in v6.3). Requiring an exact match permanently desynchronizes signing as soon as the peer skips a counter value, which can happen for legitimate reasons: the peer may consume counter values for signed PDUs that never end up being received, e.g. when retrying a locally failed send with a fresh signature or when disconnecting with signed PDUs still queued. Recovery from that state would require re-pairing.
+
+The final possible counter value (0xFFFFFFFF) is rejected as CSRK exhaustion rather than accepted, since accepting it would wrap the next expected value around to zero, re-opening the replay window for every previously used counter value.
+
+### SMP: Fail closed on local sign counter exhaustion
+
+bt_smp_sign() incremented the local sign counter without bound, so after signing with the final possible value it would silently wrap around to zero and start reusing counter values, which a compliant peer rejects as replays. It now fails closed with -EOVERFLOW once the counter space of the CSRK is exhausted, making it explicit that a new pairing needs to distribute a fresh CSRK before signing can resume. Per the spec's own note, exhausting a 32-bit sign counter takes roughly 117 years at 100,000 signed messages a day, so this is a purely defensive measure.
+
+### ATT: Fix buffer handling on signed write send failure
+
+chan_send() unreferenced the buffer when bt_smp_sign() failed, but its callers retain ownership of the buffer on failure and may requeue it for a later retry, resulting in a freed buffer being requeued (or freed a second time) whenever signing an outgoing Signed Write Command failed. In addition, the buffer state is now saved before signing and restored on send failure, so that a retried buffer is signed fresh instead of growing an extra 12-octet signature on each attempt.
+
+### SMP: Persist CSRK sign counters across reboots
+
+The local and remote CSRK sign counters are part of the bt_keys storage blob, but were only ever written to persistent storage when the bond was initially stored upon pairing completion, i.e. with a counter value of 0. The increments done at runtime by bt_smp_sign() and bt_smp_sign_verify() were never written back to storage.
+
+As a consequence, after a reboot the remote sign counter would be restored to its pairing-time value. Since ATT Signed Write Commands are sent in plaintext over an unencrypted connection, a passive eavesdropper could capture them and replay the entire sequence in its original order after the reboot, passing signature verification again. This defeats the replay protection required by the Core Specification, which ties the sign counter to the lifetime of the CSRK rather than to a power cycle. Security erratum 26047, integrated in Core Spec v6.2, states this requirement explicitly: "Conforming implementations shall be required to store the last verified SignCounter in the security database if data signing is used" (listed in Core Spec v6.3, Vol 1, Part C, Section 16.3).
+
+Similarly, the local sign counter would be restored to its pairing-time value, causing the device to reuse already-used counter values when signing, which a compliant peer will reject as replays.
+
+Fix this by storing the keys after each counter increment. Note that CSRKs are only ever distributed for bonding pairings, so the keys being stored here are guaranteed to already have a settings entry, and bt_keys_store() is a no-op when CONFIG_BT_SETTINGS is disabled.
+
+Fixes #115879
+
+*--- jhedberg (2026-08-11 07:15:26+00:00)
+Note: This entire feature was deprecated in Bluetooth 6.3, so it's fair to start deprecating it in Zephyr as well. I've created https://github.com/zephyrproject-rtos/zephyr/issues/115883 so that this doesn't get forgotten.
+
+*--- Copilot (2026-08-11 08:06:05+00:00)
+`bt_keys_store()` can fail, but this path still returns success and ATT executes the verified write. The durable counter then remains stale, so after a reboot the same captured command can verify again—the vulnerability this change is intended to close. Handle the save failure with a fail-closed policy that prevents the command from being accepted and prevents the stale CSRK state from being reused.
+
+This issue also appears on line 5253 of the same file.
+
+*--- Thalley (2026-08-11 08:15:50+00:00)
+We need to check the return value of `bt_keys_store` :)
+
+*--- jhedberg (2026-08-11 09:12:39+00:00)
+Fixed
+
+*--- Thalley (2026-08-11 09:23:05+00:00)
+```suggestion
+			bt_conn_dst_str(conn);
+```
+
+*--- Thalley (2026-08-11 09:23:14+00:00)
+```suggestion
+			bt_conn_dst_str(conn);
+```
+
+*--- Copilot (2026-08-11 09:26:41+00:00)
+This new error path leaves `chan_send()`'s ownership contract broken: `att.c:476-481` unreferences `buf` when `bt_smp_sign()` returns this error, but `process_queue()` at `att.c:592-596` then prepends that same pointer for retry. A settings write failure can therefore queue a freed buffer (use-after-free/double-free). Please update the ATT error path so a failed signing attempt either preserves a restored buffer for retry or tells `process_queue()` to drop it without requeueing.
+
+*--- jhedberg (2026-08-11 10:00:14+00:00)
+Done
+
+*--- jhedberg (2026-08-11 10:00:16+00:00)
+Done
+
+*--- jhedberg (2026-08-11 10:00:17+00:00)
+Good catch, although this is a pre-existing bug rather than something introduced by this PR: `bt_smp_sign()` could already fail before this change (missing local CSRK, crypto failure), and all `chan_send()` callers assume they retain buffer ownership on failure (`process_queue()` and `bt_att_chan_send_rsp()` requeue the buffer, `bt_att_chan_req_send()` puts it back into the request). Since this PR adds a more realistic trigger, I've fixed it in a separate preparatory commit.
+
+Note that just dropping the `net_buf_unref()` wouldn't have been enough for the retry to work: `bt_smp_sign()` extends the buffer with the 12-octet signature before it can fail, so a retried buffer would grow by 12 octets per attempt. The fix therefore also saves/restores the buffer state around the signing call, mirroring what's already done for the `bt_l2cap_send_pdu()` error path further down in the same function.
+
+*--- Copilot (2026-08-11 10:10:05+00:00)
+This only restores the pre-sign state when `bt_smp_sign()` itself fails. After signing succeeds, line 491 overwrites `state` with the already-signed state; if `bt_l2cap_send_pdu()` then fails, that signed buffer is restored and requeued by `process_queue()` (lines 596-602). The retry calls `bt_smp_sign()` again, appending another 12-byte signature despite `gatt.c:5077-5078` reserving room for only one, and advances/persists a second counter, which can assert or desynchronize the peers. Preserve enough retry state to resend the same signed PDU without signing it again, or restore the original PDU while safely coordinating the persisted counter.
+
+*--- Thalley (2026-08-11 10:42:37+00:00)
+@jhedberg This doesn't sound good :D But it also seems unrelated to your original changes
+
+*--- jhedberg (2026-08-11 10:53:53+00:00)
+Good catch, fixed in 452950e. The pre-signing state saved before `bt_smp_sign()` is now kept as the restore point on the `bt_l2cap_send_pdu()` failure path too, instead of being re-saved after signing. A retry therefore signs the buffer fresh rather than stacking a second signature onto a buffer sized for only one.
+
+This is safe with respect to the counter: `bt_smp_sign()` persists its incremented counter as soon as it succeeds, before the PDU is handed to L2CAP, so the failed attempt's counter value is already consumed regardless of whether the send succeeds. Restoring to the unsigned state and re-signing on retry just means that value is skipped rather than reused, which the peer accepts since it only requires the counter to strictly increase, not stay contiguous.
+
+*--- jhedberg (2026-08-11 10:59:16+00:00)
+Hmm, in retrospect this will make it more difficult to backport (I believe `bt_conn_dst_str()` is quite recent). But probably that should just be handled by manually constructing the backport commit.
+
+*--- Copilot (2026-08-11 11:58:02+00:00)
+The retry can permanently desynchronize two Zephyr peers. `bt_smp_sign_verify()` currently verifies only `keys->remote_csrk.cnt` (smp.c:5189-5208), so it does not accept a skipped counter. If `bt_l2cap_send_pdu()` fails after signing, this path persists counter N+1, restores the unsigned PDU, and retries with N+1; the peer still expects N and rejects this and every later write. Either retain/retry the already-signed PDU without signing it again, or update verification to authenticate and accept a received counter greater than or equal to the next expected value before persisting that received value.
+
+*--- Thalley (2026-08-13 10:47:15+00:00)
+Ah, yeah, that's a good point
+
+*--- Thalley (2026-08-13 10:47:44+00:00)
+@jhedberg another valid comment from Copilot? :(
+
+*--- jhedberg (2026-08-13 10:59:21+00:00)
+Taking a look
+
+*--- jhedberg (2026-08-13 11:14:40+00:00)
+Good catch. The exact-match behavior in bt_smp_sign_verify() was actually itself non-compliant: the spec requires the Signing Algorithm to be performed with the received counter value, with replay protection provided by rejecting counter values that have already been used (Core Spec v6.2, Vol 3, Part C, Section 10.4.2 — the last version to specify data signing before its removal in v6.3). Besides rejecting the retry behavior introduced here, requiring an exact match would also permanently desynchronize signing if the peer ever consumed counter values for PDUs that were never received, e.g. by disconnecting with signed PDUs still queued.
+
+Addressed by taking the second suggested option: a new first commit in the series makes signature verification authenticate the PDU with the received counter value and only reject values lower than the next expected one, so skipped counter values are now accepted.
+
+*--- jhedberg (2026-08-13 11:19:04+00:00)
+Can't wait to get this entire feature out from the tree as soon as 4.5 is released :D
+
+*--- Copilot (2026-08-13 11:31:50+00:00)
+When an authenticated PDU carries counter `UINT32_MAX`, this addition wraps the stored next counter to zero. Every previously captured signature then passes the `cnt < remote_csrk.cnt` replay check again under the same CSRK, defeating the persistence/replay protection this change adds. Treat the CSRK as exhausted (or fail closed before wrapping) instead of storing zero.
+
+*--- Thalley (2026-08-13 11:38:28+00:00)
+If we do want to allow wrapping, I suggest that we add a comment here stating that wrapping is intentional. I do not like when values may intentionally overflow, without an explicit comment stating that this intentional, and not a bug/oversight
+
+*--- jhedberg (2026-08-13 12:02:09+00:00)
+Made this fail closed instead of allowing the wrap: signature verification now rejects a received counter of 0xFFFFFFFF, treating the CSRK as exhausted, and a new commit makes bt_smp_sign() stop with -EOVERFLOW before ever using that final value, so neither the remote nor the local counter can wrap anymore. Recovery from exhaustion is distributing a fresh CSRK through a new pairing.
+
+@Thalley since the wrap is now impossible rather than intentional, the comments at both spots explain why the final counter value is never used instead. This also matches the erratum 26047 wording in Core Spec v6.2, Vol 3, Part H, Section 2.4.5, which has the verifier store the last verified SignCounter and accept only greater values — under that model the counter space simply runs out, with no wrap-around defined. As the spec's own note points out, exhausting a 32-bit sign counter takes roughly 117 years at 100,000 signed messages a day, so this is a purely defensive measure.
+
+*--- sjanc (2026-08-13 12:07:07+00:00)
+there is stil 1 user of this in tree,  if I recall correctly some EDTT tests depend on this..
+
+```tests/bsim/bluetooth/ll/edtt/gatt_test_app/prj_llcp.conf:CONFIG_BT_SIGNING=y```
+
+*--- jhedberg (2026-08-13 12:13:48+00:00)
+Thanks for flagging. I guess that should then be removed in the same go.
+
+*--- Copilot (2026-08-13 12:28:51+00:00)
+This rollback is not safe when two application threads send signed commands concurrently: `bt_att_send()` invokes `att_send_process()` synchronously without serializing callers (`att.c:4046-4060`). If one store fails after another signing operation has advanced and persisted the shared counter, this decrement rolls back the later operation and the next PDU reuses a counter the peer has already consumed. Serialize the complete local counter read/sign/increment/store/rollback transaction per key.
+
+*--- Thalley (2026-08-13 12:30:19+00:00)
+It's a fair point; `bt_smp_sign_verify` is not thread safe. 
+
+Unfortunately I think that nearly everything in Zephyr related to IDs and keys are not thread safe today, so perhaps we can just keep this as is, as the fix is much larger than this PR
+
+*--- jhedberg (2026-08-13 12:37:45+00:00)
+@sjanc actually, I don't think we should have any code in the tree that accesses deprecated features, so that test code should likely be removed already now.
+
+*--- jhedberg (2026-08-13 12:39:09+00:00)
+Agree with @Thalley — the race is real, but keys/ID state has no locking anywhere in the host today, and signing runs both in the caller's context (via bt_att_send()) and in the TX processor, so properly serializing this means giving the keys subsystem a locking model rather than a one-off fix here. That work is part of my ongoing host threading re-architecture, so keeping this PR as is.

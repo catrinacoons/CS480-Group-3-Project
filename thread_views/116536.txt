@@ -1,0 +1,15 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116536
+TITLE: [Backport v3.7-branch] Bluetooth: Host: Introduce a general purpose Bluetooth workqueue
+
+*--- opening post by d3zd3z (2026-08-17 20:36:47+00:00)
+Backport of the fix from #93033 to `v3.7-branch`.
+
+Fixes: #116523
+
+*--- Copilot (2026-08-17 20:42:18+00:00)
+`l2cap_chan_destroy()` cancels `le_chan->rx_work` asynchronously. If the channel is destroyed from a different thread than the Bluetooth workqueue (e.g., during teardown), `rx_work` could be running concurrently and still reference a channel object that the subsequent `released()` callback may free/reuse. Consider using `k_work_cancel_sync()` when not running in the work item's queue thread (similar to the existing `rtx_work` cancel logic) to guarantee the handler is no longer executing before returning.
+
+*--- d3zd3z (2026-08-19 17:09:40+00:00)
+Closing in favour of #116709, which @jhedberg prepared for this branch.
+
+This backport carried the general-purpose Bluetooth workqueue infrastructure that 22896cb8d6f2 depends on, which isn't suitable for a stable branch. #116709 is a self-contained equivalent that fixes the same issue (#116523) without it.

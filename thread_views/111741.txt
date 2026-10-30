@@ -1,0 +1,19 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111741
+TITLE: tracing: overhaul  tracing sample, add a new pipeline sample for tracing and add a trace viewer script
+
+*--- opening post by nashif (2026-06-21 21:59:18+00:00)
+- **samples: tracing: demonstrate more tracing features in one sample**
+- **samples: tracing: make prj.conf a working baseline and dedupe overlays**
+- **samples: tracing: make default be semhihosting**
+- **scripts: tracing: add a console CTF trace viewer**
+- **scripts: tracing: read priority from thread_sched_priority_set**
+- **samples: tracing: make space for more tracing samples**
+- **samples: tracing: add a sensor-pipeline tracing sample**
+
+
+[![asciicast](https://asciinema.org/a/Pk0BYZ6ydqjDk7Pe.svg)](https://asciinema.org/a/Pk0BYZ6ydqjDk7Pe)
+
+*--- teburd (2026-06-30 00:15:01+00:00)
+To add to @MaureenHelm's comment...
+
+Very nice

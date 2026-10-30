@@ -1,0 +1,48 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/101709
+TITLE: boards: Add support for DFRobot Beetle RP2350
+
+*--- opening post by pyhys (2026-01-03 10:56:01+00:00)
+Tested with the commands mentioned in index.rst
+
+Product photo from https://www.dfrobot.com/product-2913.html
+
+Resulting documentation https://builds.zephyrproject.io/zephyr/pr/101709/docs/boards/dfrobot/beetle_rp2350/doc/index.html
+
+*--- Copilot (2026-01-06 12:33:43+00:00)
+The label "LED GP18" is incorrect. According to the documentation and the pinctrl configuration, the LED is connected to GPIO25, not GPIO18. The label should be "LED GP25" to accurately reflect the hardware connection.
+```suggestion
+			label = "LED GP25";
+```
+
+*--- Copilot (2026-01-06 12:33:43+00:00)
+The copyright year in this file is 2025, but other files in the PR use 2026 (e.g., beetle_rp2350.dtsi, Kconfig files, defconfig files). For consistency and accuracy, this should be updated to 2026.
+```suggestion
+# Copyright (c) 2026 Stephano Cetola
+```
+
+*--- Copilot (2026-01-06 12:33:44+00:00)
+The copyright year in this file is 2025, but other files in the PR consistently use 2026. This should be updated to 2026 for consistency across the board support files.
+```suggestion
+ * Copyright (c) 2026 Stephano Cetola
+```
+
+*--- Copilot (2026-01-06 12:33:44+00:00)
+The copyright year in this file is 2022, which appears to be from the source file this was adapted from. Since this is a new file added in 2026, it should have a copyright notice that reflects 2026 as the year this board support was created.
+```suggestion
+# Copyright (c) 2026 Tokita, Hiroshi <tokita.hiroshi@gmail.com>
+```
+
+*--- Copilot (2026-01-06 12:33:44+00:00)
+The word "adaptor" should be spelled "adapter" for consistency with the rest of the codebase and standard terminology. This appears in both the comment and would align with the function name "set_adapter_speed_if_not_set" used below.
+```suggestion
+# Set the adapter speed, if unset, and given as an argument.
+```
+
+*--- pyhys (2026-01-06 22:14:15+00:00)
+Nice catch! I changed to "User LED"
+
+*--- pyhys (2026-01-06 22:17:34+00:00)
+@kartben Regarding the copilot review: The supporting files are needed for RP2350 based boards, but I have not modified these files so I did not change the copyright year. As I haven't written these files, I prefer to keep them exactly as original. Of course I will change according to the copilot suggestions if you prefer that.
+
+*--- pyhys (2026-01-11 17:45:42+00:00)
+@kartben Changed "adaptor" to "adapter", as suggested by Copilot.

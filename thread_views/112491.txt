@@ -1,0 +1,6 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112491
+TITLE: tests: kernel: sleep: document and consolidate sleep tests
+
+*--- opening post by nashif (2026-07-01 10:57:40+00:00)
+- **tests: kernel: sleep: document test cases for traceability**
+- **tests: kernel: sleep: merge sched/wraparound tick-wrap test**

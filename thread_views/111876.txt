@@ -1,0 +1,19 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111876
+TITLE: net: if: Fix potential deadlock in case multiple interfaces go up in parallel
+
+*--- opening post by rlubos (2026-06-23 14:40:07+00:00)
+* Unlock the interface mutex before operations that can cause deadlock (virtual/ipv4/ipv6 bringup). This should be safe, as functions like `rejoin_multicast_groups()` etc. lock the mutex on their own when accessing interface data.
+* `iface_ipv6_stop()` did not lock the mutex when iterating the address table, so improve that.
+* Update `rejoin_ipv6_mcast_groups() ` to avoid sending MLD reports with interface mutex locked, to avoid deadlocks.
+* Finally add regression tests that detected the deadlock, to confirm the issue is solved. Note I had to do this as a separate test suite, as it required MLD/ND to be enabled and the existing `tests/net/iface` test suite had just too many tests relying on MLD/ND being disabled to make it feasible to extend.
+
+Fixes #111757
+
+*--- Copilot (2026-06-23 14:45:56+00:00)
+The comment above the rejoin loop refers to starting DAD, but the code below re-joins multicast addresses via net_ipv6_mld_rejoin(). This is misleading when reasoning about locking and the deadlock fix; update the comment to match the actual behavior.
+
+*--- Copilot (2026-06-23 15:06:53+00:00)
+New C source file header is missing the recommended SPDX-FileCopyrightText line. Zephyr’s contribution guidelines recommend SPDX/REUSE headers with both SPDX-FileCopyrightText and SPDX-License-Identifier at the very top of each file.
+
+*--- Copilot (2026-06-23 15:06:53+00:00)
+New file header is missing the recommended SPDX-FileCopyrightText line. Zephyr’s contribution guidelines recommend SPDX/REUSE headers with both SPDX-FileCopyrightText and SPDX-License-Identifier at the very top of each file.

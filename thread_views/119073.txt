@@ -1,0 +1,32 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/119073
+TITLE: subsys/bluetooth: Cast OTS offset from off_t to long when logging
+
+*--- opening post by keith-packard (2026-09-14 18:40:19+00:00)
+Log formats were using %ld, assuming that off_t was equivalent to long. Place an explicit cast in the code so that when off_t is wider, the value is still displayed correctly.
+
+This is a piece of PR #114917
+
+*--- Copilot (2026-09-15 08:37:01+00:00)
+On 32-bit targets with Picolibc's 64-bit `off_t`, this cast truncates exactly the out-of-range value being reported (for example, `UINT32_MAX + 1` can be logged as `0`). Casting to `long long` and using `%lld` preserves the value while still resolving the format mismatch.
+
+This issue also appears on line 1494 of the same file.
+
+*--- Copilot (2026-09-15 08:37:01+00:00)
+A valid `off_t` can still exceed `LONG_MAX` before this check on a 32-bit target, so the cast can print a negative offset. Also, `size.cur` is `uint32_t`, not `size_t`, leaving `%zu` mismatched. Use arguments whose types match the format specifiers.
+
+This issue also appears on line 1499 of the same file.
+
+*--- Copilot (2026-09-15 08:37:01+00:00)
+Casting only `offset` to `long` can truncate it before the sum on 32-bit targets, and `%zu` still mismatches the `uint32_t` allocation size. Compute the logged sum in a wide type and format both arguments accordingly.
+
+*--- keith-packard (2026-09-15 17:24:57+00:00)
+> Based on the Copilot comments, wouldn't it be safer to use `long long` for `off_t`? Unfortunately we do not have a PRI macro for `off_t` :|
+
+The issue is that places a requirement that the C library support 'long long' formatted output, which is optional (and fairly expensive). And, while the API for these objects uses `off_t`, in practice they're all constrained by the address space of the target, which Zephyr assumes can be represented by a `long`'.
+
+*--- Thalley (2026-09-16 21:19:58+00:00)
+> > Based on the Copilot comments, wouldn't it be safer to use `long long` for `off_t`? Unfortunately we do not have a PRI macro for `off_t` :|
+> 
+> The issue is that places a requirement that the C library support 'long long' formatted output, which is optional (and fairly expensive). And, while the API for these objects uses `off_t`, in practice they're all constrained by the address space of the target, which Zephyr assumes can be represented by a `long`'.
+
+Fair point :) Consider putting that the in commit message as well

@@ -1,0 +1,16 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113239
+TITLE: [v3.7-branch] Bump Mbed TLS to version 3.6.7
+
+*--- opening post by valeriosetti (2026-07-10 13:33:19+00:00)
+Bump Mbed TLS to version 3.6.7
+
+Fixes #113372
+
+*--- tomi-font (2026-07-21 11:50:39+00:00)
+Dropped the manual listing of the CVEs to get this PR in. Please review.
+
+*--- Copilot (2026-07-21 11:54:08+00:00)
+The 3.7.3 security section says "The following CVEs are addressed by this release" but doesn't list any CVEs before jumping to the generic vulnerabilities link. Either list the CVEs addressed by the Mbed TLS 3.6.7 update here, or adjust the wording so the section isn't left as an empty promise.
+
+*--- Copilot (2026-07-21 11:54:08+00:00)
+The "Issues fixed" section for 3.7.3 is currently empty, even though the PR description says it fixes #113372. Please add the issue entry (and any others relevant to 3.7.3) to keep the release notes consistent with prior maintenance release sections.

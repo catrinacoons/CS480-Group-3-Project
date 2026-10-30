@@ -1,0 +1,57 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115174
+TITLE: kernel: smp: replace SMP_BOOT_DELAY with per-CPU devicetree deferral
+
+*--- opening post by nashif (2026-08-02 17:22:26+00:00)
+CONFIG_SMP_BOOT_DELAY was a global, application-level switch that made
+the kernel skip starting every secondary CPU at boot, used in-tree only
+by two tests and in practice by one platform class (intel_adsp, where
+the host or PM policy brings DSP cores up on demand). Boot topology is
+a hardware/platform property, and all-or-nothing is needlessly coarse.
+
+Replace it with a per-CPU devicetree flag, zephyr,deferred-start, on
+the /cpus children (mirroring zephyr,deferred-init for devices):
+z_smp_init() now always runs and simply skips flagged CPUs, which are
+brought up at run time with the existing k_smp_cpu_start() (or
+k_smp_cpu_resume()). Deferral is per CPU, so asymmetric bring-up
+(start some cores at boot, defer others) is now expressible, and the
+special-case branch disappears from the boot path.
+
+The flag is declared in the common cpu.yaml binding. The lookup uses
+DT_PROP_OR() so cpu nodes whose binding does not cover the property
+simply cannot be deferred rather than breaking the build; a binding
+for the intel,x86_64 compatible used by qemu_x86_64's cpu nodes was
+missing entirely and is added.
+
+The two users are converted: tests/kernel/multiprocessing/
+smp_boot_delay marks the secondary CPUs in per-board overlays (both
+tests pass on qemu_x86_64) and tests/boards/intel_adsp/smoke gains
+overlays for its four platforms (all build). Normal SMP boot is
+unaffected (verified on qemu_x86_64, all CPUs online).
+
+Out-of-tree users migrate by dropping CONFIG_SMP_BOOT_DELAY=y and
+adding zephyr,deferred-start to the deferred cpu nodes in their board
+overlay.
+
+*--- maass-hamburg (2026-08-03 07:36:41+00:00)
+this path is mandetory
+
+*--- nashif (2026-08-07 00:51:45+00:00)
+@dcpleung PTAL
+
+*--- dcpleung (2026-08-10 17:29:18+00:00)
+Probably a good future optimization to use a uint32_t bitmap instead of an array of boolean to save a few bytes.
+
+*--- dcpleung (2026-08-10 17:31:26+00:00)
+PTL has 5 CPUs where the extra two are described `dts/xtensa/intel/intel_adsp_ace30_ptl.dtsi`
+
+*--- nashif (2026-08-10 20:15:30+00:00)
+I measured this before deciding, and it turns out the array already costs nothing in the common case. Since it's const and all-zero when no CPU is deferred, GCC drops it entirely
+
+*--- dcpleung (2026-08-10 20:48:07+00:00)
+I mean the case where there are deferred starts. Some of these would be true which would take up space. But this is for future optimization.
+
+*--- nashif (2026-08-11 12:15:35+00:00)
+sure, what is the harm for checking?
+
+*--- maass-hamburg (2026-08-11 14:35:10+00:00)
+the else case may be considered dead code

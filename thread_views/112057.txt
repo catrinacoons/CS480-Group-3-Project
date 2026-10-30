@@ -1,0 +1,191 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112057
+TITLE: drivers: i2s: stm32_sai: support shared and separate kernel clocks
+
+*--- opening post by mariopaja (2026-06-25 18:42:11+00:00)
+Some STM32 SAI nodes may expose a shared kernel clock for both sub-blocks, while others may provide different kernel clocks for sub-block A and sub-block B.
+
+These changes allow the driver to handle SAI nodes with different kernel clock layouts. Nodes with sai_ker_ck use a shared kernel clock for both sub-blocks, while nodes with sai_a_ker_ck and sai_b_ker_ck use separate kernel clocks for each sub-block.
+
+*--- etienne-lms (2026-07-04 13:43:16+00:00)
+I think you can remove `pclk_len`.
+
+*--- etienne-lms (2026-07-04 13:45:15+00:00)
+No real need to copy `sai_cfg->sai_ck` locally. Is it to get rid of the possible `dropped const` build trace message?
+
+*--- etienne-lms (2026-07-04 13:48:16+00:00)
+```suggestion
+		SAI_KER_CK_INIT(inst)                                                            \
+        };                                                                                           \
+
+*--- etienne-lms (2026-07-04 13:55:18+00:00)
+*Doxygen Coverage Delta Check* complains here.
+To get rid of this CI test issue, I'd suggest to add  `/** @cond INTERNAL_HIDDEN */` (line 10) and `/** @endcond */` (file end) in this header file. 
+https://github.com/zephyrproject-rtos/zephyr/pull/112094 is already  attempting to fix the Doxygen issues in STM32 clock header files.
+
+*--- mariopaja (2026-07-04 13:56:20+00:00)
+Any idea why exactly `Doxygen Coverage Delta Check` is failing?
+
+*--- etienne-lms (2026-07-04 14:00:07+00:00)
+While at it, define also `SAI2A_SEL` (bits 6 to 8)?
+
+*--- mariopaja (2026-07-04 14:04:49+00:00)
+I did not because it is the same as SAI23, but sure :)
+
+*--- mariopaja (2026-07-04 14:12:03+00:00)
+Yes, for this reason I did that, Should I drop it?
+
+*--- etienne-lms (2026-07-04 14:20:12+00:00)
+That a false positive of SonarKube, IMHO, not needed or desired. But i'd let @erwango and @mathieuchopstm advise you for this.
+
+*--- etienne-lms (2026-07-04 14:26:38+00:00)
+No, you need either:
+```c
+/** @cond INTERNAL_HIDDEN */
+/* Device domain clocks selection helpers (RM0455.pdf) */
+#define SAI2A_SEL(val)		STM32_DT_CLOCK_SELECT((val), 8, 6, D2CCIP1R_REG)
+#define SAI2B_SEL(val)      STM32_DT_CLOCK_SELECT((val), 11, 9, D2CCIP1R_REG)
+/** @endcond */
+```
+But I would recommend:
+```patch
+ /*
+  * Copyright (c) 2022 Linaro Limited
+  *
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ #ifndef ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_STM32H7_CLOCK_H_
+ #define ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_STM32H7_CLOCK_H_
+ 
+ #include "stm32_common_clocks.h"
+ 
++/** @cond INTERNAL_HIDDEN */
++
+ 
+ (snip)
+ 
++/** @endcond */
++
+ #endif /* ZEPHYR_INCLUDE_DT_BINDINGS_CLOCK_STM32H7_CLOCK_H_ */
+
+*--- mariopaja (2026-07-04 14:29:21+00:00)
+Thank you!
+
+*--- etienne-lms (2026-07-04 14:30:55+00:00)
+Well that does the jobs as-is in your latest version.
+
+That said, I missed possition of these new macros in the file. Prefer place it in bit ranges order:
+```patch
+ /** D2CCIP1R devices */
+ #define SAI1_SEL(val)		STM32_DT_CLOCK_SELECT((val), 2, 0, D2CCIP1R_REG)
+ #define SAI23_SEL(val)		STM32_DT_CLOCK_SELECT((val), 8, 6, D2CCIP1R_REG)
++#define SAI2A_SEL(val)		SAI23_SEL(val)
++#define SAI2B_SEL(val)		STM32_DT_CLOCK_SELECT((val), 11, 9, D2CCIP1R_REG)
+ #define SPI123_SEL(val)		STM32_DT_CLOCK_SELECT((val), 14, 12, D2CCIP1R_REG)
+ #define SPI45_SEL(val)		STM32_DT_CLOCK_SELECT((val), 18, 16, D2CCIP1R_REG)
+ #define SPDIF_SEL(val)		STM32_DT_CLOCK_SELECT((val), 21, 20, D2CCIP1R_REG)
+ #define DFSDM1_SEL(val)		STM32_DT_CLOCK_SELECT((val), 24, 24, D2CCIP1R_REG)
+ #define FDCAN_SEL(val)		STM32_DT_CLOCK_SELECT((val), 29, 28, D2CCIP1R_REG)
+ #define SWP_SEL(val)		STM32_DT_CLOCK_SELECT((val), 31, 31, D2CCIP1R_REG)
+
+*--- mathieuchopstm (2026-07-07 14:44:52+00:00)
+just ignore it, SonarCube doesn't understand that the `void *` argument is opaque (and thus its `const`-ness doesn't matter)
+
+*--- mathieuchopstm (2026-07-07 14:47:39+00:00)
+I think this can be simplified to just:
+
+```suggestion
+        /*
+         * Configuration for shared mux or for
+         * SAIn_A mux depending on implementation.
+         */
+	const struct stm32_pclken sai_a_shared_ker_ck;
+	const struct stm32_pclken sai_b_ker_ck;
+	bool has_shared_ker_ck: 1;
+```
+
+where `sai_a_shared_ker_ck` is used for either shared or SAInA depending on product ~~(unless there are products where there is both a shared mux AND a per-subblock mux?)~~
+
+Edit: it seems like STM32N6 has no kernel clock? In this case, two `bool`s would be needed: `has_ker_ck: 1` and `has_shared_ker_ck: 1`
+
+*--- mathieuchopstm (2026-07-07 14:48:18+00:00)
+This would become unconditional (always configure `sai_a_shared_ker_ck`)
+
+*--- mathieuchopstm (2026-07-07 14:49:27+00:00)
+This would be `if (!sai_cfg->has_shared_ker_ck) { /* configure SAIn_B clock */ }`
+
+*--- mathieuchopstm (2026-07-07 14:49:51+00:00)
+Should be asserted at build time... if even necessary.
+
+*--- mathieuchopstm (2026-07-07 14:52:29+00:00)
+Missing an entry for `sai_ck`:
+`"sai_ck" for configuring the peripheral bus clock`
+
+*--- mathieuchopstm (2026-07-07 14:53:12+00:00)
+Maybe reword/add a line to say "either `sai_ker_ck` or both `sai_a_ker_ck`+`sai_b_ker_ck` must be present"
+
+*--- mariopaja (2026-07-07 15:03:45+00:00)
+N6-DK will have the clock config in the `*_common.dtsi`. 
+
+If it is missing, it defaults to clock selection 0. For this reason I thought it is okay
+
+*--- mariopaja (2026-07-07 16:18:01+00:00)
+But this means that sai clock selection must always be provided. At the moment there are several cases on which I have not configured the clock
+
+*--- Copilot (2026-07-08 07:31:00+00:00)
+SAI_KER_CK_FIELD_INIT uses a literal designated initializer `.name`, which does not expand to the struct member (e.g. `.sai_ker_ck`) and will not compile (no `name` member in struct stm32_sai_cfg). Use the macro parameter as the designated field name.
+
+*--- Copilot (2026-07-08 07:31:01+00:00)
+The `clock-names` schema is incorrect for a string-array: `enum` at the property level constrains the *entire array* rather than each item, and the block also overrides `base.yaml` without re-stating `type: string-array`. This can cause devicetree validation failures for valid multi-clock nodes. Also, because this property is now required, all existing `st,stm32-sai` nodes need `clock-names` (e.g. `dts/arm/st/h5/stm32h562.dtsi` has a `sai2` instance without it).
+
+*--- Copilot (2026-07-08 07:31:01+00:00)
+Indentation of the new `SAI2B_SEL` macro doesn’t match the surrounding `#define` alignment (tabs used elsewhere in this header). This makes the block inconsistent and harder to scan.
+
+*--- Copilot (2026-07-08 07:31:02+00:00)
+New file header is missing `SPDX-FileCopyrightText` (Zephyr requires SPDX file headers on new files).
+
+*--- Copilot (2026-07-08 07:31:02+00:00)
+`&pll3` is configured but never enabled (`status = "okay"`). On STM32H7, PLLs are `status = "disabled"` by default, so this overlay’s SAI2B kernel clock source (PLL3_P) likely won’t be applied.
+
+*--- mathieuchopstm (2026-07-08 10:33:41+00:00)
+yes, I realized later. then I think we should go with the `two bools` idea here:
+https://github.com/zephyrproject-rtos/zephyr/pull/112057#discussion_r3537404931
+
+*--- mariopaja (2026-07-10 07:58:30+00:00)
+I had forgotten to update the SAI2A clock name on the **h7a3.dtsi**
+
+*--- mathieuchopstm (2026-07-10 08:52:26+00:00)
+Can you confirm this is a false positive?
+
+*--- mariopaja (2026-07-10 09:17:45+00:00)
+The right question is should I update the clocks so only only SAI2_A is configured, or should I enable both SAI2A & SAI2B and have it as a sample with both clocks configured?
+
+Because It is the possibility to configure the clocks independently
+
+*--- mariopaja (2026-07-10 09:22:15+00:00)
+@mathieuchopstm This is also not true. Because the nodes can be configured independently from each other and it is not mandatory both clocks to be present. I will update it
+
+*--- mariopaja (2026-07-10 09:48:59+00:00)
+I converted the majority to a comment just to documment and show the possibility and kept only the node that is active
+
+*--- mariopaja (2026-07-16 09:45:56+00:00)
+ping @mathieuchopstm @etienne-lms
+
+*--- erwango (2026-07-17 14:42:28+00:00)
+This min/maxItems stuff is only available  in Linux I guess
+
+*--- mathieuchopstm (2026-07-23 08:42:49+00:00)
+Fair point. If you prefer, we can go back to `sai_ker_ck` / `sai_ker_a_ck` + `sai_ker_b_ck` but the driver should in any case never retain more than 3 cells (e.g., `BUILD_ASSERT(!(HAS_CLOCK_NAME(sai_ker_ck) && (HAS_CLOCK_NAME(sai_ker_a_ck) || HAS_CLOCK_NAME(sai_ker_b_ck))), "either unified or separate kernel clocks, not both");`
+
+\+ see also https://github.com/zephyrproject-rtos/zephyr/pull/112057#discussion_r3636729952
+
+*--- mathieuchopstm (2026-07-23 08:43:19+00:00)
+If only SAI2A is used by the board, I guess it's sufficient to configure only it as you have done.
+
+*--- mathieuchopstm (2026-07-23 08:45:30+00:00)
+Perhaps we could check from the subnode device that the parent has a corresponding kernel clock btw... in this case, maybe we do need three bools `has_sai_a_ker_ck`+`has_sai_b_ker_ck`+`has_sai_shared_ker_ck`.
+
+*--- mariopaja (2026-07-23 09:26:43+00:00)
+I think SAIn_B clock is an exception and the majority of series do not support it.  I guess it is fine to leave it as is.
+
+*--- mariopaja (2026-08-04 13:06:51+00:00)
+ping @erwango

@@ -1,0 +1,12 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116430
+TITLE: [Backport v3.7-branch] drivers: fuel_gauge: reject oversized len
+
+*--- opening post by d3zd3z (2026-08-16 21:29:55+00:00)
+Backport of the fix from #115762 to `v3.7-branch`.
+
+Fixes: #116420
+
+*--- Copilot (2026-08-16 21:32:40+00:00)
+`len` is a `size_t` but `z_impl_fuel_gauge_get_props()` iterates with `for (int i = 0; i < len; i++)` (see include/zephyr/drivers/fuel_gauge.h). If a caller passes `len > INT_MAX` this can overflow `i` (undefined behavior) and potentially loop unexpectedly long. Add a syscall-side bound check before calling the implementation.
+
+This issue also appears on line 57 of the same file.

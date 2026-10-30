@@ -1,0 +1,43 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114271
+TITLE: soc: nxp: mcxe31x: add SAI (I2S) support
+
+*--- opening post by lucien-nxp (2026-07-22 06:57:16+00:00)
+Add SAI (I2S) support for MCXE31x and enable SAI0 on FRDM-MCXE31B.
+
+- `clock_control: nxp_mc_cgm`: SAI gate/rate clock entries
+- `i2s: mcux_sai`: stream deconfiguration per the i2s API, FIFO
+  pointer reset on stream start, and a new `nxp,bclk-source` binding
+  property (defaults to the master clock divider, so existing users
+  are unaffected) for SoCs whose SAI bit clock derives from the bus
+  clock
+- `soc: mcxe31x`: real `nxp,mcux-i2s` nodes with clocks and eDMA
+  channels, `I2S_HAS_PLL_SETTING=n`
+- `boards: frdm_mcxe31b`: SAI0 on header J1; each pad's input path is
+  looped back on-pad, so TX-to-RX loopback needs no external wiring
+- `tests: drivers: i2s`: i2s_speed overlay for the board
+
+Testing: `tests/drivers/i2s/i2s_speed` on FRDM-MCXE31B — all eight
+sample-rate cases pass with no external connections; default-config
+regression checked (`hello_world` selection signature unchanged).
+
+*--- Copilot (2026-07-22 13:12:07+00:00)
+Deconfigure path (frame_clk_freq == 0U) can currently run even if the selected stream is in a non-configurable state (e.g. RUNNING), because the state guard above is not stream-specific. In that case this branch would purge queues and flip the state to NOT_READY without stopping DMA/SAI, leaving the stream in an inconsistent state. Also, the stream config is left populated, so callers can observe stale cfg/mem_slab after deconfigure.
+
+*--- lucien-nxp (2026-07-28 06:07:44+00:00)
+Updated.
+
+*--- lucien-nxp (2026-07-28 06:08:18+00:00)
+Hi @hakehuang 
+Could you help do a test for frdm-mcxe31b platform? Thank you.
+
+*--- hakehuang (2026-07-28 07:28:48+00:00)
+board regression test pass on  i2s_mcux typical platform and frdm_mcxe31b on v4.4.0-8820-gec7d865d10fb
+
+*--- lucien-nxp (2026-07-28 11:02:46+00:00)
+Only rebase to resolve the conflicts.
+
+*--- lucien-nxp (2026-07-30 06:52:55+00:00)
+This PR only support sai feature on mcxe31x platform, only add/change the code related to NXP, add @zejiang0jason into assignee list. FYI.
+
+Hi @iuliana-prodan @zejiang0jason @TomasBarakNXP 
+Could you help check the PR? Thank you

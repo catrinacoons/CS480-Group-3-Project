@@ -1,0 +1,11 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115802
+TITLE: Bluetooth: ATT: Fix truncation of prepare write length
+
+*--- opening post by jhedberg (2026-08-10 11:57:34+00:00)
+att_prep_write_rsp() declared its len parameter as uint8_t while its only caller, att_prepare_write_req(), passes buf->len which is a uint16_t. Any prepare write carrying more than 255 octets of value data therefore had its length silently truncated to the low byte before being stored in the uint16_t len member of struct prep_data.
+
+This is only reachable once the negotiated ATT MTU is allowed to exceed 255 via CONFIG_BT_L2CAP_TX_MTU, in which case long writes corrupt the data handed to the attribute write callback, and a value length whose low byte happens to be zero degenerates into repeated zero-length writes.
+
+Widen the parameter to uint16_t so that it matches both the caller and the struct member it is assigned to.
+
+Fixes #108227

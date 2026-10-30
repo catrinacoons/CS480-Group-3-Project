@@ -1,0 +1,143 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118215
+TITLE: Bluetooth: HCI: stm32wba: send API data length fix
+
+*--- opening post by msmttchr (2026-09-03 12:08:56+00:00)
+This PR fixes some issues in the HCI driver, as follow:
+
+- fix the data length check (this generates invalid buffer size errors)
+- preserve buffer ownership on error paths, consistent with API expectations
+ [See also bt_hci_send documentation]
+- Factorize common code to improve maintainability
+
+*--- Copilot (2026-09-03 12:26:35+00:00)
+This drops support for the largest configured HCI commands. `BT_BUF_EVT_SIZE(255U)` provides 258 bytes, but when `CONFIG_BT_BUF_CMD_TX_SIZE=255`, `BT_BUF_CMD_TX_SIZE` is 259 bytes (H:4 byte + 3-byte command header + 255-byte parameters). Such a valid command now fails the size check below. Keep the maximum of the command and event sizes.
+
+*--- Copilot (2026-09-03 12:26:36+00:00)
+`BleStack_Request()` can legitimately return zero when no synchronous event is produced; for example, `BT_HCI_OP_HOST_NUM_COMPLETED_PACKETS` is documented in `subsys/bluetooth/host/hci_core.c:465-477` as generating no command complete/status event. Here, subtracting one wraps to 65535, so stale data is parsed and the successful transmission is reported as `-ENOMEM`. Treat a zero event length as success without parsing an event.
+
+This issue also appears on line 340 of the same file.
+
+*--- mathieuchopstm (2026-09-03 13:11:14+00:00)
+Prefer:
+```suggestion
+	if (err == 0) {
+```
+
+*--- mathieuchopstm (2026-09-03 13:24:33+00:00)
+Q: what is special for `BT_HCI_H4_CMD` commands that requires a local copy? (i.e., why is the local copy not made unconditionally?)
+
+*--- msmttchr (2026-09-03 14:37:53+00:00)
+Normally, no local copy is needed; `buf->data` and `buf->len` could be passed directly to `BleStack_Request`.
+However, the same buffer is also used for the response, and `BleStack_Request` is not aware of the buffer size.
+So, the buffer must be large enough to hold the longest possible response.
+For packets like ACL, there is no response, so copying is not necessary.
+
+*--- msmttchr (2026-09-03 15:39:40+00:00)
+Done.
+
+*--- Thalley (2026-09-03 18:52:58+00:00)
+```suggestion
+		if (evt_buf != NULL) {
+```
+
+*--- Copilot (2026-09-03 19:14:02+00:00)
+`treat_evt()` also returns `NULL` for malformed headers, payload-length mismatches, and insufficient tailroom, so translating every failure to `-ENOMEM` reports the wrong cause. Please make the helper expose a specific error (or validate separately) so allocation, protocol, and size failures return appropriate errno values.
+
+*--- Copilot (2026-09-03 19:14:02+00:00)
+This label has a leading space, unlike the file's existing column-zero labels and Linux kernel style. Move it to column zero to avoid a style-check failure.
+
+*--- Thalley (2026-09-04 08:22:15+00:00)
+@msmttchr Please also fix this one :)
+
+*--- Thalley (2026-09-04 08:34:45+00:00)
+```suggestion
+	/* Free buffer only if no errors, otherwise responsibility falls
+	 * into the caller
+```
+
+Minor :D
+
+*--- Thalley (2026-09-04 08:35:10+00:00)
+Suggest to move this after the mutex
+
+*--- Thalley (2026-09-04 08:35:40+00:00)
+```suggestion
+	 * not know the length of the buffer, we need to set it to the maximum length
+```
+Minor
+
+*--- Copilot (2026-09-04 08:41:26+00:00)
+If `treat_evt()` rejects the synchronous response (for example, because no event buffer is available or the response length is invalid), this path silently drops the command response but still returns success and releases `buf`. The host can then remain blocked waiting for a completion that was never delivered. Propagate the existing `receive_data()` error so the failure and buffer ownership follow the documented send contract.
+
+*--- Thalley (2026-09-04 09:16:35+00:00)
+Minor since this is moved code:
+
+
+```suggestion
+	if (event_length != 0U) {
+```
+
+*--- Copilot (2026-09-04 09:19:26+00:00)
+The phrase “responsibility falls into the caller” is grammatically incorrect. Clarify that the caller retains responsibility on failure.
+
+*--- mathieuchopstm (2026-09-07 12:18:45+00:00)
+OK. Could be interesting as a comment in the driver, but non-blocking.
+
+*--- jhedberg (2026-09-07 12:40:30+00:00)
+Before, a non-zero return was only interpreted for commands; now it is for any packet type. `blestack.h` says a request is "HCI/ACI command packet or ACL data packet" and that "the response packet is returned in the same buffer", without stating that ACL gives zero. If the stack can return a response for ACL or ISO, it was written into the host's net_buf, uncopied and unchecked for size, and is parsed as an event here. If it never does, keeping the `BT_HCI_H4_CMD` guard on this block costs one condition and keeps the data path out of it.
+
+*--- jhedberg (2026-09-07 12:40:30+00:00)
+On failure this sets `ll_state_busy`, which the controller thread turns into `ll_intf_chng_evnt_hndlr_state(0x0F)`. That is the flow-control signal of the indication path; for a synchronous response, which is lost either way, is it harmless, or should the sync path skip it?
+
+*--- msmttchr (2026-09-08 07:59:01+00:00)
+> On the commit message: "fix the data length check" does not match the diff, since the command length check is unchanged. What goes away is the tailroom check of the response against a pre-allocated buffer, which is presumably where the "invalid buffer size errors" came from; please describe that, and the failure the ownership fix cures (the host also unrefs on a failed send, so the driver's unconditional unref was a double unref).
+
+Original problem was linked to the fact that the command pre-allocated, the response event buffer (`evt_buf`).
+In doing so, for `hci_raw` mode, it set the HCI packet indicator to 0x04, so original length of 71 bytes was reduced to 70 bytes.,
+When response was provided to command "read local supported command" (sent by BlueZ for example to a Zephyr based HCI over UART), overall length was 71 bytes including the initial 0x04 (see https://github.com/zephyrproject-rtos/zephyr/blob/bc2caf20dd0c7ca6c95c0dae66fd1ccb0e7e6147/include/zephyr/bluetooth/hci_types.h#L33) , the original check was failing since the comparison was as follow:
+`if (event_length > net_buf_tailroom(evt_buf)) {`
+
+Indeed, for commands whose response is less than 71, it worked fine since before the copy of data, the statement `net_buf_reset(evt_buf);` reset the buffer dropping the initial byte.
+
+*--- jhedberg (2026-09-08 08:13:02+00:00)
+> Original problem was linked to the fact that the command pre-allocated, the response event buffer (`evt_buf`).
+
+That is exactly what the commit message should say: the pre-allocated event buffer already carried the H:4 indicator, so its tailroom was one byte short of the 71-byte Read Local Supported Commands response, and smaller responses only passed because `net_buf_reset()` discarded that byte before the copy. Please put that in the message together with the double-unref the ownership change fixes. The two inline questions still stand.
+
+*--- msmttchr (2026-09-08 12:09:34+00:00)
+> Before, a non-zero return was only interpreted for commands; now it is for any packet type. `blestack.h` says a request is "HCI/ACI command packet or ACL data packet" and that "the response packet is returned in the same buffer", without stating that ACL gives zero. If the stack can return a response for ACL or ISO, it was written into the host's net_buf, uncopied and unchecked for size, and is parsed as an event here. If it never does, keeping the `BT_HCI_H4_CMD` guard on this block costs one condition and keeps the data path out of it.
+
+In my understanding `BleStack_Request`, only provide data for synchronous commands. In principle, this could be changed in the future, but I doubt. In all cases, it should return a valid HCI packet, so processing it with `receive_data` could make it 'future' proof. Do you think adding the extra 'if' is still safer?
+
+*--- jhedberg (2026-09-08 12:53:13+00:00)
+The `if` cannot make the write safe: the stack writes before the driver sees the return value, and for ACL/ISO the buffer it would write into is the host's `buf->data`, sized for the data it carried, while commands go through `hci_cmd_buf`, sized for a full event. A data-path response would have overrun the buffer before this block runs. What the guard buys is smaller: the driver never interprets a data-path return value as an event, and the code states the contract you just described, that only synchronous commands produce a response. If that contract changes, this function has to change anyway to route the data path through a response-sized buffer, so there is nothing to future-proof here. I would keep the guard with a comment stating the contract, but I won't block on one condition either way. The other inline question and the commit message are still open.
+
+*--- msmttchr (2026-09-08 14:27:41+00:00)
+Ok, fair point. I am addressing other points at slower pace, sorry for this.
+
+*--- jhedberg (2026-09-09 10:03:10+00:00)
+Looks mostly good now. Still open: the inline question about `ll_state_busy` on the synchronous path, and the commit message should also name the double unref the ownership change fixes, since the host unrefs the command buffer on a failed send as well.
+
+*--- msmttchr (2026-09-10 17:13:16+00:00)
+> On failure this sets `ll_state_busy`, which the controller thread turns into `ll_intf_chng_evnt_hndlr_state(0x0F)`. That is the flow-control signal of the indication path; for a synchronous response, which is lost either way, is it harmless, or should the sync path skip it?
+
+I talked with our experts, and this case is not relevant, so I have removed the flow control from the sync path. In any case, this was important suggestion from your side. Thank you.
+
+*--- msmttchr (2026-09-10 17:13:48+00:00)
+> Looks mostly good now. Still open: the inline question about `ll_state_busy` on the synchronous path, and the commit message should also name the double unref the ownership change fixes, since the host unrefs the command buffer on a failed send as well.
+
+I think everything is clean now.
+
+*--- Thalley (2026-09-11 06:56:45+00:00)
+```suggestion
+	if (err != 0) {
+```
+
+Also suggest to now have empty line between `err = receive_data` and the check here
+
+*--- Thalley (2026-09-11 06:58:37+00:00)
+Outside the scope of this PR since it's just moved, but it's a bit confusing that this function uses `ret` for the return value, while the user of this function uses `err` as the return value. Those are not semantically identical, and it's somewhat odd to use `1` as an error compared to e.g. `-1`
+
+*--- msmttchr (2026-09-11 08:57:55+00:00)
+Indeed, the `BLECB_Indication` is a callback from ST Link layer and it returns value is an `uint8_t` as type with a convention that 0 is no error and any other value is an error. Since ST link layer uses positive numbers for errors, -1 could be odd, even though it will accomplish the target (see further).
+The purpose of the return value is to inform the link layer that event has been processed (0) or not processed (any non-zero value). In the latter case, the ST link layer keeps the event in the internal queue to give another chance to process it at later time.

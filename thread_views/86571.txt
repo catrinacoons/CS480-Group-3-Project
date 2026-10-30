@@ -1,0 +1,291 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/86571
+TITLE: twister: add --check to validate test metadata
+
+*--- opening post by nashif (2025-03-03 13:29:59+00:00)
+for example, running this 
+```./scripts/twister -T samples/ --check```
+
+will result in:
+```
+QA      - filter with no integration platforms in samples/posix/gettimeofday/sample.posix.gettimeofday
+QA      - skip set in samples/tfm_integration/psa_crypto/sample.psa_crypto
+QA      - Too many excluded platforms in samples/userspace/shared_mem/sample.kernel.memory_protection.shared_mem: 6
+QA      - platform_allow in samples/kernel/bootargs/sample.kernel.bootargs.multiboot without integration_platforms
+QA      - build_only set in samples/sensor/mpu6050/sample.sensor.mpu6050
+QA      - build_only set in samples/sensor/6dof_motion_drdy/sample.sensor.6dof_motion_drdy
+QA      - build_only set in samples/sensor/mhz19b/sample.sensor.mhz19b
+QA      - filter with no integration platforms in samples/sensor/mhz19b/sample.sensor.mhz19b
+QA      - platform_allow in samples/sensor/clock/sample.sensor.clock.counter without integration_platforms
+QA      - platform_allow in samples/sensor/clock/sample.sensor.clock.rtc without integration_platforms
+QA      - filter with no integration platforms in samples/sensor/clock/sample.sensor.clock.system
+QA      - build_only set in samples/sensor/max17262/sample.sensor.max17262
+QA      - build_only set in samples/sensor/vl53l0x/sample.sensor.vl53l0x
+QA      - filter with no integration platforms in samples/sensor/bmg160/sample.sensor.bmg160
+QA      - Too many excluded platforms in samples/sensor/accel_trig/sample.sensor.accel_trig: 7
+QA      - build_only set in samples/sensor/mcux_lpcmp/sample.sensor.mcux_lpcmp.no_trigger
+QA      - build_only set in samples/sensor/icm42605/sample.sensor.icm42605
+QA      - filter with no integration platforms in samples/sensor/tmp108/sample.sensor.tmp108
+QA      - build_only set in samples/sensor/sht3xd/sample.sensor.sht3xd
+QA      - build_only set in samples/sensor/sht3xd/sample.sensor.sht3xd.trigger
+QA      - filter with no integration platforms in samples/sensor/max44009/sample.sensor.max44009
+QA      - build_only set in samples/sensor/tdk_apex/sample.sensor.icm42670.apex
+QA      - filter with no integration platforms in samples/sensor/lps22hh/sample.sensor.lps22hh
+QA      - build_only set in samples/sensor/ms5837/sample.sensor.ms5837
+QA      - filter with no integration platforms in samples/sensor/th02/sample.sensor.th02
+QA      - Too many integration platforms in samples/sensor/accel_polling/sample.sensor.accel_polling: 15
+QA      - filter with no integration platforms in samples/sensor/tmp112/sample.sensor.tmp112
+QA      - filter with no integration platforms in samples/sensor/co2_polling/sample.sensor.co2
+QA      - Unsupported depends_on {'uart_interrupt_driven', 'serial'} in samples/sensor/co2_polling/sample.sensor.co2
+QA      - filter with no integration platforms in samples/sensor/max6675/sample.sensor.max6675
+QA      - build_only set in samples/sensor/ina219/sample.drivers.ina219
+QA      - filter with no integration platforms in samples/sensor/sx9500/sample.sensor.sx9500
+QA      - filter with no integration platforms in samples/sensor/stream_fifo/sample.sensor.stream_fifo
+QA      - build_only set in samples/sensor/lsm6dso_i2c_on_i3c/sample.sensor.lsm6dso.i2c_on_i3c_bus
+QA      - filter with no integration platforms in samples/sensor/lsm6dso_i2c_on_i3c/sample.sensor.lsm6dso.i2c_on_i3c_bus
+QA      - build_only set in samples/sensor/grow_r502a/sample.sensor.grow_r502a
+QA      - filter with no integration platforms in samples/sensor/grow_r502a/sample.sensor.grow_r502a
+QA      - Unsupported depends_on {'lis2dh', 'i2c'} in samples/sensor/lis2dh/sample.sensor.lis2dh
+QA      - filter with no integration platforms in samples/sensor/veaa_x_3/sample.sensor.veaa_x_3
+QA      - build_only set in samples/sensor/sgp40_sht4x/sample.sensor.sgp40_sht4x
+QA      - build_only set in samples/sensor/mcux_acmp/sample.sensor.mcux_acmp.no_trigger
+QA      - build_only set in samples/sensor/amg88xx/sample.sensor.amg88xx.amg88xx_grid_eye_eval_shield
+QA      - build_only set in samples/sensor/amg88xx/sample.sensor.amg88xx.amg88xx_eval_kit
+QA      - filter with no integration platforms in samples/sensor/qdec/sample.sensor.qdec_sensor
+QA      - platform_allow in samples/sensor/qdec/sample.sensor.sam_qdec_sensor without integration_platforms
+QA      - Unsupported depends_on {'spi', 'bme280'} in samples/sensor/bme280/sample.sensor.bme280.spi
+QA      - filter with no integration platforms in samples/sensor/soc_voltage/sample.sensor.soc_voltage
+QA      - build_only set in samples/sensor/lps22hh_i3c/sample.sensor.lps22hh.i3c
+QA      - filter with no integration platforms in samples/sensor/lps22hh_i3c/sample.sensor.lps22hh.i3c
+```
+
+
+
+Note: many of the limits and guards are arbitrary, they will be configurable somewhere.
+
+*--- PerMac (2025-03-05 13:34:16+00:00)
+Do we need the 'STEP' level? Maybe such messages can be part of DEBUG?
+
+*--- PerMac (2025-03-05 13:54:41+00:00)
+To me this QA messaging looks like an independent feature, that could be turned on/off regardless of log-level set.
+
+*--- PerMac (2025-03-05 13:57:39+00:00)
+IMO other sets of constants to validate:
+tags, module_names and submodule_names (as in convention for naming tests which could help with test traceability)
+
+*--- PerMac (2025-03-05 14:19:59+00:00)
+this looks wrong. we will end up with >1000 entries, with duplicates. It will be a sum of all supported_features from every platform.
+
+*--- PerMac (2025-03-05 14:47:33+00:00)
+idea: maybe we can define a simple yaml file where all the qa values will be stored and in twister we just use it instead of hardcoded values scattered in multiple places? might make it easier to evaluate all the current QA settings. Would also allow for downstream projects to use their own set of rules if needed.
+
+E.g.:
+qa_values.yaml:
+```
+max_platform_allow: 10
+max_integration_platforms: 5
+max_platform_exclude: 5
+...
+```
+ and then
+ ```
+ import yaml
+with open('qa_values.yaml', 'r') as file:
+    qa_values= yaml.safe_load(file)
+
+if len(suite.platform_allow) > qa_values['max_platform_allow']:
+    logger.qa(f"Too many entries in allow_platform in {suite.name}
+ ```
+
+*--- PerMac (2025-03-05 14:52:33+00:00)
+what makes having "platform_allow" a such special case requiring integration_platforms? TBH I would go step further and set a policy that every scenario should have integration_platforms defined.
+
+*--- PerMac (2025-03-05 15:06:01+00:00)
+some more comments would help to understand the guidelines. Is the idea behind it that all scenarios with "build_only: true" have "build" in their name? If so, the printed output doesn't reflect this.
+
+*--- PerMac (2025-03-05 15:08:50+00:00)
+the condition also depends on platform_allow. Why? The printed output doesn't match this.
+
+*--- PerMac (2025-03-05 15:16:32+00:00)
+looks like some more complex condition, where the output doesn't match exactly the logic in code. This triggers only when there is platform_allow list and it includes at least one platform from default_platforms and there is also integration_platforms, but doesn't include any from default_platforms. Correct? What is the reasoning behind it? Encouraging usage of default_platforms in integration_platforms?
+
+*--- PerMac (2025-03-05 15:26:38+00:00)
+IMO we would have better control and understanding if we extract all existing supported_features and depends_on in advance and add them to constants module instead of recreating the list of supported_features each time. Then we will always see when something new/wrong is being added.
+
+The logic could work both way: having depends_on which no platform supports, but also platform having a supported key which is not used in any test as depends_on
+
+*--- PerMac (2025-03-05 15:29:56+00:00)
+`and self.options.log_level == "QA"` looks redundant,
+
+*--- PerMac (2025-03-05 15:42:10+00:00)
+this `if` seems redundant. Using logger.qa already handles the logic when to print
+
+*--- nashif (2025-03-05 15:48:16+00:00)
+read the note at the end:
+
+```Note: many of the limits and guards are arbitrary, they will be configurable somewhere.```
+
+*--- nashif (2025-03-05 15:58:50+00:00)
+> Do we need the 'STEP' level? Maybe such messages can be part of DEBUG?
+
+DEBUG is very busy and the STEP is for debugging the queue management and focuses on that. This can also be printed in debug mode, but isolation is needed for debugging twister core functionality, not necessarily to debug test execution.
+
+*--- nashif (2025-03-05 16:00:07+00:00)
+Sure, but not part of this change, all of this can be added later.
+
+*--- nashif (2025-03-05 16:56:47+00:00)
+this is supposed to be a set
+
+*--- nashif (2025-03-05 17:00:01+00:00)
+if you have 1 entry in the platform_allow it does not make sense to replicate it into integration_platform, afaik it will have the same effect.
+
+*--- nashif (2025-03-05 17:03:05+00:00)
+that is a hack right now, there are build tests, i.e. things we only build and should NEVER run and we need to mark those differently and distinguish them from build_only set for other reasons or no reason at all. I am thinking to introduce and enforce 'harness: build` for such tests and stop using `build_only`...
+
+*--- nashif (2025-03-05 17:05:51+00:00)
+this should discover issues and missed test oppertunities in CI, i.e. a test that run on native_sim or qemu, but integration_platforms is limited to some hardware platform, see https://github.com/zephyrproject-rtos/zephyr/pull/86493 for example.
+
+Sure, the messaging can be improved.
+
+*--- nashif (2025-03-05 17:07:11+00:00)
+if we want to put this in a constant is open for discussion, right now this tries to use the data as we have it.
+
+*--- nashif (2025-03-05 17:08:14+00:00)
+those will be cleaned up, I was getting the wrong level at some point and did not want the messages to interfere.
+
+*--- nashif (2025-03-05 17:33:49+00:00)
+ditto
+
+*--- PerMac (2025-03-06 09:18:19+00:00)
+"afaik it will have the same effect." there will be some small differences. E.g. when you use integration_platforms a given configuration cannot get skipped (because of one of dozens cases in twister) in most cases as it will be changed to error. Without it there is no such warranty, so you can end up with a configuration that cannot be verified. 
+
+My question can be reworded: "why we need integration_platform when we have platform_allow, and don't need it when there is no platform_allow (unless there is filter)".
+Let's decide in which cases integration_platforms are required (if not in all, which would simplify the logic) and then we can adjust the logic to match it.
+
+*--- golowanow (2025-03-06 10:23:05+00:00)
+```suggestion
+        choices=['NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'TRACE', 'SANITY'],
+```
+imo these are better reflect the purpose.
+
+*--- golowanow (2025-03-06 10:25:44+00:00)
+in all these places, just the same
+```suggestion
+            logger.step(f"op:{op} instance:{self.instance.name}")
+```
+this allows to grep/parse/filter logs much easier than a bunch of new and different entries.
+
+*--- golowanow (2025-03-06 10:31:30+00:00)
+> To me this QA messaging looks like an independent feature, that could be turned on/off regardless of log-level set.
+
+I also think so.
+
+*--- golowanow (2025-03-06 10:34:54+00:00)
+is it a leftover from some other change ? it looks not related to this commit/PR
+
+*--- golowanow (2025-03-06 10:38:12+00:00)
+it can be already a dictionary with constants at one place somewhere instead of these magic values.
+
+*--- nashif (2025-03-06 10:46:34+00:00)
+Another batch of fixes based on the results from this PR: #86716
+
+*--- nashif (2025-03-06 12:21:10+00:00)
+so, to shift focus from the messanger to the message, I removed the logging level thing and added some summary and custom handling:
+
+now, get the results with `./scripts/twister --check`, output:
+
+```
+...
+...
+...
+WARNING - skip: skip set in tests/arch/arm64/arm64_gicv3_its/arch.arm64.gicv3_its
+WARNING - skip: skip set in tests/lib/cmsis_dsp/transform/libraries.cmsis_dsp.transform
+WARNING - skip: skip set in tests/lib/cmsis_dsp/filtering/libraries.cmsis_dsp.filtering
+WARNING - skip: skip set in tests/lib/cmsis_dsp/matrix/libraries.cmsis_dsp.matrix
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.deferred
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.deferred_no_opt
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.immediate
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.immediate_no_opt
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.deferred_cpp
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.deferred_cpp_no_opt
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.immediate_cpp
+WARNING - skip: skip set in tests/subsys/logging/log_stack/logging.stack.immediate_cpp_no_opt
+WARNING - skip: skip set in samples/tfm_integration/psa_crypto/sample.psa_crypto
+WARNING - skip: skip set in samples/drivers/ipm/ipm_esp32/sample.ipm.ipm_esp32
+WARNING - skip: skip set in samples/subsys/shell/fs/sample.filesystem.shell.fuse
+ERROR   - unsupported_depends_on: Unsupported depends_on {'pinctrl', 'nrf'} in tests/drivers/pinctrl/nrf/drivers.pinctrl.nrf
+ERROR   - unsupported_depends_on: Unsupported depends_on {'zms'} in tests/subsys/settings/zms/settings.zms
+ERROR   - unsupported_depends_on: Unsupported depends_on {'serial', 'uart_interrupt_driven'} in samples/sensor/co2_polling/sample.sensor.co2
+ERROR   - unsupported_depends_on: Unsupported depends_on {'i2c', 'lis2dh'} in samples/sensor/lis2dh/sample.sensor.lis2dh
+ERROR   - unsupported_depends_on: Unsupported depends_on {'spi', 'bme280'} in samples/sensor/bme280/sample.sensor.bme280.spi
+ERROR   - unsupported_depends_on: Unsupported depends_on {'mailbox'} in samples/boards/st/h7_dual_core/sample.boards.stm32.h7_dual_core
+ERROR   - unsupported_depends_on: Unsupported depends_on {'gnss'} in samples/drivers/gnss/sample.drivers.gnss
+ERROR   - unsupported_depends_on: Unsupported depends_on {'charger'} in samples/drivers/charger/sample.drivers.charger
+INFO    - Summary of checks:
+INFO    -
++------------------------+------------+---------------+----------------------------------------------+
+| Check                  | Severity   |   Occurrences | Description                                  |
++========================+============+===============+==============================================+
+| harness                | warning    |           451 | Unsupported harness                          |
++------------------------+------------+---------------+----------------------------------------------+
+| build_only             | warning    |           359 | build_only set                               |
++------------------------+------------+---------------+----------------------------------------------+
+| filter_no_integration  | error      |           277 | filter with no integration platforms         |
++------------------------+------------+---------------+----------------------------------------------+
+| allow_no_integration   | error      |           223 | allow_platform without integration_platforms |
++------------------------+------------+---------------+----------------------------------------------+
+| no_default_integration | error      |           140 | No default platforms in integration_platform |
++------------------------+------------+---------------+----------------------------------------------+
+| scenario_count         | warning    |           123 | Too many scenarios                           |
++------------------------+------------+---------------+----------------------------------------------+
+| allow_platform         | warning    |            42 | Too many entries in allow_platform           |
++------------------------+------------+---------------+----------------------------------------------+
+| exclude_platform       | warning    |            36 | Too many excluded platforms                  |
++------------------------+------------+---------------+----------------------------------------------+
+| integration_platform   | warning    |            21 | Too many integration platforms               |
++------------------------+------------+---------------+----------------------------------------------+
+| skip                   | warning    |            15 | skip set                                     |
++------------------------+------------+---------------+----------------------------------------------+
+| unsupported_depends_on | error      |             8 | Unsupported depends_on                       |
++------------------------+------------+---------------+----------------------------------------------+
+```
+
+*--- nashif (2025-03-17 22:23:22+00:00)
+done in  the test configuration file.
+
+*--- hakehuang (2025-04-01 04:17:16+00:00)
+May I raise a request here? can I check the specific platform only? For now it seems to give an overall result.
+
+*--- nashif (2025-04-01 11:10:58+00:00)
+> May I raise a request here? can I check the specific platform only? For now it seems to give an overall result.
+
+not sure what you mean
+
+*--- PerMac (2025-04-01 15:16:50+00:00)
+personal opinion (not a request for change): I find this class and how it is handled hard to follow and it took me some time to understand what is going on. Especially when the tuples defined here are added to a `checks` list every time a given type of issue is found. I believe that using named fields would be easier to understand than using a logic based on a positional argument within a nested structure.
+
+*--- PerMac (2025-04-01 15:28:15+00:00)
+not sure how helpful is this check. Why not just checking if integration_platforms are provided or not (regardless of platform_allow)? Or from another perspective: when it is not an issue when there are no integration_platforms?
+
+*--- PerMac (2025-04-01 15:30:08+00:00)
+the reason string doesn't correspond to the logic (not mentioning platform_key and platform_allow)
+
+*--- hakehuang (2025-04-02 07:22:17+00:00)
+> not sure what you mean
+@nashif  if I run
+`./scripts/twister -p frdm_k64f -T samples/ --check`
+it will only give me the frdm_k64f related check
+
+*--- Copilot (2025-04-23 16:49:34+00:00)
+Clarify if the threshold for triggering a check on 'platform_allow' without 'integration_platforms' should be '>1' instead of '>0'. Confirm that a single entry is acceptable as intended.
+```suggestion
+                            if len(suite.platform_allow) > 0 and not suite.integration_platforms:
+```
+
+*--- Copilot (2025-04-23 16:49:35+00:00)
+The expected set now correctly omits duplicate values; ensure that test expectations fully align with Python set semantics.
+```suggestion
+        ([ '1', '2', '2', '3', '3' ], 'set', { '1', '2', '3' }, None),  # Test with duplicates
+    ],
+    ids=['str to str', 'str to float', 'str to int', 'str to bool', 'str to map',
+         'invalid', 'to unknown', "list to set", "list with duplicates to set"]
+```

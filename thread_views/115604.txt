@@ -1,0 +1,8 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115604
+TITLE: instrumentation: improve Doxygen coverage
+
+*--- opening post by kartben (2026-08-07 06:40:47+00:00)
+Add the missing `@file` block to the instrumentation header and document
+the instrumentation record structure members.
+
+Documentation only, no functional change.

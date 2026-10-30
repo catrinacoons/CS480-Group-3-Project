@@ -1,0 +1,137 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109124
+TITLE: tests: bluetooth: classic: add HID Device functional test
+
+*--- opening post by chengkai15 (2026-05-14 07:26:35+00:00)
+## Summary
+
+Add a pytest-based functional test for the Bluetooth Classic HID Device profile, using Bumble as the HID Host counterpart. This follows the same pattern as existing classic BT tests (`a2dp_sink`, `a2dp_source`, `rfcomm_c`, etc.).
+
+- DUT application (`test_hid_device.c`) provides shell commands for HID Device operations: register, connect, disconnect, reconnect, send report, virtual cable unplug
+- Pytest (`test_hid.py`) uses `bumble.hid.Host` to exercise the full HID protocol over L2CAP control (PSM 0x0011) and interrupt (PSM 0x0013) channels
+
+## Test Cases (8 total)
+
+| # | Test | Description |
+|---|------|-------------|
+| 1 | `test_hid_case_register` | Register HID callbacks + SDP record |
+| 2 | `test_hid_case_connect_host_initiated` | Bumble Host opens L2CAP ctrl+intr → HID connected/disconnected |
+| 3 | `test_hid_case_get_report` | Valid report_id → DATA response; invalid id → ERR_INVALID_REPORT_ID |
+| 4 | `test_hid_case_set_report` | Valid → HANDSHAKE SUCCESS; invalid → ERR_INVALID_REPORT_ID |
+| 5 | `test_hid_case_protocol` | GET_PROTOCOL + SET_PROTOCOL (boot/report mode) |
+| 6 | `test_hid_case_send_input_report` | DUT sends input report → Bumble receives on interrupt channel |
+| 7 | `test_hid_case_suspend_resume` | Host sends SUSPEND/EXIT_SUSPEND → DUT callback fires |
+| 8 | `test_hid_case_virtual_cable_unplug` | DUT sends VCU → Bumble receives notification |
+
+## Dependencies
+
+This PR depends on #94012 (HID Device profile) being merged first. The test uses the `bt_hid_device_*` API and `CONFIG_BT_HID_DEVICE` Kconfig introduced there.
+
+## Test plan
+
+- [x] DUT C code builds successfully on `native_sim` (324/324 objects)
+- [x] Python syntax validation passes (conftest.py + test_hid.py)
+- [x] All Bumble HID imports verified (Host, Message, events, enums)
+- [x] End-to-end verified with dual CSR USB HCI dongles on native_sim: all 10 tests PASS
+
+```
+[TEST 1]  HID Connect (Host initiated)      - PASS
+[TEST 2]  GET_REPORT (valid report_id=2)     - PASS (response: a10200000000)
+[TEST 3]  GET_REPORT (invalid report_id=99)  - PASS (ERR_INVALID_REPORT_ID)
+[TEST 4]  SET_REPORT (valid report_id=2)     - PASS (SUCCESSFUL)
+[TEST 5]  SET_REPORT (invalid report_id=99)  - PASS (ERR_INVALID_REPORT_ID)
+[TEST 6]  GET_PROTOCOL                       - PASS (a001 = Report Protocol)
+[TEST 7]  SET_PROTOCOL (boot)                - PASS (SUCCESSFUL)
+[TEST 8]  SUSPEND                            - PASS
+[TEST 9]  EXIT_SUSPEND                       - PASS
+[TEST 10] HID Disconnect                     - PASS
+```
+
+*--- Copilot (2026-05-14 07:36:30+00:00)
+There is significant code duplication: the helper `setup_bumble_device()` defined at lines 103-121 is never used. Each test case (lines 137-152, 186-201, 265-280, 340-355, 423-438, 479-494, 533-548) repeats the same ~15 lines of Bumble device setup boilerplate. Refactor every test to call `setup_bumble_device()` instead, to reduce ~100 lines of duplication and make future changes (e.g., updates to PairingConfig) only need to be made in one place.
+
+This issue also appears on line 587 of the same file.
+
+*--- Copilot (2026-05-14 07:36:30+00:00)
+`asyncio.get_event_loop()` is deprecated and produces DeprecationWarnings on Python 3.10+ and is scheduled for removal. Inside a running coroutine (which is the case here since these are `async def` functions awaited via `asyncio.run`), use `asyncio.get_running_loop()` instead, or simply construct the future via `loop = asyncio.get_running_loop(); loop.create_future()` once at the top of the coroutine. This affects all 9 occurrences (lines 222, 239, 301, 318, 376, 388, 402, 459, 569).
+
+This issue also appears on line 317 of the same file.
+
+*--- Copilot (2026-05-14 07:36:31+00:00)
+In `hid_case_virtual_cable_unplug`, the DUT command is issued via `shell.exec_command("hid_dev vcu")` directly, while every other test uses the `send_cmd_to_iut(...)` helper that asserts a successful response. This bypasses the consistent error-handling pattern and provides no verification that the command actually executed successfully on the DUT. Use `send_cmd_to_iut(shell, dut, "hid_dev vcu", None)` (or with a parse string) for consistency.
+
+*--- Copilot (2026-05-14 07:36:31+00:00)
+After the VCU completes, the test never calls `bumble_acl_disconnect(...)`. Other tests cleanly tear down the ACL connection at the end. Leaving a stale ACL state across tests in the same pytest session (which uses `pytest_dut_scope: session`) can cause subsequent test cases to fail or behave unpredictably since the DUT may still consider itself paired/connected.
+
+*--- Copilot (2026-05-14 07:36:31+00:00)
+`device_power_on` swallows every exception in an unbounded retry loop. If `power_on()` fails for a non-transient reason (e.g., bad HCI transport, permission error), this will spin indefinitely and the test will only fail by hitting the 180s testcase timeout, with no useful diagnostic. Bound the retry count and/or log the exception, and re-raise after N attempts.
+
+*--- Copilot (2026-05-14 07:36:31+00:00)
+`hid_set_report_cb` reads `buf->len` for logging but does not consume the data with `net_buf_pull_*` or unref it. Whether the caller (`bt_hid_device`) owns the buf after the callback returns is API-contract-dependent; please verify against the `bt_hid_device` set_report callback contract introduced in PR #94012. If callers are expected to consume payload via `net_buf_pull*`, add it; if buf ownership transfers on a non-zero return, the early -ENOENT path may leak/double-free the buffer.
+
+*--- Copilot (2026-05-14 07:36:32+00:00)
+`hid_get_report_cb`/`cmd_send` directly access `hid->boot_mode`, treating the `bt_hid_device` struct as if it has a public layout. Public APIs in Zephyr's Bluetooth stack typically expose accessors (e.g., `bt_hid_device_get_protocol_mode()`); accessing internal struct members from a test app couples the test to private implementation details and will break if the struct is reorganized. Confirm whether `boot_mode` is part of the documented public API or add an accessor.
+
+*--- Copilot (2026-05-14 07:36:32+00:00)
+`hid_pool` is sized for only 2 buffers but is shared between the asynchronous response path in `hid_get_report_cb` and the explicit input report path in `cmd_send`. With back-to-back GET_REPORT/SET_REPORT/SEND traffic, the pool can deplete and `bt_hid_device_create_pdu()` will return NULL, causing tests to fail intermittently. Consider increasing the count to at least 4–8 to provide headroom under realistic test traffic.
+
+*--- Copilot (2026-05-14 07:36:32+00:00)
+`cmd_unregister` is exposed via the shell but never exercised by the pytest harness, and `cmd_reconnect` is registered but the corresponding test described in the PR description ("reconnect") is missing from the test list. Either drop the unused commands or add the missing test cases. The PR description also lists `test_hid_case_virtual_cable_unplug` as test #8 but the table shows 10 tests total — please reconcile the description with the actual 8 test methods present in the file.
+
+*--- Copilot (2026-05-14 07:36:32+00:00)
+Other pytest-based BR/EDR tests in `tests/bluetooth/classic/` (e.g., `a2dp_sink/README.rst`) ship a README describing prerequisites (Bumble version, USB HCI dongle setup, how to run). Adding an equivalent `README.rst` here would help downstream users reproduce the PR's "end-to-end verified with dual CSR USB HCI dongles" results.
+
+*--- Copilot (2026-05-14 07:36:33+00:00)
+`hid_registered` is declared as `int` but used as a boolean flag (assigned 0/1 and tested with `!`). Per Zephyr style, prefer `bool` with `true`/`false` for boolean state. Also note `default_hid` is reset to NULL in `cmd_unregister` but the underlying connection state in the HID stack at the moment of unregister isn't checked — if a HID connection is live, the disconnect callback will fire after `default_hid = NULL`, which is fine, but worth ensuring matches the bt_hid_device unregister contract.
+
+*--- Copilot (2026-05-14 07:36:33+00:00)
+Unused parameters: `cmd_register`, `cmd_unregister`, `cmd_connect`, `cmd_disconnect`, `cmd_reconnect`, `cmd_vcu` all take `argc`/`argv` but never use them. Per Zephyr/MISRA conventions, mark these with `ARG_UNUSED(argc); ARG_UNUSED(argv);` to silence -Wunused-parameter warnings and document intent.
+
+*--- Copilot (2026-05-14 07:36:33+00:00)
+SPDX header style does not match the repo convention required by the Copilot instructions. New files should include both an `SPDX-FileCopyrightText:` line and an `SPDX-License-Identifier:` line. Currently the .c/.py/conf files use a free-form "Copyright 2026 Xiaomi Corporation" line plus the SPDX-License-Identifier, missing the SPDX-FileCopyrightText tag.
+
+*--- chengkai15 (2026-05-14 09:38:41+00:00)
+this is how it's written in the community, and it doesn't affect functionality
+
+*--- chengkai15 (2026-05-14 09:38:52+00:00)
+updated
+
+*--- chengkai15 (2026-05-14 09:39:05+00:00)
+updated
+
+*--- chengkai15 (2026-05-14 09:39:14+00:00)
+updated
+
+*--- chengkai15 (2026-05-14 09:39:53+00:00)
+This is the standard way to write all Zephyr classic BT tests (copied from A2DP). pytest itself has a 180s timeout as a fallback.
+
+*--- chengkai15 (2026-05-14 09:40:27+00:00)
+The API convention is that the ownership of the buf belongs to the stack, and the callback is read-only and not released.
+
+*--- chengkai15 (2026-05-14 09:42:19+00:00)
+The Zephyr community standard is /* Copyright ... */ + SPDX-License-Identifier:, not the REUSE format. All existing tests use this format.
+
+*--- chengkai15 (2026-05-14 09:46:27+00:00)
+boot_mode is a documented public field; direct access is the design intent.
+
+*--- chengkai15 (2026-05-14 09:48:20+00:00)
+updated
+
+*--- chengkai15 (2026-05-14 09:50:06+00:00)
+updated
+
+*--- chengkai15 (2026-05-14 09:51:55+00:00)
+updated
+
+*--- chengkai15 (2026-05-14 09:52:07+00:00)
+updated
+
+*--- chengkai15 (2026-05-14 09:53:29+00:00)
+All classic BT shell code—not one uses ARG_UNUSED.
+
+*--- chengkai15 (2026-05-14 10:03:46+00:00)
+Note: This PR depends on #94012 (Bluetooth HID Device profile) which introduces CONFIG_BT_HID_DEVICE and the bt_hid_device_* API. The following CI failures are expected until #94012 is merged:
+
+   - Kconfig compliance: CONFIG_BT_HID_DEVICE reported as undefined symbol
+   - Twister build: prj.conf references CONFIG_BT_HID_DEVICE which doesn't exist on main yet
+  
+  These will resolve automatically once the dependency PR lands. All 8 test cases pass locally on native_sim with dual USB HCI dongles (CSR 4.2).

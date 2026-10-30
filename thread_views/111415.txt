@@ -1,0 +1,13 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111415
+TITLE: [Backport v4.4-branch] drivers: i2c: i2c_dw: fix target-mode ISR state races and missing START_DET unmask
+
+*--- opening post by d3zd3z (2026-06-16 15:55:18+00:00)
+Backport of the fix from #107537 to `v4.4-branch`.
+
+Fixes: #111412
+
+*--- Copilot (2026-06-16 15:57:51+00:00)
+The PR title/description says this is a backport of #107537 fixing multiple slave-mode ISR issues (cached IC_INTR_STAT usage and clearing read_in_progress on all transaction boundaries), but this change only unmasks START_DET. In this branch, i2c_dw_slave_read_clear_intr_bits() still re-reads IC_INTR_STAT (race with the cached intr_stat in i2c_dw_isr) and read_in_progress is only cleared on STOP_DET, so the other reported contract violations remain. Either narrow the PR title/description to just the START_DET unmask, or backport the remaining functional changes from #107537 as well.
+
+*--- MaureenHelm (2026-07-01 13:59:47+00:00)
+@maass-hamburg PTAL

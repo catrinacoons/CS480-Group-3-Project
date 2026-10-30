@@ -1,0 +1,30 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116750
+TITLE: boards: remove deprecated aliases and fix dangling ds3231 node
+
+*--- opening post by kartben (2026-08-19 09:35:35+00:00)
+Removes eleven board name aliases from `boards/deprecated.cmake` that reached the end of their two-release deprecation period, plus a follow-up fix from the DS3231 removal. Not on tracker #94255.
+
+- boards: remove board name aliases deprecated in 4.3 and earlier
+- boards: intel: cyclonev_socdk: fix dangling ds3231 compatible
+
+All but `panb511evb` were already present in `v4.2.0`, and `panb511evb` was added during the 4.3 cycle, so all eleven were deprecated in 4.3 or earlier. The board directories themselves are untouched — only the old-name redirection goes away. Aliases introduced in 4.4 or later stay.
+
+This is also a follow-up to 5b51b03a4839 (#116657), which removed the `raytac_an54l15q_db/nrf54l15/cpuapp` alias without a release note or migration guide entry — both lists here cover it as well, so the 4.5 docs account for all twelve dropped aliases.
+
+### Review note — the cyclonev commit is a bug fix, not a removal
+
+The DS3231 removal (#111879) also dropped `dts/bindings/counter/maxim,ds3231.yaml`, but left this board declaring `compatible = "maxim,ds3231"`. No binding matches that compatible any more, so the node ends up unbound. It is re-pointed at `maxim,ds3231-mfd`, the binding that replaced it at the same I2C address.
+
+Deliberately **no** `maxim,ds3231-rtc` child: that binding requires `isw-gpios`, which `rtc_ds3231.c` dereferences with `GPIO_DT_SPEC_INST_GET` rather than the `_OR` variant, and this board has never described such a GPIO. Adding the child would make `CONFIG_RTC_DS3231` default to `y` as soon as `CONFIG_RTC=y` and then fail to build. A board maintainer who wires the interrupt/square-wave pin can add the child together with its `isw-gpios` property.
+
+*--- henrikbrixandersen (2026-08-19 19:38:53+00:00)
+Why change this? `rtc` is the recommended Generic Name for RTCs in the Devicetree specification.
+
+*--- kartben (2026-08-19 19:42:20+00:00)
+Oversight, will fix
+
+*--- kartben (2026-08-21 13:44:28+00:00)
+addressed
+
+*--- kartben (2026-08-21 13:44:32+00:00)
+rebased to address merge conflict

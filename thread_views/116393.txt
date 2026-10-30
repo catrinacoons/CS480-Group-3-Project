@@ -1,0 +1,43 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116393
+TITLE: logging: align stack packages when stack alignment is insufficient
+
+*--- opening post by dmvo (2026-08-16 06:31:41+00:00)
+This change is a prerequisite for the m68k port proposed in RFC #114672.
+
+Runtime logging sometimes builds a temporary `cbprintf` package on the current thread's stack using `alloca()`. `cbvprintf_package()` explicitly comments that its buffer “must be aligned at least to size of a pointer” and returns `-EFAULT` otherwise.
+
+That requirement usually follows from the architecture's stack alignment. m68k is the counterexample: its ABI permits 2-byte stack alignment while pointers are 4 bytes. A legal stack can therefore make `alloca()` return an address at `2 mod 4`. Packaging then fails, and runtime logging panics on its `plen >= 0` assertion.
+
+The fix selects the allocation path at compile time. Architectures whose stack already guarantees pointer alignment retain plain `alloca()` and unchanged generated code. Otherwise, all three stack-backed paths reserve alignment slack and round the allocation to `Z_LOG_MSG_ALIGNMENT`. Pointer alignment determines whether the fallback is needed; when it is, aligning to `Z_LOG_MSG_ALIGNMENT` makes the real package match the alignment assumed by logging’s preceding size calculation.
+
+*--- nordic-krch (2026-08-17 05:01:09+00:00)
+don't you need to increase the `_size`. Something like:
+```suggestion
+		 : (void *)ROUND_UP((uintptr_t)alloca((_size +  Z_LOG_MSG_ALIGNMENT - 1U) + Z_LOG_MSG_ALIGNMENT - 1U),         \
+```
+
+*--- dmvo (2026-08-17 06:00:43+00:00)
+Good catch to question this, thanks @nordic-krch for asking! The nesting of the cast and parentheses makes the expression genuinely easy to misread, and it tripped me up too when I expanded it.
+
+With `A = Z_LOG_MSG_ALIGNMENT`, the current expression is equivalent to:
+
+```
+p = alloca(_size + A - 1);
+q = ROUND_UP((uintptr_t)p, A);
+```
+
+So the extra `A - 1` is already part of the size passed to `alloca()`, as required. Since rounding advances `p` by at most `A - 1`, at least
+
+```
+_size + A - 1 - (A - 1) = _size
+```
+
+bytes remain available from `q`. And by definition of `ROUND_UP()`, `q` is aligned to `A`.
+
+Therefore, the current expression always provides at least `_size` usable bytes with the required alignment. Thanks for pointing this out. The expression could definitely be easier to parse.😳
+
+*--- nordic-krch (2026-08-17 07:14:09+00:00)
+eh, it was too early in the morning and i have somehow misread the macro, i think that I assumed that closing bracket after `_size` is for alloca(). All good.
+
+*--- dmvo (2026-08-24 17:28:10+00:00)
+@dcpleung, when you have a chance, could you possibly take a look at this small logging/cbprintf alignment fix? @nordic-krch has already approved it and CI is green; I’d especially appreciate a second look at the fallback stack-allocation path. Thank you!

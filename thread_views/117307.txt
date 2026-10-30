@@ -1,0 +1,9 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117307
+TITLE: net: websocket: Select the SHA-1 algorithm the client uses
+
+*--- opening post by jukkar (2026-08-25 12:26:13+00:00)
+The Websocket client computes the Sec-WebSocket-Accept hash with PSA_ALG_SHA_1, but WEBSOCKET_CLIENT asked PSA for SHA-256, which the library never uses. In a build that enables the client and nothing else, psa_hash_compute() then returns PSA_ERROR_NOT_SUPPORTED and websocket_connect() fails with -EPROTO before the handshake is sent. The websocket_client sample is affected as shipped.
+
+The wrong algorithm came in when the client moved off the legacy Mbed TLS crypto API and "select MBEDTLS_SHA1 if MBEDTLS_BUILTIN" was replaced. HTTP_SERVER_WEBSOCKET selects SHA-1 itself, which is why builds that pair the client with the server were unaffected.
+
+Assisted-by: Claude:claude-opus-5

@@ -1,0 +1,172 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114547
+TITLE: net: sockets: tls: add per-socket TLS Max Fragment Length control
+
+*--- opening post by kacper-szkoda (2026-07-24 21:35:50+00:00)
+Adds a new TLS socket option, `TLS_MAX_FRAGMENT_LENGTH`, to give the option to configure MFL per socket, overriding the global value identical for all sockets, which is the current implementation. This gives more fine-grained control, allowing for different MFL policies for different connections.  
+
+Exposes mbedTLS `MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH` via a new Kconfig option. This allows TLS in/out buffers to be automatically resized after the handshake to the actually negotiated size, thus decreasing their memory footprint and being less wasteful. 
+
+Removes the restriction that prevents advertising MFL when the buffers are at the TLS maximum. This seemed like more of a heuristic rather than a hard requirement and could lead to confusion. The real constraint is that the advertised MFL must not exceed the buffer size, which is still enforced by mbedTLS's own `mbedtls_ssl_conf_max_frag_len()`.
+
+Plus associated tests.
+
+*--- jukkar (2026-07-27 09:00:39+00:00)
+Asked Claude for a review, these are the comments:
+
+Review: TLS Max Fragment Length socket option
+
+* Two commits by Kacper Szkoda that make RFC 6066 Max Fragment Length (MFL) configurable per socket and let mbedTLS shrink its buffers post-handshake.
+
+What they do
+
+  0d001f82485 — modules: mbedtls: add MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH Kconfig
+  Exposes mbedTLS's MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH. When on, in/out buffers are resized after the handshake down to the negotiated MFL + overhead, reducing per-connection footprint. Kconfig depends on !MBEDTLS_SSL_PROTO_TLS1_3 (MFL is TLS 1.2 only), plumbed into config-mbedtls.h.
+
+  116a108c70b — net: sockets: tls: add TLS_MAX_FRAGMENT_LENGTH socket option
+  New write-only sockopt ZSOCK_TLS_MAX_FRAGMENT_LENGTH with values ZSOCK_TLS_MFL_DISABLED/512/1024/2048/4096. Stored in a new int8_t options.mfl_code (default -1 = "use global"). tls_set_max_frag_len() now takes the whole tls_context and branches: per-socket override → direct map to mbedTLS code; 0 → suppress extension; -1 → old global behavior. Also removes the MBEDTLS_TLS_EXT_ADV_CONTENT_LEN < 16384 compile guard. Good test coverage (validation + real handshake negotiating 512/1024).
+
+Correctness — the code is sound
+
+* The direct mapping mfl_code (1-4) → mbedtls_ssl_conf_max_frag_len() is correct: ZSOCK_TLS_MFL_512..4096 happen to equal MBEDTLS_SSL_MAX_FRAG_LEN_512..4096 (1..4). This works but is an undocumented ABI coupling — worth a BUILD_ASSERT(ZSOCK_TLS_MFL_512 == MBEDTLS_SSL_MAX_FRAG_LEN_512 ...) so a future mbedTLS renumber can't silently break it.
+* Input validation in tls_opt_mfl_set() is correct (null, optlen == sizeof(int), range [0,4]).
+* No new races: mfl_code is set pre-handshake and consumed in tls_mbedtls_init(), same lifecycle as every other option.
+* No memory-safety / info-disclosure / DoS concerns. Write-only option correctly falls through to -ENOPROTOOPT on getsockopt.
+
+Findings worth raising
+
+  1. Default-path behavior change at the 16384 boundary (functional regression risk). Removing the MBEDTLS_TLS_EXT_ADV_CONTENT_LEN < 16384 guard doesn't only affect the new override path — it also changes the mfl_code == -1 (default) path. Previously, a build with content length at the TLS max (16384) advertised no MFL extension, so peers could use full 16384-byte records. Now tls_mfl_code_from_content_len(16384) returns MAX_FRAG_LEN_4096, so those builds will advertise MFL_4096 and cap records at 4096 by default. The commit message justifies the removal for the override case ("true constraints enforced below"), but the side effect hits users who never set the sockopt. Consider keeping the < 16384 guard on the default branch and only bypassing it when mfl_code >= 0.
+
+  2. Option accepted-but-ignored when MBEDTLS_SSL_MAX_FRAGMENT_LENGTH is undefined. tls_opt_mfl_set() / the setsockopt case are guarded only by CONFIG_NET_SOCKETS_TLS_SET_MAX_FRAGMENT_LENGTH, but the real tls_set_max_frag_len() also requires MBEDTLS_SSL_MAX_FRAGMENT_LENGTH (TLS 1.3-only builds fall to the empty stub). So on a TLS 1.3-only build the setsockopt succeeds but silently does nothing. Minor, but returning -ENOPROTOOPT there would be more honest.
+
+  3. config-mbedtls.h placement. MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH is defined inside the TLS1.2 || TLS1.3 block but outside the !TLS1.3 block that defines MBEDTLS_SSL_MAX_FRAGMENT_LENGTH. The Kconfig depends on !TLS1.3 makes this safe in practice, but nesting it next to MBEDTLS_SSL_MAX_FRAGMENT_LENGTH (inside the !TLS1.3 guard) would keep the two dependent macros co-located and robust against custom configs.
+
+*--- tomi-font (2026-07-27 09:20:40+00:00)
+Can you also make `MBEDTLS_SSL_MAX_FRAGMENT_LENGTH` a Kconfig option, `default y` and that `depends on !MBEDTLS_SSL_PROTO_TLS1_3`, and make this Kconfig option depend on it instead?
+
+*--- tomi-font (2026-07-27 09:21:53+00:00)
+Could also just copy/paste the text from Mbed TLS:
+```
+When this option is enabled, the SSL buffer will be resized automatically
+based on the negotiated maximum fragment length in each direction.
+```
+
+*--- rlubos (2026-07-27 13:46:16+00:00)
+`optval == NULL`
+
+*--- rlubos (2026-07-27 13:49:58+00:00)
+If the option shouldn't be used with TLS 1.3, it could probably check `context->tls_version` and throw an error if TLS 1.3 is in use?
+
+*--- kacper-szkoda (2026-08-01 18:30:51+00:00)
+I believe the runtime check can be replaced by compiling away the entire option. The chain would be:
+
+* tls_opt_mfl_set and the ZSOCK_TLS_MAX_FRAGMENT_LENGTH setsockopt case only exist under #if defined(CONFIG_NET_SOCKETS_TLS_SET_MAX_FRAGMENT_LENGTH)
+* that Kconfig now depends on MBEDTLS_SSL_MAX_FRAGMENT_LENGTH (new symbol, added per the other comment)
+* that symbol depends on !MBEDTLS_SSL_PROTO_TLS1_3
+
+Then on any build with 1.3 support enabled the case would not exist and calling setsockopt falls to the default `err = -ENOPROTOOPT`. 
+
+Side tangent I just thought about, currently the MFL gets disabled for the whole build when 1.3 is enabled, but what about a mixed 1.2 and 1.3 situation? I see why 1.3 does not support MFL, but why shouldn't a 1.2 socket be able to advertise MFL while coexisting 1.3 sockets get guards? Not something I want to necessarily change here, maybe in a different PR after verifying behaviour, but flagging as a possible followup, and looking for input and clarification
+
+*--- kacper-szkoda (2026-08-01 18:35:24+00:00)
+> Asked Claude for a review, these are the comments:
+> 
+> Review: TLS Max Fragment Length socket option
+> 
+>     * Two commits by Kacper Szkoda that make RFC 6066 Max Fragment Length (MFL) configurable per socket and let mbedTLS shrink its buffers post-handshake.
+> 
+> 
+> What they do
+> 
+> [0d001f8](https://github.com/zephyrproject-rtos/zephyr/commit/0d001f824850d2ee6fe1ef351eecbbf19c1e4816) — modules: mbedtls: add MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH Kconfig Exposes mbedTLS's MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH. When on, in/out buffers are resized after the handshake down to the negotiated MFL + overhead, reducing per-connection footprint. Kconfig depends on !MBEDTLS_SSL_PROTO_TLS1_3 (MFL is TLS 1.2 only), plumbed into config-mbedtls.h.
+> 
+> [116a108](https://github.com/zephyrproject-rtos/zephyr/commit/116a108c70b341b96c8b4f40605381e02f34928d) — net: sockets: tls: add TLS_MAX_FRAGMENT_LENGTH socket option New write-only sockopt ZSOCK_TLS_MAX_FRAGMENT_LENGTH with values ZSOCK_TLS_MFL_DISABLED/512/1024/2048/4096. Stored in a new int8_t options.mfl_code (default -1 = "use global"). tls_set_max_frag_len() now takes the whole tls_context and branches: per-socket override → direct map to mbedTLS code; 0 → suppress extension; -1 → old global behavior. Also removes the MBEDTLS_TLS_EXT_ADV_CONTENT_LEN < 16384 compile guard. Good test coverage (validation + real handshake negotiating 512/1024).
+> 
+> Correctness — the code is sound
+> 
+>     * The direct mapping mfl_code (1-4) → mbedtls_ssl_conf_max_frag_len() is correct: ZSOCK_TLS_MFL_512..4096 happen to equal MBEDTLS_SSL_MAX_FRAG_LEN_512..4096 (1..4). This works but is an undocumented ABI coupling — worth a BUILD_ASSERT(ZSOCK_TLS_MFL_512 == MBEDTLS_SSL_MAX_FRAG_LEN_512 ...) so a future mbedTLS renumber can't silently break it.
+> 
+>     * Input validation in tls_opt_mfl_set() is correct (null, optlen == sizeof(int), range [0,4]).
+> 
+>     * No new races: mfl_code is set pre-handshake and consumed in tls_mbedtls_init(), same lifecycle as every other option.
+> 
+>     * No memory-safety / info-disclosure / DoS concerns. Write-only option correctly falls through to -ENOPROTOOPT on getsockopt.
+> 
+> 
+> Findings worth raising
+> 
+>     1. Default-path behavior change at the 16384 boundary (functional regression risk). Removing the MBEDTLS_TLS_EXT_ADV_CONTENT_LEN < 16384 guard doesn't only affect the new override path — it also changes the mfl_code == -1 (default) path. Previously, a build with content length at the TLS max (16384) advertised no MFL extension, so peers could use full 16384-byte records. Now tls_mfl_code_from_content_len(16384) returns MAX_FRAG_LEN_4096, so those builds will advertise MFL_4096 and cap records at 4096 by default. The commit message justifies the removal for the override case ("true constraints enforced below"), but the side effect hits users who never set the sockopt. Consider keeping the < 16384 guard on the default branch and only bypassing it when mfl_code >= 0.
+> 
+>     2. Option accepted-but-ignored when MBEDTLS_SSL_MAX_FRAGMENT_LENGTH is undefined. tls_opt_mfl_set() / the setsockopt case are guarded only by CONFIG_NET_SOCKETS_TLS_SET_MAX_FRAGMENT_LENGTH, but the real tls_set_max_frag_len() also requires MBEDTLS_SSL_MAX_FRAGMENT_LENGTH (TLS 1.3-only builds fall to the empty stub). So on a TLS 1.3-only build the setsockopt succeeds but silently does nothing. Minor, but returning -ENOPROTOOPT there would be more honest.
+> 
+>     3. config-mbedtls.h placement. MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH is defined inside the TLS1.2 || TLS1.3 block but outside the !TLS1.3 block that defines MBEDTLS_SSL_MAX_FRAGMENT_LENGTH. The Kconfig depends on !TLS1.3 makes this safe in practice, but nesting it next to MBEDTLS_SSL_MAX_FRAGMENT_LENGTH (inside the !TLS1.3 guard) would keep the two dependent macros co-located and robust against custom configs.
+
+1) 
+
+The removal of the 16k guard was intended. While working with `NET_SOCKETS_TLS_SET_MAX_FRAGMENT_LENGTH` I was confused why MFL was not being advertised even though `MBEDTLS_SSL_MAX_FRAGMENT_LENGTH` was compiled in. Tracing it down led to this `< 16384` clause, which led to silent suppression of any MFL behaviour. The threshold itself also seems arbitrary, a 16383 byte buffer gets auto-derived MFL, a 16384 byte one silently doesn't, with no functional reason a max-size buffer couldn't advertise a smaller MFL too.
+
+I agree that this can change behaviour in existing builds, but I would argue this behaviour is unwanted, and a more explicit version should be preferred. This PR now removes the guard, then the global MFL can be cleanly disabled through `NET_SOCKETS_TLS_SET_MAX_FRAGMENT_LENGTH`, while per socket can be disabled with passing `TLS_MFL_DISABLED`.
+
+2) 
+
+Already covered by a response to a different comment. 
+
+3) 
+
+Agreed and done.
+
+*--- Copilot (2026-08-03 07:50:02+00:00)
+tls_opt_mfl_set() rejects -1 even though the internal mfl_code uses -1 to mean “use global Kconfig-derived value”. As-is, applications can override/disable MFL per-socket but cannot revert the socket back to the default behavior once changed. Consider allowing -1 as a valid setsockopt value (and documenting it) to support resetting to the global default.
+
+*--- tomi-font (2026-08-03 09:44:25+00:00)
+swap the two lines
+
+*--- tomi-font (2026-08-03 09:46:37+00:00)
+```suggestion
+	  Enable support for RFC 6066 max_fragment_length extension in SSL,
+	  allowing a smaller fragment size to be
+```
+or
+```suggestion
+	  Enable support for negotiating a Maximum Fragment Length (MFL)
+	  (RFC 6066), allowing a smaller fragment size to be
+```
+
+*--- tomi-font (2026-08-03 09:47:30+00:00)
+Remove this, covered by the `depends on` which implicitly acts as documentation
+
+*--- tomi-font (2026-08-03 09:50:18+00:00)
+we let Kconfig do this job, here no hierarchy
+```suggestion
+#if defined(CONFIG_MBEDTLS_SSL_MAX_FRAGMENT_LENGTH)
+#define MBEDTLS_SSL_MAX_FRAGMENT_LENGTH
+#endif
+
+#if defined(CONFIG_MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH)
+#define MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH
+#endif
+```
+
+*--- rlubos (2026-08-03 14:17:03+00:00)
+Yeah, we're probably talking about some exotic configurations here, someone enables TLS 1.3 Kconfig but would still intend to use TLS 1.2 socket at some level, but perhaps the current state (where its forbidden at Kconfig level) is good enough enough for now. If someone needs it, that could be changed in the future.
+
+*--- kacper-szkoda (2026-08-07 16:03:14+00:00)
+> Socket layer changes LGTM, but please squash the changes from `net: sockets: tls: address review feedback on MFL commits` into original commits. We don't do "review fixes" commits in Zephyr to keep history clean.
+
+My intention was to squash after all the changes have been accepted. I split these into separate commits so the incremental changes would be easier to follow while review was still ongoing. I will squash once there are no more pending changes if that is okay?
+
+*--- rlubos (2026-08-10 09:45:29+00:00)
+> > Socket layer changes LGTM, but please squash the changes from `net: sockets: tls: address review feedback on MFL commits` into original commits. We don't do "review fixes" commits in Zephyr to keep history clean.
+> 
+> My intention was to squash after all the changes have been accepted. I split these into separate commits so the incremental changes would be easier to follow while review was still ongoing. I will squash once there are no more pending changes if that is okay?
+
+Fine, but personally I won't approve until commtis are squashed to avoid accidental merge.
+
+*--- kacper-szkoda (2026-08-12 13:46:16+00:00)
+> > > Socket layer changes LGTM, but please squash the changes from `net: sockets: tls: address review feedback on MFL commits` into original commits. We don't do "review fixes" commits in Zephyr to keep history clean.
+> > 
+> > 
+> > My intention was to squash after all the changes have been accepted. I split these into separate commits so the incremental changes would be easier to follow while review was still ongoing. I will squash once there are no more pending changes if that is okay?
+> 
+> Fine, but personally I won't approve until commtis are squashed to avoid accidental merge.
+
+Squashed as requested. Just noting there are minor changes in doc comments as well: in Kconfig for `NET_SOCKETS_TLS_SET_MAX_FRAGMENT_LENGTH` added note that an override is possible, and in `mfl_code` for `tls_context` noted that -1 is not just the default but also can be used to reset back to global.

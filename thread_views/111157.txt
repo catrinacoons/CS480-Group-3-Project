@@ -1,0 +1,13 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111157
+TITLE: twister: pytest: support per-test device launch args
+
+*--- opening post by pdgendt (2026-06-12 12:07:32+00:00)
+Add `set_extra_args()` on `DeviceAdapter` and a same-scope `device_extra_args` fixture so tests can inject per-launch args (e.g. `--eeprom=<path>`) without round-tripping through the static `--extra-test-args` CLI flag. `None` (the fixture default) keeps existing behavior; `[]` explicitly suppresses static args; a list replaces them.
+
+Assisted-by: Claude:claude-opus-4.7
+
+*--- gchwier (2026-06-12 14:35:44+00:00)
+Why not just override the `dut` fixture in a downstream `conftest.py`? Adding a dependency to the `dut` fixture (which is used by nearly every scenario) is not a good idea.
+
+*--- pdgendt (2026-06-12 16:28:43+00:00)
+That sounds like a better approach, thanks!

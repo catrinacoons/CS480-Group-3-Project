@@ -1,0 +1,8 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/50680
+TITLE: Bluetooth: Controller: Staging changes
+
+*--- opening post by cvinayak (2022-09-27 05:07:36+00:00)
+Bluetooth Controller staging branch.
+
+*--- Copilot (2025-11-25 14:45:51+00:00)
+The comment text has a typo: "aptured" should be "captured".

@@ -1,0 +1,23 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113317
+TITLE: net: ptp: fix 32-bit overflow in foreign clock record time window
+
+*--- opening post by guclumhg (2026-07-12 09:05:10+00:00)
+`foreign_clock_cleanup()` computes the announce record aging timeout in
+32-bit arithmetic before storing it into an `int64_t`. For positive
+`log_msg_interval` values the product `4 * 2^log * NSEC_PER_SEC` wraps
+around: with `log_msg_interval = 1` the 8 s window becomes ~3.7 s, so
+announce messages still inside the window are aged out prematurely and
+the port can wrongly lose its foreign time transmitter records
+(Coverity CID 487738, OVERFLOW_BEFORE_WIDEN / CWE-190).
+
+- The first commit casts the first factor to `int64_t` in both branches
+  so the expression is evaluated in 64-bit arithmetic.
+- The second commit adds a `foreign_master` regression test pinning the
+  scaled window behavior: it fails without the fix (records dropped,
+  `ptp_port_best_foreign()` returns `NULL`) and passes with it.
+
+**Testing:** `west twister -T tests/net/ptp -p native_sim/native/64` —
+all suites pass; the new test was verified to fail with the fix
+reverted. `./scripts/ci/check_compliance.py` clean locally.
+
+Fixes #84696

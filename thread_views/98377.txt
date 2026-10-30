@@ -1,0 +1,175 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/98377
+TITLE: cmake: refactor `zephyr_get_*_for_lang` functions
+
+*--- opening post by pillo79 (2025-10-28 08:11:52+00:00)
+**Not for 4.3.**
+
+This PR unifies the implementation of the various `zephyr_get_*_for_lang` functions and their string variants with a generic `zephyr_get_property`, so that the same feature set is available to all wrappers. It also adds several new options that expand the possible use cases:
+
+  - `AS_STRING`: Return the result as a string rather than a list. Equivalent to specifying `DELIMITER " "`.
+  - `DELIMITER <delim>`: Specify the output delimiter to use for the list entries. Defaults to `$<SEMICOLON>`.
+  - `GENEX`: Use generator expressions to get the property entries at build time, for targets that are not yet fully configured. Cannot be used with `LANG`. Also, CMake will complain if the requested property includes `$<COMPILE_OPTIONS:...>` expressions.
+  - `LANG <C|CXX|ASM>`: When set, the property value is filtered for `$<COMPILE_LANGUAGE:lang>` entries, and only those matching the given language are kept. Cannot be used with `GENEX`.
+  - `PREFIX <prefix>`: Specify a prefix to use for each entry in the output list.
+  - `STRIP_PREFIX`: Omit the prefix string, even if given by `PREFIX`.
+  - `TARGET <target>`: Specify the target to get the property from. Defaults to `zephyr_interface`.
+
+This work was done while experimenting with alternatives to #98348. It is no longer useful for the EDK, but I think it is still worth considering for merge.
+
+*--- tejlmand (2025-10-28 13:24:39+00:00)
+I think cleaning up the current use of `zephyr_get_*_for_lang..` is valuable, but if we anyway change current style, then perhaps align closer to CMake.
+
+Like we have `zephyr_string` and `zephyr_get`, then perhaps a
+```
+zephyr_get_property(<out-var> PROPERTY <prop> LANG <C|CXX|ASM>)
+```
+alternative `zephyr_get_build_property()`.
+
+Optional, the `_as_string` could even be a flag to the function which would default the delimiter to `<space>` instead of `$<SEMICOLON>`, as to not need to remember that `" "` does exactly that.
+
+*--- tejlmand (2025-10-28 13:28:30+00:00)
+No, we should not wrap function definition in a macro like this.
+
+It might make it easy for us, but it will make it impossible for ordinary developers to find out where a function like:
+`zephyr_get_include_directories_for_lang()` and friends are defined.
+
+Not to mention the impact this will have on tasks like this: https://github.com/zephyrproject-rtos/zephyr/pull/87083
+
+When we have the property function in place, then let's just deprecate the old style.
+
+*--- tejlmand (2025-10-28 13:33:57+00:00)
+Perhaps specify that default delimiter is `$<SEMICOLON>` to allow the result to be used in generator expressions.
+
+*--- pillo79 (2025-10-28 15:43:33+00:00)
+I really hate copying code that should be written once only, so this was basically the first thing I did. 😅
+
+I did consider the issue of making the definitions opaque, so I left comments with the generated function names next to each macro invocation for easy grepping. But if #87083 performs actual indexing, I will gladly revert to the verbose sequence of commands. 👍
+
+*--- pillo79 (2025-10-28 15:46:36+00:00)
+I dropped `AS_STRING` once I understood it could be done with existing options. Looks a lot cleaner with it though, so I'll re-add that.
+
+*--- pillo79 (2025-10-29 12:55:50+00:00)
+**v2**, addressing all comments:
+
+* Renamed to `zephyr_get_property` and removed all default build-specific processing:
+   * Prefixes are specified in the wrapper functions with `PREFIX <...>`
+   * `LANG` is optional; when not specified, no filtering is done on the output list
+* Dropped macro wrapper generation in favor of minimal single-call variants. Way easier to read!
+* Made `LANG` exclusive with `GENEX`, so that it is clear one cannot support the other; this also prevents using `GENEX` with wrappers.
+
+*--- tejlmand (2025-11-11 12:45:37+00:00)
+seems like `AS_STRING` and `DELIMITER` are mutual exclusive.
+At least if `AS_STRING` is specified as arg, then `DELIMITER` is ignored.
+
+So please do a check and error out if both are giver, such as `zephyr_get_property(.. AS_STRING DELIMETER "-")`.
+
+Could be this is already a potential issue today, but would still be good to know.
+
+*--- tejlmand (2025-11-11 12:55:46+00:00)
+if `args_DELIMITER` is a space, then this genex can end up not behaving / expanding as expected.
+
+Has this been verified with more complex lists ?
+
+See also: https://cmake.org/cmake/help/latest/manual/cmake-generator-expressions.7.html#whitespace-and-quoting
+
+*--- tejlmand (2025-11-11 13:05:26+00:00)
+`AS_STRING` ?
+```suggestion
+                      PREFIX "-isystem" AS_STRING
+```
+
+*--- tejlmand (2025-11-11 13:29:06+00:00)
+I believe we can simplify.
+
+`PREFIX` follows the property type, so `zephyr_get_property()` could have a list of known pairs, like.
+```
+  set(prefix_INTERFACE_COMPILE_DEFINITIONS "-D")
+  set(prefix_INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "-isystem")
+  set(prefix_INTERFACE_INCLUDE_DIRECTORIES "-I")
+
+  if(NOT DEFINED args_PREFIX)
+    set(args_PREFIX ${prefix_${args_PROPERTY}})
+  endif()
+```
+
+thus supporting all properties possible, by allowing PREFIX, but removing the need for passing `PREFIX` for known properties, like `-D`, `-I`, `-isystem` etc.
+
+That will also lower the threshold for updating the code from:
+```
+zephyr_get_compile_definitions_for_lang(C zephyr_defs)
+zephyr_get_include_directories_for_lang(C ZEPHYR_INCLUDES)
+etc.
+```
+to
+```
+zephyr_get_property(zephyr_defs PROPERTY INTERFACE_COMPILE_DEFINITIONS LANG C)
+zephyr_get_property(ZEPHYR_INCLUDES PROPERTY ZEPHYR_INCLUDES LANG C)
+```
+
+if we want.
+
+and then in that process, deprecate the old functions.
+
+Thoughts ?
+
+*--- pillo79 (2025-11-11 14:25:52+00:00)
+I think this is the expected behavior? If the user asks for space as a delimiter, having the char in the`${args_DELIMITER}` variable will properly expand the genex to a single-space-separated string.
+
+Now, the linked docs mention that the resulting string becomes ambiguous if there were spaces in the data (you may either have too many arguments, or a single quote-enclosed one), but to avoid that... you should use a proper list in the first place (which is returned without `AS_STRING`).
+
+*--- pillo79 (2025-11-11 14:30:15+00:00)
+I added `DELIMITER` in commit 2 and then a generic `AS_STRING` as a convenience in the next commit, so I did not want to change the same line twice.
+Will define both in a single commit so I can immediately use `AS_STRING` instead.
+
+*--- pillo79 (2025-11-11 14:42:43+00:00)
+I had in fact pushed an intermediate version (https://github.com/zephyrproject-rtos/zephyr/commit/e0fb12fed9cc41eab0652b45489317274a4479cc and parent commits) with a `zephyr_get_build_property()` and a long series of `if()`s, but I disliked it for a number of reasons:
+
+* it is unclear which properties get an automatic prefix and which do not. Some even should never need it (e.g.`COMPILE_OPTIONS`)
+* that is the only `_build`-specific thing in the function, everything else applies to any CMake property in the project;
+* obviously ugly with the `if`s (but your proposal would be way cleaner!).
+
+In my view, removing the embedded prefix list made the function clean and use-agnostic, and gave a proper meaning to the existing wrappers (collapsing all build-property-specific functionality).
+
+Let me know if you still prefer to incorporate the prefixes in the generic function. If so, I would suggest to call that `zephyr_get_build_property` as it's doing build-specific stuff as well.
+
+*--- tejlmand (2025-11-12 10:48:16+00:00)
+>  but I disliked it for a number of reasons:
+
+yes, seeing it from the function implementation then the `if`'s is really not nice.
+I also understand from the concern on the build specific part of the function.
+
+However, when seeing it from the caller, that is if we want to get rid of `zephyr_get_*_for_lang` functions, then requesting the caller to remember `PREFIX -D` when using `INTERFACE_COMPILE_DEFINITIONS` is not nice.
+`-D` ought to be implied by the property name (when seeing things from the caller).
+
+> Let me know if you still prefer to incorporate the prefixes in the generic function.
+
+Depends on what you believe the long term support for existing `zephyr_get_*_for_lang` functions is.
+
+> If so, I would suggest to call that zephyr_get_build_property as it's doing build-specific stuff as well.
+
+That might be a better name. Especially as the function description already states:
+https://github.com/zephyrproject-rtos/zephyr/blob/2fa423179490dbc4bec3f47581368089b4c8fb1c/cmake/modules/extensions.cmake#L167-L168
+
+so it is target related, and targets are build specific, as well as `LANG` is very build oriented.
+
+*--- pillo79 (2026-02-03 09:37:56+00:00)
+@tejlmand Sorry for letting this slide - PTAL when you get a chance, I left a small question in my [last comment](https://github.com/zephyrproject-rtos/zephyr/pull/98377#discussion_r2514504042):
+
+> > Depends on what you believe the long term support for existing `zephyr_get_*_for_lang` functions is.
+>
+> [...] removing the embedded prefix list made the function clean and use-agnostic, and gave a proper meaning to the existing wrappers (collapsing all build-property-specific functionality). 
+> _Let me know if you still prefer to incorporate the prefixes in the generic function. If so, I would suggest to call that `zephyr_get_build_property` as it's doing build-specific stuff as well._
+
+Thanks!
+
+*--- pillo79 (2026-05-04 08:00:05+00:00)
+@tejlmand PTAL, pity to leave this to rot.
+
+*--- Copilot (2026-05-17 07:36:11+00:00)
+The PR description mentions introducing a generic `zephyr_get_property`, but the implementation added here is named `zephyr_get_build_property`. This mismatch is likely to confuse users/reviewers; either rename the function to match the description or update the PR description/docs accordingly.
+
+*--- Copilot (2026-05-17 07:36:11+00:00)
+The doc comment says the result “is not computed until build time”, but when `GENEX` is not set this function calls `get_property()` and (optionally) `process_flags()` at configure time. Please adjust the documentation to reflect that only the `GENEX` path defers property evaluation to generate/build time.
+
+*--- Copilot (2026-05-17 07:36:11+00:00)
+`cmake_parse_arguments()` populates `args_KEYWORDS_MISSING_VALUES` when a keyword like `DELIMITER`, `LANG`, `PREFIX`, or `TARGET` is provided without a value. This function currently doesn't check that list, so such call sites can fail silently (e.g., `DELIMITER` gets ignored and defaults are used). Consider adding a FATAL_ERROR when `args_KEYWORDS_MISSING_VALUES` is non-empty.

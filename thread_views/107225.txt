@@ -1,0 +1,54 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107225
+TITLE: Add NXP ENET QOS PTP driver support
+
+*--- opening post by yangbolu1991 (2026-04-14 02:32:42+00:00)
+This PR is to add NXP ENET QOS PTP clock driver and ENET QOS PTP timestamping support.
+Also enabled it on frdm_mcxn947 and mcx_nx4x_evk boards, verified with ptp sample.
+
+This PR is based on https://github.com/zephyrproject-rtos/zephyr/pull/105536 with comments addressed. Changes include,
+- Split changes of binding/dts for proper patch sequence.
+- Convert to use ptp as sub-node of the mac, as it's part of it. Also convert the driver support.
+- Also enabled ptp on mcx_nx4x_evk.
+- Dropped some places code formating. I think we don't have to. Or if we want to clean up the format, just do clang-format for all driver files.
+
+Thanks.
+
+*--- maass-hamburg (2026-04-14 04:05:10+00:00)
+Where does ENET_MAC_PACKET_FILTER_PM_MASK come from? It is not part of enum ethernet_hw_caps
+
+*--- yangbolu1991 (2026-04-14 09:26:00+00:00)
+It seems it's introduced by mistake previously.
+Let me add one more patch to remove.
+Thanks.
+
+*--- yangbolu1991 (2026-04-14 09:29:00+00:00)
+Updated to v2. Changes include,
+- Added one more patch to drop wrong eth hw capability mask ENET_MAC_PACKET_FILTER_PM_MASK.
+- Fixed a doc issue in CI.
+
+Thanks.
+
+*--- maass-hamburg (2026-04-14 09:55:37+00:00)
+```suggestion
+	enum ethernet_hw_caps caps = ETHERNET_LINK_100BASE | ETHERNET_LINK_10BASE;
+```
+
+*--- yangbolu1991 (2026-04-15 02:30:23+00:00)
+Sure, I am okay with this. 
+But I think either is okay. There is also conversion between enum and unsigned long during OR operation.
+Thanks.
+
+*--- yangbolu1991 (2026-04-15 02:35:54+00:00)
+Updated to v3. Changes include,
+- Used `enum ethernet_hw_caps caps` instead of `unsigned long caps`.
+
+Thanks.
+
+*--- Copilot (2026-04-16 08:26:10+00:00)
+`nominal_addend` is computed assuming `ref_clk_hz` is strictly greater than `PTP_CLOCK_NXP_ENET_QOS_PTPCLK_HZ`, but the code never enforces that. If the reference clock is <= 50 MHz, the addend computation will overflow/truncate (uint32_t cast) and produce an incorrect rate. Add a runtime check (and clear error return/log) before computing the addend, and consider validating `snsinc` as well.
+
+*--- Copilot (2026-04-16 08:26:10+00:00)
+The busy-wait loops that poll TSINIT/TSUPDT/TSADDREG clear bits have no timeout, so a clock-domain/configuration issue could hang the system forever. Please add a bounded wait (e.g., using `k_busy_wait()` chunks with a max duration like the ENET QoS DMA reset helper) and return an error if the bit never clears.
+
+*--- Copilot (2026-04-16 08:26:10+00:00)
+`memset(... * frags_count)` resets descriptors based on fragment count, but TX now uses `data->tx.num_descs` descriptors (potentially half as many). This is harmless but does extra work; consider clearing only the descriptors that will be used (or compute `num_descs` earlier and use that consistently).

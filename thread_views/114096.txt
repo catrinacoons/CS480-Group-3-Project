@@ -1,0 +1,58 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114096
+TITLE: net: mdns_responder: fix v4_svc/v6_svc undersized for probe's resolver
+
+*--- opening post by rwrozelle (2026-07-20 17:09:36+00:00)
+## Summary
+
+`v4_svc`/`v6_svc` are shared between two different consumers:
+
+1. The per-interface listener dispatch in `init_listener()` (needs one fd
+   per interface, sized by `MDNS_MAX_IPV4/6_IFACE_COUNT`, i.e. the
+   `CONFIG_NET_IF_MAX_IPV4/6_COUNT` interface-count Kconfigs).
+2. When `CONFIG_MDNS_RESPONDER_PROBE` is enabled, `send_probe()`'s
+   temporary DNS resolve context, which needs `DNS_RESOLVER_MAX_POLL`
+   fds for its own server list (`DNS_RESOLVER_MAX_SERVERS` +
+   `MDNS_SERVER_COUNT` + `LLMNR_SERVER_COUNT` -- at least 2 with IPv4 +
+   IPv6 mDNS both enabled).
+
+`v4_svc`/`v6_svc` were sized only for the first use. Since the
+interface-count Kconfigs default to 1, any probe attempt fails
+`net_socket_service_register()`'s capacity check with `-ENOMEM`
+("Too many file descriptors"), and every probe silently times out --
+`init_listener()` never runs, so the mDNS responder never starts at all
+whenever probing is enabled with typical single-interface
+configurations. The failure is invisible unless
+`CONFIG_DNS_SOCKET_DISPATCHER_LOG_LEVEL_DBG` is specifically enabled
+(a module nobody would think to enable while debugging a probe issue).
+
+`net_socket_service_register()` fully replaces the previously
+registered descriptor set on every call rather than accumulating (see
+`cleanup_svc_events()` in `sockets_service.c`), so the two uses never
+need their capacities summed -- just sized to cover whichever is
+larger. This PR does exactly that: `MAX(interface count,
+DNS_RESOLVER_MAX_POLL)` when probing is enabled, unchanged otherwise
+to avoid wasting static memory on non-probing builds.
+
+## Test plan
+
+- Verified as a genuine regression, not just a plausible theory:
+  reverted this change (in a local test build) and confirmed probing
+  fails with `-ENOMEM` every time; restored, confirmed it works.
+- No dedicated test is included in this PR: this is a sizing fix that
+  `CONFIG_MDNS_RESPONDER_PROBE` needs to work at all, so it has no
+  independently observable behavior of its own to test without also
+  exercising probing end to end.
+- Confirmed with a real `esp32_devkitc` ESPHome build
+  (`CONFIG_MDNS_RESPONDER_PROBE` + `CONFIG_NET_DHCPV4` both on)
+  compiling clean end-to-end with this fix applied.
+
+Assisted-by: Claude:claude-sonnet-5
+
+*--- rwrozelle (2026-07-20 17:28:44+00:00)
+@jukkar , I am a hobbyist working on a prototype to use Zephyr for multiple h/w variants in Open Home Foundation's EspHome.  I've seen you merge prior mdns fixes, so am contacting you.  I've encountered some issues and this is the first PR i have drafted to start resolving those issues.  I leaned heavily on Claude, so hopefully, this is the correct fix.  Thank you for your time
+
+*--- rwrozelle (2026-07-20 19:21:39+00:00)
+fixed the signoff
+
+*--- jukkar (2026-07-21 08:18:24+00:00)
+Thanks Robert! I saw you had couple of other mDNS changes in your repo, all the fixes/features are welcome.

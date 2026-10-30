@@ -1,0 +1,129 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/99582
+TITLE: Bluetooth: Controller: nRF54Lx: Fix Radio Tx Power set
+
+*--- opening post by cvinayak (2025-11-18 13:08:51+00:00)
+Fix incorrectly high Radio Tx Power being set as default.
+
+Fixes #99588.
+
+*--- Copilot (2025-11-18 14:17:38+00:00)
+The `hal_radio_tx_power_value()` function is missing a case for +3 dBm. When `tx_power_lvl` is 3, it will match the condition `if (tx_power_lvl >= 0)` and incorrectly return `RADIO_TXPOWER_TXPOWER_0dBm` instead of `RADIO_TXPOWER_TXPOWER_Pos3dBm`. This needs to be added as a separate case before the >= 0 check:
+```c
+if (tx_power_lvl >= 3) {
+    return RADIO_TXPOWER_TXPOWER_Pos3dBm;
+}
+```
+```suggestion
+	if (tx_power_lvl >= 3) {
+		return RADIO_TXPOWER_TXPOWER_Pos3dBm;
+	}
+	if (tx_power_lvl >= 0) {
+		return RADIO_TXPOWER_TXPOWER_0dBm;
+	}
+```
+
+*--- Copilot (2025-11-18 14:17:39+00:00)
+Inconsistency in minimum power level handling. The `hal_radio_tx_power_min_get()` function returns -30 dBm (line 72), but the `hal_radio_tx_power_floor()` function returns -40 dBm as its minimum (line 111) with a comment indicating "-30 dBm power level is deprecated so ignore it!". If -30 dBm is deprecated and should not be used, then `hal_radio_tx_power_min_get()` should also return -40 dBm to maintain consistency. Alternatively, the comment should clarify why the min_get returns -30 when the actual implementation doesn't support it.
+```suggestion
+	return -40; /* -40 dBm (Note: -30 dBm is deprecated) */
+```
+
+*--- Copilot (2025-11-18 14:17:39+00:00)
+The `hal_radio_tx_power_value()` function is missing a case for +3 dBm. When `tx_power_lvl` is 3, it will match the condition `if (tx_power_lvl >= 0)` and incorrectly return `RADIO_TXPOWER_TXPOWER_0dBm` instead of `RADIO_TXPOWER_TXPOWER_Pos3dBm`. This needs to be added as a separate case before the >= 0 check:
+```c
+if (tx_power_lvl >= 3) {
+    return RADIO_TXPOWER_TXPOWER_Pos3dBm;
+}
+```
+```suggestion
+{
+	if (tx_power_lvl >= 3) {
+		return RADIO_TXPOWER_TXPOWER_Pos3dBm;
+	}
+```
+
+*--- Copilot (2025-11-18 14:25:46+00:00)
+The nRF5340 supports +3 dBm transmit power (as indicated by hal_radio_tx_power_max_get() returning 3), but hal_radio_tx_power_value() does not handle values >= 3. When tx_power_lvl is 3, this function will incorrectly return RADIO_TXPOWER_TXPOWER_0dBm instead of setting the appropriate register value for +3 dBm. Add a check for tx_power_lvl >= 3 before the >= 0 check.
+
+*--- Copilot (2025-11-18 14:25:46+00:00)
+The nRF5340 supports +3 dBm transmit power (as indicated by hal_radio_tx_power_max_get() returning 3), but hal_radio_tx_power_value() does not handle values >= 3. When tx_power_lvl is 3, this function will incorrectly return RADIO_TXPOWER_TXPOWER_0dBm instead of setting the appropriate register value for +3 dBm. Add a check for tx_power_lvl >= 3 before the >= 0 check.
+
+*--- Copilot (2025-11-18 14:25:46+00:00)
+The function returns -40 but according to hal_radio_tx_power_min_get() the minimum is -30 dBm for nRF51. This should return -30 to be consistent with the minimum supported power level.
+```suggestion
+	/* Return the minimum supported power level for nRF51: -30 dBm */
+	return -30;
+```
+
+*--- Thalley (2025-11-28 10:15:16+00:00)
+Consider IS_ENABLED
+
+*--- Thalley (2025-11-28 10:16:12+00:00)
+I assume all the numbers from this function is based on some specification somewhere?
+
+*--- Thalley (2025-11-28 10:18:34+00:00)
+In `hal_radio_tx_power_value` we use defined values as return values, but the code was also changed to use literal values. Does it make sense to define the values instead of the literal values?
+
+*--- Thalley (2025-11-28 10:21:49+00:00)
+I wondered if there was a smarter way to implement these functions. Asked Copilot and got 
+
+```c
+static inline int8_t hal_radio_tx_power_floor(int8_t tx_power_lvl)
+{
+    /* Allowed TX power levels in descending order. Keep the -40 sentinel last. */
+    static const int8_t levels[] = {8, 7, 6, 5, 4, 3, 2, 0, -4, -8, -12, -16, -20, -40};
+    const size_t n = sizeof(levels) / sizeof(levels[0]);
+
+    for (size_t i = 0; i < n; ++i) {
+        if (tx_power_lvl >= levels[i]) {
+            return levels[i];
+        }
+    }
+
+    /* Should never get here because -40 is last, but return a fallback to be safe. */
+    return levels[n - 1];
+}
+```
+
+In number of lines it's certainly short, and it does avoid duplication of values, e.g. 
+
+```c
+	if (tx_power_lvl >= 7) {
+		return 7;
+	}
+```
+
+Is slightly more error prone if the 2 literal value are not the same. 
+
+I'm OK either way, and I'm not sure about the sideeffects w.r.t. performance and code size
+
+*--- Thalley (2025-11-28 10:23:20+00:00)
+I do wonder that if these values are related to the hardware, is it something that should belong in device tree?
+
+*--- cvinayak (2025-11-28 16:46:05+00:00)
+The header file does not get included for function.
+
+*--- cvinayak (2025-11-28 16:46:45+00:00)
+This has been like this before. Not changing.
+
+*--- cvinayak (2025-11-28 16:50:38+00:00)
+Actually, use of `for` loop seems optimal... will consider this...
+
+*--- cvinayak (2025-11-28 16:52:46+00:00)
+There is scope for improvement... will consider to enhance this code...
+
+*--- cvinayak (2025-11-28 16:53:01+00:00)
+not changing
+
+*--- cvinayak (2025-11-28 16:54:02+00:00)
+These values are h/w specific... yes, in theory should be inherited from devicetree... not sure if they are there now.
+
+*--- Thalley (2025-11-28 16:59:21+00:00)
+Not sure I follow - Can you elaborate?
+
+*--- cvinayak (2025-11-29 05:35:05+00:00)
+`hal_radio_tx_power_high_voltage_set()`  is defined `static inline` in 
+
+https://github.com/cvinayak/zephyr/blob/d95a862c62939a375a602d8eb3c7c37aba7cfde8/subsys/bluetooth/controller/ll_sw/nordic/hal/nrf5/radio/radio_nrf5340.h#L569-L574
+
+and that header file is only included for nrf5340 build.

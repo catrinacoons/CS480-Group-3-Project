@@ -1,0 +1,54 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/93278
+TITLE: Bluetooth: ISO: Fix issue with BIS tx_complete
+
+*--- opening post by Thalley (2025-07-17 15:16:05+00:00)
+BIS termination as broadcaster is handled different than ACL and CIS, and in rare chances the
+tx_complete for BIS may not have been completed in the system workqueue before iso_new was called for the same bt_conn struct (e.g. via bt_iso_cig_create), which would perform
+
+k_work_init(&conn->tx_complete_work, tx_complete_work);
+
+but where conn->tx_complete_work still existed in
+the system workqueue, which would cause the list
+of pending items on the system workqueue to be removed as the `next` pointer would be NULL.
+
+This also adds an assert in bt_conn_new to prevent this issue from appearing again.
+
+*--- Thalley (2025-07-17 15:22:24+00:00)
+The assert from this PR may be superseded by https://github.com/zephyrproject-rtos/zephyr/pull/93279
+
+*--- Copilot (2025-07-17 20:19:38+00:00)
+Typo in the copyright year range; replace "20242-2025" with "2024-2025".
+```suggestion
+ * Copyright (c) 2024-2025 Nordic Semiconductor ASA
+```
+
+*--- cvinayak (2025-07-29 12:14:51+00:00)
+@PavelVPV FYI, as this issue concerns the way Host uses system workqueue, potentially causing issues to other users of system work queue.
+
+*--- PavelVPV (2025-07-30 12:59:34+00:00)
+I guess this should be moved above memset on line 369.
+
+*--- PavelVPV (2025-07-30 13:12:11+00:00)
+IIRC we don't need to update copyright year.
+
+*--- PavelVPV (2025-07-30 13:32:03+00:00)
+> @PavelVPV FYI, as this issue concerns the way Host uses system workqueue, potentially causing issues to other users of system work queue.
+
+Perhaps, all work items should be moved below `ref` in `bt_conn` and initialized just once.
+
+*--- Thalley (2025-07-31 08:59:47+00:00)
+Good catch! 
+
+Maybe it makes more sense to have the assert where `ref` ends up being 0? It should, at that point, have been flushed
+
+*--- Thalley (2025-07-31 09:08:48+00:00)
+I don't we ever managed to write and guidelines on this :D I usually just update them when I remember them, but I can omit it if you prefer
+
+*--- Thalley (2025-07-31 09:09:44+00:00)
+I moved the assert to `bt_conn_unref` when a `bt_conn` is unreffed, as that's really where all pending TX should have been flushed
+
+*--- PavelVPV (2025-07-31 09:49:34+00:00)
+Fine by me. I remember getting such comment long time ago, but can't find it now.
+
+*--- Copilot (2025-07-31 10:34:38+00:00)
+Setting conn to NULL after the assertion will cause the assertion to access a NULL pointer. The conn = NULL assignment should remain after the assertion, but the assertion should be moved before this line or use a different approach to access the work structure.

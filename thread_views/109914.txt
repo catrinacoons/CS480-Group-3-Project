@@ -1,0 +1,27 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109914
+TITLE: random: remove CONFIG_CTR_DRBG_CSPRNG_GENERATOR
+
+*--- opening post by tomi-font (2026-05-27 09:59:23+00:00)
+It was deprecated for Zephyr v4.4.0 (by b92d516907e850e0e099094f078dd05557f8e762) but not in a proper way.
+Its implementation was removed and it was made identical to `CONFIG_PSA_CSPRNG_GENERATOR` which is deceiving.
+In addition, it appears first in the choice, which means the build system defaults to using this deprecated option instead of `CONFIG_PSA_CSPRNG_GENERATOR`.
+
+Removing it now is the best course of action to avoid deceiving users any longer or defaulting to a deprecated option.
+
+*--- Copilot (2026-05-27 10:12:56+00:00)
+This migration note applies the same replacement to both removed symbols, but `CONFIG_CS_CTR_DRBG_PERSONALIZATION` has no PSA equivalent and was a deprecated no-op. Please clarify that applications should switch `CONFIG_CTR_DRBG_CSPRNG_GENERATOR` to `CONFIG_PSA_CSPRNG_GENERATOR` and simply remove any `CONFIG_CS_CTR_DRBG_PERSONALIZATION` setting.
+
+*--- Copilot (2026-05-27 10:12:56+00:00)
+After removing the CTR-DRBG choice entry, the `CSPRNG_GENERATOR_CHOICE` help text above still instructs users to select CTR-DRBG when hardware entropy is not suitable. Update that help text to reference the remaining PSA option instead, otherwise Kconfig guidance points to a symbol that no longer exists.
+
+*--- tomi-font (2026-05-28 06:59:24+00:00)
+Rebased and fixed conflicts.
+
+*--- Copilot (2026-05-28 07:03:53+00:00)
+Removing the CTR-DRBG symbol leaves existing `:kconfig:option:` references to `CONFIG_CTR_DRBG_CSPRNG_GENERATOR` in the historical release docs unresolved (`doc/releases/migration-guide-4.0.rst` and `doc/releases/release-notes-4.4.rst`). Please convert those references to literals or otherwise preserve a valid target so the documentation build does not emit broken-reference warnings after this Kconfig option is removed.
+
+*--- Copilot (2026-05-28 07:03:54+00:00)
+After removing the only content in this section, `Helper Configuration Options` no longer documents any helper options before the next top-level section starts. Please remove this empty heading or add replacement content so the random API page does not contain a misleading empty section.
+
+*--- tomi-font (2026-06-01 10:19:06+00:00)
+@ceolin please review

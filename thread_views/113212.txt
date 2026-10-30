@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113212
+TITLE: net: l2: ieee802154: Fix secured frame payload length underflow
+
+*--- opening post by rlubos (2026-07-10 10:14:09+00:00)
+Reject frames whose MAC payload is shorter than the AES-CCM authentication tag before computing payload_len, preventing uint8_t underflow from passing an inflated length into the cipher path.
+
+Assisted-by: Cursor:Composer 2.5
+
+*--- rlubos (2026-08-05 07:57:56+00:00)
+Superseded by #115136

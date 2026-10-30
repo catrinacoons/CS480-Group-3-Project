@@ -1,0 +1,17 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114019
+TITLE: drivers: stepper: h_bridge: Propagate timing source errors
+
+*--- opening post by kartben (2026-07-19 21:37:03+00:00)
+`h_bridge_stepper_ctrl_move_by()` and `h_bridge_stepper_ctrl_run()` captured the timing source `update()`/`start()` return codes and logged them on failure, but then unconditionally returned `0`. Callers could not tell that the motor never started moving.
+
+Simply returning the captured `ret` is not enough, though: the work-queue timing source did not honor the `stepper_timing_source_api` contract, which documents *0 on success, negative errno on failure*. `step_work_timing_source_start()` returned `k_work_reschedule()` verbatim (**1** when the work item is newly scheduled) and `step_work_timing_source_stop()` returned the `k_work_cancel_delayable()` flags word. So this PR fixes the timing source first, then the driver:
+
+### 1. `drivers: stepper: gpio: honor the timing source return contract`
+
+Normalize `step_work_timing_source_start()`/`_stop()` to return `0` on success and only propagate negative errors. The counter timing source already did this. This also fixes a latent bug in the step_dir controller, whose `stop()` treats any non-zero `timing_source->stop()` result as a failure and bails out before the pending-step accounting.
+
+### 2. `drivers: stepper: h_bridge: Propagate timing source errors`
+
+Return the captured error from `move_by()` and `run()`, matching what the step_dir controller does.
+
+The commits are ordered so that each one builds and tests cleanly on its own — with the driver change alone, `drivers.stepper.stepper_ctrl.h_bridge_stepper_work_q` fails on `zassert_ok()` because `move_by()`/`run()` would return `1`.

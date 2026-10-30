@@ -1,0 +1,13 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114719
+TITLE: soc: ti: cc23x0: always compile power.c regardless of CONFIG_PM
+
+*--- opening post by LarsMorstadTI (2026-07-27 15:17:28+00:00)
+power.c calls PMCTLSetVoltageRegulator() from a SYS_INIT() hook that is meant to always run, but CMakeLists.txt only compiled the file when CONFIG_PM was enabled. With CONFIG_PM=n, the file was skipped entirely.
+
+Compile power.c unconditionally. Its own "#ifdef CONFIG_PM" guard already excludes the PM-only code when CONFIG_PM is disabled.
+
+Verified by checking that power_initialize is run with CONFIG_PM=n.
+
+
+
+Assisted-by: Claude:claude-sonnet-5

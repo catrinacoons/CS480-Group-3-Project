@@ -1,0 +1,766 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/100491
+TITLE: tests: bluetooth: classic: sim: add GAP discovery test
+
+*--- opening post by lylezhu2012 (2025-12-04 05:18:37+00:00)
+Add Bluetooth Classic GAP (Generic Access Profile) discovery test for the simulation testing infrastructure.
+
+The test validates inquiry-based device discovery functionality, including both general and limited discovery procedures. It uses two simulated Bumble controllers connected via TCP to test central and peripheral roles performing discovery, connection establishment, and disconnection.
+
+It is the first test suite based on the Classic simulation environment.
+
+*--- Copilot (2025-12-04 05:23:44+00:00)
+Inconsistent capitalization: "if" should be "If" to maintain consistency with the previous sentence that starts with "If".
+```suggestion
+If the error `west: command not found` occurs, the following command should be used to activate the
+```
+
+*--- Copilot (2025-12-04 05:23:44+00:00)
+Missing indentation: The code block continuation should be indented to align with the previous line. The line should start with three spaces to properly align with the `source` command in the code block.
+```suggestion
+    source ~/zephyrproject/.venv/bin/activate
+```
+
+*--- Copilot (2025-12-04 05:23:45+00:00)
+Typo in error message: "Disconnected" should be "Disconnection" to match the pattern used in test_central.c and to be grammatically correct. The message should read "Disconnection timeout (err %d)" for consistency.
+
+*--- Copilot (2025-12-04 05:23:45+00:00)
+Typo in error message: "Disconnected" should be "Disconnection" to match the pattern used elsewhere and to be grammatically correct. The message should read "Disconnection timeout (err %d)" for consistency.
+```suggestion
+	zassert_equal(err, 0, "Disconnection timeout (err %d)", err);
+```
+
+*--- Copilot (2025-12-04 05:23:45+00:00)
+Typo in error message: "Connected" should be "Connection" to be grammatically correct. The message should read "Connection timeout (err %d)" for proper grammar.
+```suggestion
+	zassert_equal(err, 0, "Connection timeout (err %d)", err);
+```
+
+*--- Copilot (2025-12-04 05:23:45+00:00)
+Typo in error message: "Connected" should be "Connection" to be grammatically correct. The message should read "Connection timeout (err %d)" for proper grammar.
+```suggestion
+	zassert_equal(err, 0, "Connection timeout (err %d)", err);
+```
+
+*--- Copilot (2025-12-04 05:23:46+00:00)
+Missing test flag reset in before() function: The `before()` function should clear the connection test flags (`TEST_FLAG_CONN_CONNECTED` and `TEST_FLAG_CONN_DISCONNECTED`) to ensure test isolation between test cases, similar to how it's done in test_central.c. Add:
+```c
+atomic_clear_bit(test_flags, TEST_FLAG_CONN_CONNECTED);
+atomic_clear_bit(test_flags, TEST_FLAG_CONN_DISCONNECTED);
+```
+```suggestion
+{
+	atomic_clear_bit(test_flags, TEST_FLAG_CONN_CONNECTED);
+	atomic_clear_bit(test_flags, TEST_FLAG_CONN_DISCONNECTED);
+```
+
+*--- Copilot (2025-12-04 05:23:46+00:00)
+Shell command execution issue: The test command is stored as a string and then executed directly with `$test_cmd`. This approach doesn't properly handle sudo and command arguments correctly. Use `eval $test_cmd` instead, or better yet, execute the command directly without storing it in a variable.
+```suggestion
+
+    log_info "Starting peripheral device asynchronously: sudo ./$peripheral_exe --bt-dev=$first_device"
+    log_info "Using virtual device: $first_device (${virtual_addresses[0]})"
+
+    # Execute the test command asynchronously
+    sudo "./$peripheral_exe" --bt-dev="$first_device" &
+```
+
+*--- Copilot (2025-12-04 05:23:46+00:00)
+Shell command execution issue: The test command is stored as a string and then executed directly with `$test_cmd`. This approach doesn't properly handle sudo and command arguments correctly. Use `eval $test_cmd` instead, or better yet, execute the command directly without storing it in a variable.
+```suggestion
+
+    log_info "Executing test command: sudo ./$central_exe --bt-dev=$second_device"
+    log_info "Using central device: $second_device (${virtual_addresses[1]})"
+
+    # Execute the test command and capture exit code
+    set +e
+    sudo ./"$central_exe" --bt-dev="$second_device"
+```
+
+*--- Copilot (2025-12-04 05:23:46+00:00)
+Typo in error message: "Disconnected" should be "Disconnection" to be grammatically correct. The message should read "Disconnection timeout (err %d)" for consistency with the "Connection timeout" pattern and the "Disconnection failed" message.
+```suggestion
+	zassert_equal(err, 0, "Disconnection timeout (err %d)", err);
+```
+
+*--- Copilot (2025-12-04 05:23:47+00:00)
+Typo in error message: "Connected" should be "Connection" to be grammatically correct. The message should read "Connection timeout (err %d)" for proper grammar.
+```suggestion
+	zassert_equal(err, 0, "Connection timeout (err %d)", err);
+```
+
+*--- Copilot (2025-12-04 05:23:47+00:00)
+`$build_cmd` is executed as a single variable (`if ! $build_cmd; then`) after being constructed with `-DCONFIG_TEST_GAP_CENTRAL_ADDRESS="${virtual_addresses[1]}"`. Because quotes inside the variable are not preserved during word splitting, a crafted `virtual_addresses[1]` value containing shell metacharacters (e.g., `"; rm -rf / #`) can break out of the intended flag and inject arbitrary commands. Construct the command as an array and pass the address as a separate, safely quoted argument, e.g.,
+
+```bash
+local addr=${virtual_addresses[1]}
+west build -b native_sim tests/bluetooth/classic/gap_discovery -d "$build_dir" -DCONFIG_TEST_GAP_PERIPHERAL=y -DCONFIG_TEST_GAP_CENTRAL_ADDRESS="$addr"
+```
+
+or use `printf '%q'` to escape the value and avoid executing a variable as a command.
+```suggestion
+    local addr="${virtual_addresses[1]}"
+
+    log_info "Executing build command: west build -b native_sim tests/bluetooth/classic/gap_discovery -d \"$build_dir\" -DCONFIG_TEST_GAP_PERIPHERAL=y -DCONFIG_TEST_GAP_CENTRAL_ADDRESS=\"$addr\""
+
+    # Execute the build command safely
+    if ! west build -b native_sim tests/bluetooth/classic/gap_discovery -d "$build_dir" -DCONFIG_TEST_GAP_PERIPHERAL=y -DCONFIG_TEST_GAP_CENTRAL_ADDRESS="$addr"; then
+```
+
+*--- Copilot (2025-12-04 05:23:47+00:00)
+`$build_cmd` is executed directly after embedding `-DCONFIG_TEST_GAP_PERIPHERAL_ADDRESS="$peripheral_address"` sourced from `hciconfig`. Since the variable is expanded and executed as a command, quotes inside the variable do not protect against shell metacharacters; an attacker controlling the BT address could inject arbitrary shell commands. Build the command without executing a pre-assembled string: pass the address as a separate, quoted argument or escape it strictly, e.g.,
+
+```bash
+local addr=$peripheral_address
+west build -b native_sim tests/bluetooth/classic/gap_discovery -d "$central_dir" -DCONFIG_TEST_GAP_CENTRAL=y -DCONFIG_TEST_GAP_PERIPHERAL_ADDRESS="$addr"
+```
+
+and avoid `if ! $build_cmd; then` in favor of invoking `west build` directly.
+```suggestion
+
+    log_info "Executing build command: west build -b native_sim tests/bluetooth/classic/gap_discovery -d \"$central_dir\" -DCONFIG_TEST_GAP_CENTRAL=y -DCONFIG_TEST_GAP_PERIPHERAL_ADDRESS=\"$peripheral_address\""
+    log_info "Peripheral address configured as: $peripheral_address"
+
+    # Execute the build command
+    if ! west build -b native_sim tests/bluetooth/classic/gap_discovery -d "$central_dir" -DCONFIG_TEST_GAP_CENTRAL=y -DCONFIG_TEST_GAP_PERIPHERAL_ADDRESS="$peripheral_address"; then
+```
+
+*--- Copilot (2025-12-04 06:26:10+00:00)
+The error message says "Failed to stop GAP discovery procedure" but doesn't cause the test to fail (only logs an error). If stopping discovery is important for test correctness, this should use `zassert_equal(err, 0, ...)` instead of just logging. If it's acceptable for stop to fail, the error message should clarify this.
+```suggestion
+	zassert_equal(err, 0, "Failed to stop GAP discovery procedure (err %d)", err);
+```
+
+*--- Copilot (2025-12-04 06:26:10+00:00)
+[nitpick] The `br_discover_result` array is declared as static but is not explicitly initialized. While C guarantees zero-initialization for static variables, explicitly clearing or documenting this behavior would improve code clarity, especially since this array is reused across multiple test cases.
+
+*--- Copilot (2025-12-04 06:26:11+00:00)
+[nitpick] The variable `auto_fix` is set to `true` with a comment suggesting it could be set to `false`, but there's no configuration option or command-line parameter to control this behavior. This makes the variable and conditional logic unnecessary. Either remove the variable and always auto-fix, or provide a way to configure this behavior.
+
+*--- Copilot (2025-12-04 06:26:11+00:00)
+The script prompts the user for interactive input with `read -p`, which will cause issues in automated CI/CD environments where there's no interactive terminal. Consider adding a command-line flag to enable non-interactive mode, or checking if stdin is a terminal before prompting.
+
+*--- Copilot (2025-12-04 06:26:11+00:00)
+The script runs `sudo` commands for `btvirt`, `btmon`, `hciconfig`, and test executables without checking if the user has sudo privileges. If sudo requires a password or fails, the script may hang or fail unexpectedly. Consider adding a sudo privilege check at the beginning or handling sudo failures more gracefully.
+
+*--- Copilot (2025-12-04 06:26:11+00:00)
+[nitpick] The timeout calculation includes hardcoded magic numbers (1.25 and 5.0). These should be extracted as named constants with explanatory comments to improve code maintainability and make the timeout calculation formula more understandable.
+```suggestion
+/* Multiplier for each discovery result to estimate timeout (seconds per device) */
+#define GAP_DISCOVERY_TIMEOUT_PER_DEVICE 1.25
+/* Base timeout added to the total (seconds) */
+#define GAP_DISCOVERY_TIMEOUT_BASE 5.0
+#define GAP_DISCOVERY_TIMEOUT(count) ((double)(count) * GAP_DISCOVERY_TIMEOUT_PER_DEVICE + GAP_DISCOVERY_TIMEOUT_BASE)
+```
+
+*--- Copilot (2025-12-04 06:26:12+00:00)
+Same issue as line 167: accessing `br_discover_result[0].cod` without verifying that the peer device is at index 0. The peer device might be at a different index in the results array.
+
+*--- Copilot (2025-12-04 06:26:12+00:00)
+The shell script creates virtual HCI devices but doesn't verify that exactly 2 devices are created before proceeding. The script assumes `virtual_devices[0]` and `virtual_devices[1]` exist, but only checks if count is non-zero at line 354. This could lead to array access errors if only 1 device is created. Add a check to ensure at least 2 virtual devices are available before proceeding with the build steps.
+```suggestion
+
+    if [[ $count -lt 2 ]]; then
+        log_warn "At least 2 Virtual HCI devices are required, but only $count found"
+        return 1
+    fi
+```
+
+*--- Copilot (2025-12-04 06:26:12+00:00)
+The `before` function sets both `TEST_FLAG_CONN_CONNECTED` and `TEST_FLAG_CONN_DISCONNECTED` flags to 1, which is incorrect. These flags should be cleared (set to 0) at the beginning of each test to ensure a clean state. Setting them to 1 will cause the test assertions in lines 57 and 63 to pass incorrectly even if no connection/disconnection occurred.
+
+Replace `atomic_set_bit` with `atomic_clear_bit` for both flags.
+```suggestion
+	atomic_clear_bit(test_flags, TEST_FLAG_CONN_CONNECTED);
+	atomic_clear_bit(test_flags, TEST_FLAG_CONN_DISCONNECTED);
+```
+
+*--- Copilot (2025-12-04 06:26:12+00:00)
+The function attempts to access `br_discover_result[0].cod` even though the `peer_device_discovery()` function only sets the `TEST_FLAG_DEVICE_FOUND` flag but doesn't guarantee that the peer device is at index 0 in the results array. If the peer device is discovered but not at index 0, this will read the wrong device's CoD. Consider storing the index of the found device or searching for the peer device in the results array.
+
+*--- lylezhu2012 (2025-12-04 06:53:40+00:00)
+The error code of GAP discovery stop is ignored. Just add a log to print it.
+
+*--- lylezhu2012 (2025-12-04 06:55:20+00:00)
+The comments is used to comment the variable can be changed to `false` if needed.
+
+*--- lylezhu2012 (2025-12-04 11:30:10+00:00)
+Hi @jhedberg , This PR is used to add a new test suite for Bluetooth Classic in simulation platform and simulation controller. My goal is for it to become part of CI/CV for Bluetooth Classic PR inspection.
+
+What do I need to do to achieve this goal?
+
+*--- jhedberg (2025-12-05 14:30:14+00:00)
+Why such an old version of the SDK? The latest one is `0.17.4`. You might also want to factor out the version to a single updatable variable, and maybe also consider using the `west sdk install` command.
+
+*--- lylezhu2012 (2025-12-09 02:50:49+00:00)
+Thanks. Will update it.
+
+*--- jhedberg (2026-01-26 11:53:42+00:00)
+I reassigned this to infrastructure maintainers, since more importantly than Bluetooth reviews the general approach of adding a new github workflow and requirements on the runners needs review & feedback from the appropriate people.
+
+*--- aescolar (2026-01-26 12:10:02+00:00)
+Please don't do this. Do not have test scripts modify the tree itself.
+If a file needs to be executable it should be comited to the tree being executable.
+
+*--- aescolar (2026-01-26 12:16:21+00:00)
+This (and 234-238) is a lot of error handling code for the same condition. An error which will result in all tests failing anyhow. Handling it per test, and in such a verbose way seems quite unnecessary.
+
+Note this is actually redundant with code in main()
+
+*--- aescolar (2026-01-26 12:26:24+00:00)
+This script is replicating a lot of code that is also in ci.bt.classic.sh
+It would be nicer if it was in a common source file.
+
+*--- aescolar (2026-01-26 12:27:16+00:00)
+What if they were launched from another ZEPHYR_BASE but still hanging around?
+
+*--- aescolar (2026-01-26 12:32:48+00:00)
+SonarCloud errors would need to be addressed.
+For this, the function can just be removed, and NULL used in its place in ZTEST_SUITE
+
+*--- aescolar (2026-01-26 12:35:59+00:00)
+Wouldn't this be redundant? (it would have failed just before otherwise)
+
+*--- aescolar (2026-01-26 12:36:18+00:00)
+this is really unnecessary/redundant...
+
+*--- aescolar (2026-01-26 12:38:13+00:00)
+This function is practically the same as `build_peer_device()`. If you want to have your own build wrapper like this, it should be refactored into something reused.
+
+*--- aescolar (2026-01-26 12:43:46+00:00)
+This message and this whole function is way too verbose.
+There is no need to print "everything is fine" messages all the time.
+It is much better to follow a ["silence is golden"](https://www.linfo.org/rule_of_silence.html) approach.
+
+*--- aescolar (2026-01-26 12:44:33+00:00)
+Something like this would better be in a common file to be reused.
+
+*--- aescolar (2026-01-26 12:45:30+00:00)
+Fundamental: so if there is more of these tests, they cannot be run in parallel? (also note hardcoded port numbers) (and they cannot be run in the same machine by different users at the same time?)
+
+*--- aescolar (2026-01-26 12:47:11+00:00)
+That's a lot of time..
+
+*--- aescolar (2026-01-26 12:51:54+00:00)
+A basic design consideration/note: If there is left over processes from previous runs, either the previous run was not cleaned up properly due to some catastrophic failure or hard kill by the user not handled by the wrapping scripts (which can happen), or there is a fundamental flaw in how the whole thing is run which should be fixed.
+
+*--- aescolar (2026-01-26 12:55:45+00:00)
+repeat:
+If a file needs to be executable it should be committed to the tree being executable.
+
+*--- aescolar (2026-01-26 12:58:40+00:00)
+Creating logs around in the tree is really not nice. Better generate all artifacts in a single folder[^1], preferably in a user configurable place (env var defined), and which defaults to be a folder in the top level (like other similar test setups and workflows do)
+
+[^1]: `bt_classic_sim/` is already created by other scripts in this PR
+
+*--- aescolar (2026-01-26 13:01:43+00:00)
+This should have happened at a lower level. If this is necessary there is a problem with some other script in this PR leaving zombie processes around.
+
+*--- aescolar (2026-01-26 13:02:49+00:00)
+A user trying to run something that does not exist, should be treated as an error.
+
+*--- aescolar (2026-01-26 13:08:09+00:00)
+Wasn't the directory change run in a subshell? This would be a nop..
+
+*--- aescolar (2026-01-26 13:08:45+00:00)
+Nit: This only has second resolution.
+
+*--- aescolar (2026-01-26 13:13:26+00:00)
+nit: I think it would be more appropriate just keeping the overall start in a separate variable, as any overhead in this script around running the tests also counts.
+
+*--- aescolar (2026-01-26 13:20:29+00:00)
+Major: A user should not need to have sudo permissions to run this script.
+
+*--- aescolar (2026-01-26 13:28:33+00:00)
+Major: Killing any zephyr.exe is not ok. There are likely to be other zephyr.exe running from other unrelated tests.
+In principle the same applies to btmon
+
+*--- aescolar (2026-01-26 13:29:41+00:00)
+Minor: A whole summary was just printed above. This is just unnecessarily verbose
+
+*--- aescolar (2026-01-26 13:54:28+00:00)
+Nit: too verbose
+
+*--- aescolar (2026-01-26 14:01:10+00:00)
+It should be possible for users to build and run separately tests.
+
+*--- lylezhu2012 (2026-01-27 08:52:03+00:00)
+Parallelism should be supported. It just needs to use different ports for different cases.
+
+Let me update the test suite to allocate the TCP ports dynamically.
+
+*--- lylezhu2012 (2026-01-27 09:06:47+00:00)
+Yes, I agreed. 
+
+Let me clean up it. The created processes should be killed before the script existing. And it has be handled by this script.
+
+*--- lylezhu2012 (2026-01-27 09:07:52+00:00)
+Sure. let me remove it.
+
+*--- lylezhu2012 (2026-01-27 09:08:09+00:00)
+Yes.
+
+*--- lylezhu2012 (2026-01-27 09:15:52+00:00)
+The directory was switched to "$ZEPHYR_BASE" earlier in the current function. Here it is switched back.
+
+*--- lylezhu2012 (2026-01-29 03:12:07+00:00)
+Removed. The executable attribute is added when creating the commit.
+
+*--- lylezhu2012 (2026-01-29 03:12:16+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:13:06+00:00)
+Added a common file `test_utils.sh`.
+
+*--- lylezhu2012 (2026-01-29 03:14:18+00:00)
+Fixed. Terminate the processor according to the processor ID instead of script path.
+
+*--- lylezhu2012 (2026-01-29 03:15:15+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:15:35+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:16:31+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:16:39+00:00)
+Fixed. Changed it to `build_local_device()`.
+
+*--- lylezhu2012 (2026-01-29 03:17:16+00:00)
+Unnecessary log messages were cleared.
+
+*--- lylezhu2012 (2026-01-29 03:18:16+00:00)
+Added a common file `bumble_utils.sh` to manage the simulations controller related operations.
+
+*--- lylezhu2012 (2026-01-29 03:19:18+00:00)
+Added a dedicated function `find_available_port()` to allocate the port.
+
+*--- lylezhu2012 (2026-01-29 03:19:58+00:00)
+Optimised. Changed it to 3.
+
+*--- lylezhu2012 (2026-01-29 03:21:55+00:00)
+Optimised.
+
+The simulation controller processor will be created at the beginning of the script. And it will be terminated when existing the script.
+
+*--- lylezhu2012 (2026-01-29 03:22:41+00:00)
+Removed.
+Added the executable attribute when creating the commit.
+
+*--- lylezhu2012 (2026-01-29 03:23:18+00:00)
+Put all log files to the same folder `bt_classic_sim`.
+
+*--- lylezhu2012 (2026-01-29 03:23:47+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:24:30+00:00)
+Returned an error.
+
+*--- lylezhu2012 (2026-01-29 03:25:16+00:00)
+Cleaned.
+
+*--- lylezhu2012 (2026-01-29 03:25:41+00:00)
+Change the unit to `ms`.
+
+*--- lylezhu2012 (2026-01-29 03:27:20+00:00)
+Added. Calculated the total time separately.
+
+*--- lylezhu2012 (2026-01-29 03:27:34+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:27:57+00:00)
+All of them are removed.
+
+*--- lylezhu2012 (2026-01-29 03:28:10+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:28:25+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-01-29 03:35:14+00:00)
+The script do not support this case.
+
+The BD address of simulation controller is randomly generated.
+
+And the precondition of building includes the peer BD address in current test case.
+
+Therefore, when creating a simulation controller, the build and run processes should be executed sequentially. This ensures that the addresses are not modified.
+
+*--- aescolar (2026-02-02 14:41:57+00:00)
+Why not pass them as command line parameters to not need to rebuild?
+
+*--- aescolar (2026-02-02 14:45:08+00:00)
+The way this is written, it seems you have used an LLM to generate this..
+In any case, this is overly verbose and reads like advertisement with little content. Please be brief. Peoples time is valuable, and their attention limited.
+
+*--- aescolar (2026-02-02 14:59:07+00:00)
+Hi @lylezhu2012,
+Before going more into details, let me zoom out a bit:
+I can certainly understand the desire to have tests for the BT classic side of the stack.
+And I can understand the desire to have them run in CI.
+
+But let me make a couple of comments, and ask a couple of questions, and so we can understand what may be the best approach.
+
+* Bumble's [own documentation has a warning about it being immature](https://google.github.io/bumble/)
+  That raises a concern about its API stability, and reliability
+  (and therefore the amount of trouble and rework in may cause on Zephyr's side to keep these tests)
+
+* All communication (between the native_sim executable and the python code) seems to be asynchronous(?). This would mean tests runs are not deterministic or reliable: They may pass or fail when rerun. Both due to the CI runner load/speed, or more random factors.
+
+* Should tests like these be run in CI at all? (or just be available to be run locally?)
+  If they are run in CI, given that they are not deterministic, should they be retried a number of times when they fail?
+  If run in CI, should they gate merges? (or simply inform?)
+  If they gate merges, should they be run only when changing BT classic code? (or when changing any code that could affect the test result?)
+
+*--- lylezhu2012 (2026-02-03 07:22:14+00:00)
+It is updated.
+
+*--- lylezhu2012 (2026-02-03 07:43:51+00:00)
+> * Bumble's [own documentation has a warning about it being immature](https://google.github.io/bumble/)
+>   That raises a concern about its API stability, and reliability
+>   (and therefore the amount of trouble and rework in may cause on Zephyr's side to keep these tests)
+
+I took these issues into account. That's why I limited the number of versions of Bumble. I believe that future updates to Bumble will require thorough testing.
+
+> * All communication (between the native_sim executable and the python code) seems to be asynchronous(?). This would mean tests runs are not deterministic or reliable: They may pass or fail when rerun. Both due to the CI runner load/speed, or more random factors.
+> * Should tests like these be run in CI at all? (or just be available to be run locally?)
+
+Yes, that's possible. I think changes are necessary if you want to improve the quality of Bluetooth Classic.
+
+>   If they are run in CI, given that they are not deterministic, should they be retried a number of times when they fail?
+
+I think it's necessary. However, retrying will increase the server load.
+
+>   If run in CI, should they gate merges? (or simply inform?)
+
+For Bluetooth Classic related changes, I think it is better to block to be merged if CI failed.
+
+>   If they gate merges, should they be run only when changing BT classic code? (or when changing any code that could affect the test result?)
+
+I have actually specified some paths, do I need to narrow down the scope?
+
+```
+  pull_request:
+    paths:
+      - '.github/workflows/bluetooth_classic_sim_tests.yml'
+      - "west.yml"
+      - 'include/zephyr/bluetooth/**'
+      - "subsys/bluetooth/**"
+      - 'tests/bluetooth/classic/**'
+      - "samples/bluetooth/classic/**"
+      - "boards/native/**"
+      - "soc/native/**"
+      - "arch/posix/**"
+      - "include/zephyr/arch/posix/**"
+      - "scripts/native_simulator/**"
+      - "modules/mbedtls/**"
+      - '!**.rst'
+```
+
+*--- aescolar (2026-02-05 09:47:08+00:00)
+>> Bumble's own documentation has a warning about it being immature
+>
+> I took these issues into account...I believe that future updates to Bumble will require thorough testing.
+
+Ok, that will be a maintenance cost for the BT classic side. If you are willing to accept it, and it does not cause a burden on other areas that seems fine to me.
+
+>> If they are run in CI, given that they are not deterministic, should they be retried a number of times when they fail?
+>
+> I think it's necessary. However, retrying will increase the server load.
+
+If re-running only those which failed, doing it automatically would actually save CI time compared to manual re-trigger.
+
+Another overall comment: CI time:
+Running tests in real time as we do in this PR, is very slow.
+Python is slow. So with python code handling each packet we have a test system which is inherently slow by design.
+
+Note this gap discovery test took 75s in CI to run, while comparable tests in BabbleSim take ~0.2s.
+Meaning, this test setup will scale badly CI time wise and cost wise, as tests are added.
+This may just be accepted, but needs to be understood, and is in general something which should be attempted to be minimized. (CC @stephanosio , @nashif )
+
+> For Bluetooth Classic related changes, I think it is better to block to be merged if CI failed...
+> I have actually specified some paths, do I need to narrow down the scope?
+
+Yes please. With these limitation, I think this CI job should only be triggerd narrowly for BT classic changes. Otherwise we would start blocking other PRs due to oversensitive BT classic tests, and a lot of CI time for very little benefit.
+
+*--- lylezhu2012 (2026-02-06 04:14:35+00:00)
+> If re-running only those which failed, doing it automatically would actually save CI time compared to manual re-trigger.
+
+How does CI currently support retry? Or is this determined by the script itself?
+
+> Note this gap discovery test took 75s in CI to run, while comparable tests in BabbleSim take ~0.2s. Meaning, this test setup will scale very badly CI time wise and cost wise, as tests are added. This may just be accepted, but needs to be understood, and is in general something which should be attempted to be minimized. (CC @stephanosio , @nashif )
+
+Yes. The main reason is that I added a GAP limited discovery test case to the test suite. This case needs to detect whether limited discovery stops within 30-60 seconds after discover-able is enabled. It is a special test case.
+
+> Yes please. With these limitation, I think this CI job should only be triggerd narrowly for BT classic changes. Otherwise we would start blocking other PRs due to oversensitive BT classic tests, and a lot of CI time for very little benefit.
+
+Sure.
+
+*--- aescolar (2026-02-06 08:40:46+00:00)
+> How does CI currently support retry? Or is this determined by the script itself?
+
+We do it with our scripting. In the case of the twister job, it is called again (up to 3 times in total) told to rerun only last run failed tests. An option would be for this PR parallelizing script to retry up to N times if a test fails on its own.
+
+*--- lylezhu2012 (2026-02-06 12:12:12+00:00)
+> We do it with our scripting. In the case of the twister job, it is called again (up to 3 times in total) told to rerun only last run failed tests. An option would be for this PR parallelizing script to retry up to N times if a test fails on its own.
+
+Thanks. Added an argument MAX_RUN_RETRIES for retry.
+
+*--- aescolar (2026-02-06 13:24:38+00:00)
+Thanks @lylezhu2012
+I added the other BT stack maintainers as reviewers so they are also informed, and can help with the review.
+
+*--- Thalley (2026-02-06 13:36:12+00:00)
+I'm not gonna review this PR, just to be clear :D 
+
+I think @aescolar makes a good point with the time to run these; The test added by this PR seems to take ~90 seconds (120 in total for the entire action), which isn't too bad, but if that's just a single test, then that might end up scaling quite poorly if the number of tests increases. 
+
+If the number of tests don't increase, i.e. it mostly acts as a smoke-test, then I think it is fine to add, and the runtime is not concerning. 
+It may be possible to run the current test for all the paths add to `.github/workflows/bt_classic_sim_tests.yml`, and then maybe we can add subsequent tests to only run for `- 'subsys/bluetooth/host/classic/**'` (and other classic-only)? Then the runtime of those tests is not going to matter a lot for the majority of PRs, which doesn't fix anything, but it mitigates it a bit. 
+
+The addition of running tests with bumble is actually something that would be welcoming for LE Audio as well, as Bumble does support quite a lot of LE Audio profiles and services too: https://github.com/google/bumble/tree/main/bumble/profiles. I have played around with the idea of running IOP testing in CI with Bumble for that reason too, and maybe just run it as a smoketest (due to run-time). If there are ways to somehow run Bumble with BSIM (at least for LE), then that could add some nice automated and simulated IOP testing. Unfortunately I don't have the capacity to look further into that at the moment, but this PR could be a first step towards that :) (bumble could also be used for IOP testing for the LE Host as well)
+
+*--- aescolar (2026-02-06 13:48:23+00:00)
+(Sorry for the tangent to this PR)
+
+> (bumble could also be used for IOP testing for the LE Host as well)
+
+@thalley note that there are other BT LE stacks out there that work with BabbleSim. So if we are thinking about IOP testing, that would be an option. (though I wonder if Zephyr's PR CI would be the place). @sjanc can probably comment about the current state of Nimble and if they'd have some interest to IOP it with Zephyr in such a way.
+
+*--- chengkai15 (2026-04-03 04:07:50+00:00)
+```suggestion
+            self.on_inquiry = on_inquiry
+```
+
+*--- chengkai15 (2026-05-11 07:09:04+00:00)
+@lylezhu2012 any update?
+
+*--- nashif (2026-06-02 20:24:06+00:00)
+given the recent changes in twister to support running babblesim tests (using script harness: https://github.com/zephyrproject-rtos/zephyr/pull/108119), was there any attempt to make this type of tests run and be managed by twister? 
+It would be great to have testing all done in one worflow and managed the same way, having multiple workflows with different envionment setups that are managed by different folks is not ideal.
+But in general I am not opposed for giving this a try short term with the goal of consolidating our workflows and how we run and manage tests mid to long term.
+
+*--- lylezhu2012 (2026-06-12 00:56:34+00:00)
+> given the recent changes in twister to support running babblesim tests (using script harness: #108119), was there any attempt to make this type of tests run and be managed by twister? It would be great to have testing all done in one worflow and managed the same way, having multiple workflows with different envionment setups that are managed by different folks is not ideal. But in general I am not opposed for giving this a try short term with the goal of consolidating our workflows and how we run and manage tests mid to long term.
+
+Thanks for sharing. Let me try it.
+
+*--- lylezhu2012 (2026-06-18 13:43:12+00:00)
+Hi @nashif, @aescolar, @jhedberg, @Thalley, @chengkai15 
+
+I have removed the changes related to the GitHub workflow and updated the PR using the `twister + harness + script` testing framework.
+
+Please help review the changes.
+
+*--- Copilot (2026-06-18 13:43:21+00:00)
+`BT_LIMITED_DISCOVERABLE_DURATION` is declared without a type, but has a numeric default/range. In Kconfig this should be an `int` symbol; as-is it will be treated as a boolean/tristate and the numeric default is invalid.
+
+*--- Copilot (2026-06-18 13:43:22+00:00)
+`compile_scripts()` checks `$?` twice, but the second check is no longer the status of `resolve_test_dir()` (it was overwritten by the prior `[[ ... ]]`). This makes the `valid_dirs` population logic incorrect.
+
+*--- Copilot (2026-06-18 13:43:22+00:00)
+`run_scripts()` appends to `script_files` but never initializes it locally. This leaks state into the global scope (and across calls) and can produce incorrect results if `run_scripts` is invoked more than once.
+
+*--- Copilot (2026-06-18 13:43:22+00:00)
+`run_scripts()` has the same `$?` re-check bug as `compile_scripts()`: after the error check, `$?` is no longer the return code from `resolve_test_dir()`, so `valid_dirs` may not be populated correctly.
+
+*--- Copilot (2026-06-18 13:43:23+00:00)
+`execute_async()` uses `eval` on a reconstructed command line. This makes argument passing fragile (quoting/spacing) and needlessly increases risk of unintended shell expansion. It can run the command directly using `"$@"` instead.
+
+*--- Copilot (2026-06-18 13:43:23+00:00)
+`K_SECONDS(timeout)` is passed a `double`. `K_SECONDS()` expands to integer tick conversion macros and should be given an integer duration; passing floating-point can truncate and may trigger warnings or incorrect timeouts. Consider converting explicitly to milliseconds and using `K_MSEC()`.
+
+*--- Copilot (2026-06-18 13:43:23+00:00)
+The documented executable name omits the `sim` part of the Twister test case name. The scripts use `bluetooth.classic.sim.gap.discovery`, so the copied binary name will include `.sim.`; the README should match to avoid confusion when running manually.
+
+*--- Copilot (2026-06-18 13:43:23+00:00)
+This example uses `test_case_name="bluetooth.classic.gap.discovery"`, but the actual Twister test case added in this PR is `bluetooth.classic.sim.gap.discovery` (see `testcase.yaml` and scripts). Using the wrong name will point readers at a non-existent binary path.
+
+*--- Copilot (2026-06-18 13:43:24+00:00)
+This example uses `test_case_name="bluetooth.classic.gap.discovery"`, but the actual test case added here is `bluetooth.classic.sim.gap.discovery`. The example should use the same name so it matches the produced executable name.
+
+*--- Copilot (2026-06-18 13:43:24+00:00)
+Typo in log message: "Inqury" -> "Inquiry".
+
+*--- Copilot (2026-06-18 13:43:24+00:00)
+The `-test=...` argument strings in this script include a leading space. This is easy to miss and becomes problematic if `execute_async` is changed to pass arguments without `eval` (the leading space would be preserved). Prefer passing the flag without leading whitespace, consistent with `general_discovery.sh`.
+
+*--- Copilot (2026-06-18 13:43:25+00:00)
+Same leading-space issue for the central `-test=...` argument; drop the whitespace so the argument is passed exactly as intended.
+
+*--- Copilot (2026-06-18 13:43:25+00:00)
+This example builds a single `ARGS` string and passes it as one argument to `execute_async`. That relies on `execute_async` doing `eval`/word-splitting; if `execute_async` is made safer (no `eval`), this example will stop working. Prefer an array and pass `"${ARGS[@]}"` like the real test scripts do.
+
+*--- Copilot (2026-06-18 13:43:25+00:00)
+Same issue as above: passing a combined `ARGS` string as a single argument hides whitespace issues (note the double space before `-test`) and depends on `eval`-style execution. Prefer an array and pass `"${ARGS[@]}"`.
+
+*--- chengkai15 (2026-06-23 03:12:57+00:00)
+BT_COD_MAJOR_SVC_CLASS_LIMITED_DISCOVER is defined in
+include/zephyr/bluetooth/assigned_numbers.h
+
+*--- chengkai15 (2026-06-23 03:17:46+00:00)
+it seems that the length was in units of 1.28 s
+
+*--- chengkai15 (2026-06-23 03:19:02+00:00)
+For the Z_TIMEOUT_MS / K_MSEC / SYS_CLOCK series, suggest using integer milliseconds for time calculations is the standard convention in Zephyr.
+
+*--- chengkai15 (2026-06-23 03:28:34+00:00)
+run_parallel/collect_parallel_results — hand-assembles JUnit <testsuites> XML, duplicating what the Twister script harness already provides.
+
+*--- chengkai15 (2026-06-23 03:30:01+00:00)
+uses eval "$*", which would re-parses arguments and loses quoting
+
+*--- chengkai15 (2026-06-23 03:50:27+00:00)
+I haven't gone through everything yet — it's a fairly large change. 
+ 
+ But based on the discussion so far, it seems we're not fully aligned on the overall approach yet. 
+ 
+ Could we settle the framework direction (extend bsim vs. adopt Bumble) before going further?
+
+*--- lylezhu2012 (2026-06-23 05:11:43+00:00)
+The purpose is to modify the range. The type is not needed.
+
+*--- lylezhu2012 (2026-06-23 05:12:04+00:00)
+Cleared the code block
+
+*--- lylezhu2012 (2026-06-23 05:12:14+00:00)
+Cleared the code block
+
+*--- lylezhu2012 (2026-06-23 05:12:30+00:00)
+~Ignored and unchanged.~
+
+Fixed.
+
+*--- lylezhu2012 (2026-06-23 05:13:01+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-06-23 05:13:14+00:00)
+Fixed
+
+*--- lylezhu2012 (2026-06-23 05:13:24+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-06-23 05:13:49+00:00)
+Fixed
+
+*--- lylezhu2012 (2026-06-23 05:14:02+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-06-24 11:21:53+00:00)
+Fixed
+
+*--- lylezhu2012 (2026-06-24 11:22:09+00:00)
+Fixed
+
+*--- lylezhu2012 (2026-06-24 11:22:27+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-06-24 11:23:03+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-06-24 11:23:16+00:00)
+Corrected.
+
+*--- lylezhu2012 (2026-06-24 11:23:31+00:00)
+Corrected.
+
+*--- lylezhu2012 (2026-06-24 11:23:55+00:00)
+Removed.
+
+*--- lylezhu2012 (2026-06-24 11:24:03+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-06-24 11:31:38+00:00)
+> the overall approach yet.
+
+It is unclear what you mean by "overall approach."
+
+> Could we settle the framework direction (extend bsim vs. adopt Bumble) before going further?
+
+Because Bluetooth Classic is unsupported by BubbleSim, the BSIM cannot be used. So, for Bluetooth Classic, the test framework is ZTEST (twister + harness + script) in my plan.
+
+So, the test framework is clear. It is ZTEST (twister + harness + script). Also it is applicable `BSIM`.
+
+*--- Copilot (2026-06-24 11:39:38+00:00)
+The file appears to start with a UTF-8 BOM character before the shebang (``/invisible), which can break the kernel shebang parsing and also violates Zephyr’s non-ASCII guidance. Remove the BOM so the very first bytes are `#!`.
+
+*--- Copilot (2026-06-24 11:39:39+00:00)
+Kconfig symbol has no type, so it defaults to `bool`, but it’s given a numeric default/range. This will be rejected by Kconfig parsing. Declare it as an `int` (optionally without a prompt if it’s meant to be hidden).
+
+*--- Copilot (2026-06-24 11:39:39+00:00)
+CMake style: command names should be lowercase in Zephyr, and using `file(GLOB ...)` makes the build sensitive to stale CMake state. Since the sources are known, list them explicitly in `target_sources()` with 2-space indentation.
+
+*--- Copilot (2026-06-24 11:39:39+00:00)
+`wait_for_async_jobs()` claims to return the *first* failed process’ exit code, but the loop overwrites `exit_code` on every failure. This can hide the initial failure reason and makes debugging flaky.
+
+*--- Copilot (2026-06-24 11:39:39+00:00)
+The load guard variable is named `COMPILE_UTILS_LOADED`, but this file is `common_utils.sh`. This increases the chance of accidental collisions with other sourced helpers and makes the intent unclear.
+
+*--- Copilot (2026-06-24 11:39:40+00:00)
+Installing/uninstalling Python packages at test runtime is fragile (requires network access, writable environment, and can break hermetic CI). It’s safer for the harness to *check* the Bumble version and fail with a clear message if the dependency isn’t satisfied.
+
+*--- Copilot (2026-06-24 11:39:40+00:00)
+`inquiry_mode` is an integer/enum-like value; using `is` performs identity comparison, which is not reliable for numeric values. Use `==` for the mode checks to avoid intermittent behavior.
+
+*--- Copilot (2026-06-24 11:39:40+00:00)
+`br_discover_sem` can be given both when the target device is found *and* again on the discovery timeout callback. When the device is found early, that extra give can leave the semaphore in a signaled state and make subsequent `peer_device_discovery()` calls return immediately (this test calls discovery multiple times in `test_02_limited_discovery`). Reset the semaphore before starting a new discovery.
+
+*--- Copilot (2026-06-24 11:39:41+00:00)
+`timeout_ms` is a `uint64_t`, but `%llu` assumes `unsigned long long`. On LP64 platforms `uint64_t` is often `unsigned long`, which can trigger format warnings/errors. Cast explicitly (or use PRIu64).
+
+*--- Copilot (2026-06-24 11:39:41+00:00)
+If `--peer_bd_address` is malformed, the test keeps running with an uninitialized/zero address, which tends to fail later with a much less actionable assertion. Since this is a mandatory option, fail fast from the cmdline callback (native_sim provides `nsi_exit()`).
+
+*--- lylezhu2012 (2026-06-25 02:53:08+00:00)
+Fixed,
+
+*--- lylezhu2012 (2026-06-25 02:53:23+00:00)
+Not accepted.
+
+*--- lylezhu2012 (2026-06-25 02:53:34+00:00)
+Ignored.
+
+*--- lylezhu2012 (2026-06-25 02:53:46+00:00)
+Optimized.
+
+*--- lylezhu2012 (2026-06-25 02:53:58+00:00)
+Updated.
+
+*--- lylezhu2012 (2026-06-25 02:55:40+00:00)
+If the test is executed by a human, this comment is fine; however, for CI, this comment is unacceptable.
+
+*--- lylezhu2012 (2026-06-25 02:55:55+00:00)
+Updated
+
+*--- lylezhu2012 (2026-06-25 02:56:06+00:00)
+Fixed
+
+*--- lylezhu2012 (2026-06-25 02:56:17+00:00)
+Optimized.
+
+*--- lylezhu2012 (2026-06-25 02:56:27+00:00)
+Added.
+
+*--- jhedberg (2026-06-25 08:09:25+00:00)
+@lylezhu2012 I added you back as assignee, since this doesn't touch runner details or anything else outside of the Bluetooth Classic domain.
+
+*--- aescolar (2026-06-25 08:24:12+00:00)
+Nit:
+```suggestion
+			.is_mandatory = true,
+			.option = "peer_bd_address",
+			.name = "XX:XX:XX:XX:XX:XX",
+			.type = 's',
+```
+No need to set fields that are 0
+
+*--- aescolar (2026-06-25 08:36:44+00:00)
+This test took 50 seconds on this PR latest CI run, and your own example output was 115s. I think it would be better to have quite a bit more margin here, to account for more loaded runners.
+```suggestion
+    timeout: 300
+```
+
+*--- jhedberg (2026-08-17 07:36:55+00:00)
+Heads-up: #116447 proposes a twister sidecar (per the merged #113253 framework) as the host-side orchestration for this simulation framework, and it carries the Python simulation backend from this PR — your commit, trimmed to the Python modules, with authorship and sign-off preserved and a note in the commit message explaining the trim. Please shout if you'd prefer that handled differently.
+
+The intent is that this PR and #111840 remain the home of the actual test content: with the sidecar in place, the shell utilities and per-test scripts here would drop out, and each scenario becomes a `sidecar: bumble` declaration in `tests.yaml` with the ztest harness. See the `acl_conn` reference test in #116447 for the shape.

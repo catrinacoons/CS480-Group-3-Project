@@ -1,0 +1,16 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116838
+TITLE: sys: printk: restore the API in the Doxygen output
+
+*--- opening post by kartben (2026-08-19 16:53:34+00:00)
+Doxygen does not define `CONFIG_PRINTK`, so it only ever sees the `CONFIG_PRINTK=n` stubs. #114814 hid those behind `@cond`, which left the `printk()` documentation block with nothing to attach to: it landed on `snprintk()` instead — that is the `parameters ... are not documented` warning in the doc build — and the rest of the header dropped out of the API documentation entirely 🥲 
+
+Add `__DOXYGEN__` to the condition so the real prototypes are what gets documented, and document `snprintk()`, `vsnprintk()` and `vprintk()`, which never had documentation of their own while at it.
+
+### Why CI didn't catch it
+
+As of a few weeks back doc CI workflow does not build Sphinx website when not needed so a PR only touching header files only has Doxygen being built, and in that case Doxygen warnings are not considered an error. It's only when Doxygen build is wrapped  in a "full" Sphinx build that warnings get promoted as errors... I'll try to improve this in a follow-up fix.
+
+*--- kartben (2026-08-19 17:18:10+00:00)
+> I'd really rather not see a hotfix have additional work with it, but given that these are comments/doxygen generation I don't see much reason hold this up.
+
+You're right. Not in front of a computer for the next couple hours but feel free to force push a more concise fix directly to my branch

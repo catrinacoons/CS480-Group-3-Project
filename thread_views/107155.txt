@@ -1,0 +1,146 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107155
+TITLE: tests: unified test definition file for both samples and tests.
+
+*--- opening post by nashif (2026-04-12 12:25:29+00:00)
+- **twister: support unified test definition file**
+- **west: support test files named tests.yaml**
+- **samples: hello world: use tests.yaml**
+- **doc: twister: adapt twister docs for tests.yaml**
+- **ci: twister: adapt script for unified tests.yaml file**
+- **twister: tests: adapt to unified test definition file**
+- **scripts: footprint: remove unused check**
+
+*--- gchwier (2026-04-13 13:02:59+00:00)
+please remove tests.yml, as `.yaml` is the prefered extension when creating new files
+
+*--- gchwier (2026-04-29 10:58:02+00:00)
+```suggestion
+from . import ZEPHYR_BASE  # pylint: disable=no-name-in-module
+```
+
+*--- gchwier (2026-04-29 10:58:40+00:00)
+not needed, don't ask why :), just remove
+
+*--- hakehuang (2026-04-29 11:06:37+00:00)
+so do we plan to use a batch pr to change all the .yaml files to test.yaml?
+
+*--- nashif (2026-04-29 11:11:40+00:00)
+> so do we plan to use a batch pr to change all the .yaml files to test.yaml?
+
+yes, after this goes in.
+
+*--- nashif (2026-04-29 11:16:46+00:00)
+this does not seem to work, we need to just override this, it has been like this forever.
+
+*--- gchwier (2026-04-29 11:33:19+00:00)
+yep, you can think also about disabling that rule globally, here https://github.com/zephyrproject-rtos/zephyr/blob/main/scripts/ci/pylintrc#L119 ;-)
+
+*--- Thalley (2026-05-14 10:26:56+00:00)
+Are these two type of files semantically equivalent? If so, do we prefer one over the other?
+
+*--- Thalley (2026-05-14 10:28:24+00:00)
+Oh I see that the others are being deprecated?
+
+*--- Thalley (2026-05-14 10:31:26+00:00)
+I wonder if we should keep `sample.yaml`, but for non-testing purposes. 
+
+One interesting thing about such files, is that you can use them to also denote various build configurations for a sample, and where you can (mis)use e.g. `west twister` to build the same sample application in various ways, or automatically apply overlays etc. depending on the board and configuration. I think this is a useful method for more complex applications/samples that are designed for multiple boards and configurations and not just for testing purposes (whereas the name `tests.yaml` is much more clearly intended for only testing purposes).
+
+*--- nashif (2026-05-14 10:40:22+00:00)
+> One interesting thing about such files, is that you can use them to also denote various build configurations for a sample, and where you can (mis)use e.g. `west twister` to build the same sample application in various ways, or automatically apply overlays etc. depending on the board and configuration. I think this is a useful method for more complex applications/samples that are designed for multiple boards and configurations and not just for testing purposes (whereas the name `tests.yaml` is much more clearly intended for only testing purposes).
+
+that is the not the purpose of sample.yaml, if you have different build configuration in a sample, it needs to be done via cmake directly. sample.yaml is not how we document or configure a sample and how it is built.
+
+*--- Thalley (2026-05-14 10:55:11+00:00)
+I know it's not the purpose (hence the "(mis)use)"), but it is nevertheless a way to do it (and something that a few samples do today (https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/psa/its#building). 
+
+The purpose of `sample.yaml` is not very explicitly documented either, so I guess that may also explain why it may have been used like that. 
+
+Do we really not want to have a way to build various configurations with west explicitly like `west build config_a`, `west build config_b`, instead of relying on CMake (where I guess would you would do something like `west build -- -DA` or `west build -- -DB`)? It is arguably outside the scope of this PR to discuss this of course, but I do think it's s shame that we today (technically) have a way to express various build configurations for various boards in a nicely formatted file (that can be re-used for testing purposes as well), and the change here (while not actually removing that, but making it much clearer that it's not the intention due to the renaming) will "remove" that.
+
+*--- Thalley (2026-05-14 10:57:02+00:00)
+If `testcase.yaml` and `sample.yaml` are being deprecated, should this PR not also go through and rename all existing cases of these in-tree? I thought we didn't want to use any deprecated things in the tree. I guess this should also provide some sort of warning when using these, as well as having an entry in the migration guide as deprecating these type of files will probably be breaking for a lot of applications
+
+*--- Copilot (2026-05-14 11:47:08+00:00)
+Setting `class_testplan.TEST_DEFINITION_FILENAME = 'test_data.yaml'` assigns a string, but the new `add_testsuites` logic iterates this attribute (`for f in self.TEST_DEFINITION_FILENAME if f in filenames`). With a string value, iteration yields individual characters instead of filenames, so no match will be found and the test won't behave as before. Use a list, e.g. `['test_data.yaml']`, consistent with the other call site updated in this same file.
+
+*--- Copilot (2026-05-14 11:47:08+00:00)
+Two `@mock.patch.object` decorators are stacked on the same attribute `TEST_DEFINITION_FILENAME`. The second one patches it to an empty string `''`, which (because decorator stacking applies bottom-up first) overwrites the intended `test_filename_mock` value during the test body. The previous code patched two distinct attributes (`TESTSUITE_FILENAME` and `SAMPLE_FILENAME`); after the unification the second patch should be removed (or this test scenario rethought), as patching the same attribute twice with different values is almost certainly unintended.
+
+*--- Copilot (2026-05-14 11:47:09+00:00)
+Duplicate `@mock.patch.object(TestPlan, 'TEST_DEFINITION_FILENAME', test_filename_mock)` — the same attribute is patched twice with the same value. Previously these decorated two distinct attributes (`TESTSUITE_FILENAME` and `SAMPLE_FILENAME`); after merging into a single attribute, one decorator should be removed.
+
+*--- Copilot (2026-05-14 11:47:09+00:00)
+The priority order of test definition filenames is inconsistent across the codebase. Here it is `['testcase.yaml', 'tests.yaml', 'sample.yaml']` (testcase.yaml first), while `scripts/west_commands/build.py` uses `['tests.yaml', 'sample.yaml', 'testcase.yaml']` and `scripts/ci/test_plan.py` uses `['sample.yaml', 'testcase.yaml', 'tests.yaml']`. Since the documentation now describes `tests.yaml` as the canonical filename and the others as deprecated, `tests.yaml` should consistently take precedence in all locations to avoid surprises when a directory contains more than one of these files during the migration.
+
+This issue also appears on line 159 of the same file.
+
+*--- Copilot (2026-05-14 11:47:09+00:00)
+Grammatical error: "the presence of a ``tests.yaml`` ... files" — singular article "a" with plural noun "files". Suggest: "the presence of a ``tests.yaml`` file in the application's project directory".
+
+*--- PerMac (2026-05-14 12:04:54+00:00)
+In practice IMO those yaml and "tests" there  in many cases serves more as build config variants. Because the real tests are e.g. either in main.c in case of ztest or .py for pytest, and the same tests are run on different "tests" items. Only harness: console/shell has tests defined in the yamls. I am fine with the proposed change as it follows status quo, but (imo) confusion remains.
+
+*--- nashif (2026-05-14 12:18:08+00:00)
+> I know it's not the purpose (hence the "(mis)use)"), but it is nevertheless a way to do it (and something that a few samples do today ([`main`/samples/psa/its#building](https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/psa/its#building)).
+
+you can still do that, nothing has changed beside the file name? in sample.yaml we have been using "tests" for all those multiple configurations, so right now it is going to be tests.yaml instead, same content, same functionality....
+
+> The purpose of `sample.yaml` is not very explicitly documented either, so I guess that may also explain why it may have been used like that.
+
+see above, the only difference is that sample.yaml included additional metadata explain what the sample is about to allow for collection of samples automatically
+
+> o we really not want to have a way to build various configurations with west explicitly like `west build config_a`, `west build config_b`, instead of relying on CMake (where I guess would you would do something like `west build -- -DA` or `west build -- -DB`)? It is arguably outside the scope of this PR to discuss this of course, but I do think it's s shame that we today (technically) have a way to express various build configurations for various boards in a nicely formatted file (that can be re-used for testing purposes as well), and the change here (while not actually removing that, but making it much clearer that it's not the intention due to the renaming) will "remove" that.
+
+That is all supported the same way as before.
+
+HAving said all of this, we have a real problem (not really related to this change) where samples are being misused as tests and where the sample.yaml is used to build with different options that are not part of documentation of the sample and do not really provide any value for someone looking at the sample to learn and rather being used to test functionality on different boards, rather than serve as a sample.
+
+*--- nashif (2026-05-14 12:19:12+00:00)
+will come as the second step, or else I will spend the rest of my life rebasing and dealing with conflicts.
+
+*--- Thalley (2026-05-14 12:57:04+00:00)
+> That is all supported the same way as before.
+
+I know, and I do realize that the renaming here is just a semantic change
+
+> HAving said all of this, we have a real problem (not really related to this change) where samples are being misused as tests 
+
+I agree with this :) 
+
+> and where the sample.yaml is used to build with different options that are not part of documentation of the sample and do not really provide any value for someone looking at the sample to learn and rather being used to test functionality on different boards, rather than serve as a sample.
+
+Correct me if I'm wrong, but is the plan to rename all `sample.yaml` files to `tests.yaml`? Are they still going to be placed in the sample's directory, thus replacing "sample configuration" with "test configuration"? Isn't this going in the wrong direction then, if we do not want to treat samples as tests? If the `whatever.yaml` file is to be used _exclusively_ for testing purposes, should they then not be be placed in the sample's directory, as they "do not really provide any value for someone looking at the sample to learn and rather being used to test functionality on different boards, rather than serve as a sample."?
+
+*--- henrikbrixandersen (2026-05-14 13:00:47+00:00)
+As I see it, you can _test_ a sample, but a sample should not be used for _testing_. Similar as to how a Zephyr application (e.g. a downstream application for a product) can be tested, but it should not be used for testing.
+
+We currently have `sample.yaml` files in our downstream application folders for doing automated testing of those applications - naming those files `tests.yaml` makes much more sense.
+
+*--- Thalley (2026-05-14 13:32:00+00:00)
+That also makes sense :) 
+
+I think my main points here are:
+1) Renaming `sample.yaml` to `tests.yaml` changes the semantic purpose of the file (IMO as it changes from describing a sample, to describing a test), and any application/sample that used this for non-testing purposes will require to make changes to how they build their applications. I don't see the advantage of this change. Maybe `sample.yaml` was not used for its intended purposes, but I can't find any documentation stating this. And yes, technically they can just rename it (assuming that they don't have sample.yaml for building/configuration purposes and testcases.yaml for testing purposes)
+
+2) It would be nice to have an official declarative way of defining various build configurations of an application (like `sample.yaml` can do today)
+
+3) Is `samples/x/tests.yaml` really the right place to place tests of samples, instead `tests/samples/x/tests.yaml`? We already have several tests of samples (that require a bit more test verification than what `tests.yaml` can provide I think) under `tests`. 
+
+
+
+I'm not against these changes just to be clear, but I did want to raise the concerns that your intended purposes of some of these files may differ from what other application developers have intended to use them as (including several in-tree samples), and this change may be a bigger breaking change that you may think, because the intended purposes of these files were never really appropriately documented (as far as I can tell anyhow). While we are adding this new type of file, tests.yaml, we may also want to consider documenting it properly somewhere and what its intended purposes (and perhaps also how it should not be used?); at the point of writing this it is just stated that twister and pytest will look for this file for tests, but the file itself does not have any proper introduction IMO.
+
+*--- henrikbrixandersen (2026-05-14 14:08:25+00:00)
+As `sample.yaml` and `testcase.yaml` are for use by Twister, which is the Zephyr _test_ runner, they are both documented here: https://docs.zephyrproject.org/latest/develop/test/twister.html#tests
+
+Notice how they are documented under "Developing with Zephyr » Testing » Test Runner (Twister) » Tests" and documented to be used for describing test scenarios. I'd say our current documentation clearly states the intended use of these files.
+
+*--- henrikbrixandersen (2026-05-14 14:11:19+00:00)
+> 3\. Is `samples/x/tests.yaml` really the right place to place tests of samples, instead `tests/samples/x/tests.yaml`? We already have several tests of samples (that require a bit more test verification than what `tests.yaml` can provide I think) under `tests`.
+
+Our application test code and accompanying configuration lives in the same folder as the application itself. I would not want to introduce some "magic" parallel test configuration directory structure under `tests/` but rather keep tests of applications close to the code being tested. I really don't see any benefit of splitting the two?
+
+*--- PerMac (2026-05-15 07:39:19+00:00)
+I see the benefit of splitting tests of samples from samples (hence keeping them separate) to resolve "sample is not a test" issue. We would have samples in samples dir and corresponding tests in tests dir. I hope then it would be easier to extend the testing options e.g. to new boards.
+We (and other vendors as well) want to verify that samples works on our platforms when applicable. Right now we are regularly blocked when we try to add extra platforms to sample.yaml because "sample is not a test". Or will the change from sample.yaml to test.yaml mean the statement "sample is not a test" will no longer be a blocker, since we will be extending tests not samples?

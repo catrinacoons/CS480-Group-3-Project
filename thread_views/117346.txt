@@ -1,0 +1,9 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117346
+TITLE: drivers: adc: esp32: fix oneshot read hang with wi-fi power save
+
+*--- opening post by sylvioalves (2026-08-25 19:28:20+00:00)
+When Wi-Fi power saving is enabled, adc_read() can hang forever because the ADC shares an analog clock with the Wi-Fi modem and the hal waits for the conversion result in a loop with no timeout. While the modem sleeps the conversion can never finish.
+
+The driver now holds the analog clock while reading and the hal wait is bounded, so instead of hanging the read returns ETIMEDOUT and the application can simply retry. The timeout is configurable through ADC_ESP32_CONVERSION_TIMEOUT_US.
+
+Fixes #117247

@@ -1,0 +1,21 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109600
+TITLE: tests/bluetooth/audio: Be sure to free all malloc'ed memory
+
+*--- opening post by aescolar (2026-05-21 15:00:15+00:00)
+To avoid memory leak warnings with valgrind.
+
+The one in bap_base is evident.
+
+The other is due to a tests that is purposely overwriting the stream pointer to NULL.
+Which means it is lost and can't be free'd.
+So, let's make sure we free it at the end of each test by keeping the cap_streams ptr in the fixture.
+
+*--- Copilot (2026-05-22 05:37:29+00:00)
+The fixture stores `cap_streams` as `void *`, which drops type information and relies on implicit pointer conversions. Since this is always a `struct bt_cap_stream *` allocation in this test, store it with the correct type to improve type-safety and readability.
+
+*--- Thalley (2026-05-22 06:01:42+00:00)
+```suggestion
+	struct bt_cap_stream *cap_streams;
+```
+
+Minor

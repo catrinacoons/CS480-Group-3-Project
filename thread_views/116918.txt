@@ -1,0 +1,17 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116918
+TITLE: cmake: west: read the topdir through west's Python API
+
+*--- opening post by kartben (2026-08-20 09:32:21+00:00)
+`west topdir` boots west's entire CLI just to print one path. Calling `west.util.west_topdir()` directly does the same job without the CLI machinery. Saves **~100 ms per configure** (0.145 s → 0.035 s on macOS, 0.113 s → 0.022 s on Linux; isolated, min of 7 runs).
+
+Note that `west build` already passes `-DWEST_TOPDIR`, which skips this block entirely — so the beneficiaries are plain `cmake` invocations and **twister**, where the saving is paid once per test case rather than once per session.
+
+Output is unchanged (verified identical across runs on both platforms), and both failure paths are left alone: a west version import failure stays fatal, a missing topdir stays tolerated so a tree without a west workspace still configures.
+
+*--- pdgendt (2026-08-20 14:01:48+00:00)
+Question; should we pass `-DWEST_TOPDIR` in CI's twister run? It's an immediate win.
+
+*--- kartben (2026-08-20 14:45:25+00:00)
+> Question; should we pass `-DWEST_TOPDIR` in CI's twister run? It's an immediate win.
+
+yeah maybe? @nashif, thoughts?

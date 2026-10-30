@@ -1,0 +1,105 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/issues/107500
+TITLE: ADC Channel Address Mismatch
+
+*--- opening post by jsbatch (2026-04-17 19:03:25+00:00)
+### Describe the bug
+
+A change was made in in the ADC API in PR https://github.com/zephyrproject-rtos/zephyr/pull/99120 that changed the `ADC_CHANNEL_DT_NODE` behavior.  
+
+Old macro implementation: 
+```
+ #define ADC_CHANNEL_DT_NODE(ctlr, input) \
+     DT_FOREACH_CHILD_VARGS(ctlr, ADC_FOREACH_INPUT, input)
+ 
+ #define ADC_FOREACH_INPUT(node, input) \
+     IF_ENABLED(IS_EQ(DT_REG_ADDR_RAW(node), input), (node))
+```
+In this implementation, the child node's reg property was used in the comparison with input in the macro.  
+
+New macro implementation: 
+```
+ #define ADC_CHANNEL_DT_NODE(ctlr, input) \
+     DT_CHILD_BY_UNIT_ADDR_INT(ctlr, input)
+```
+In the new implementation, the child node is looked up using the unit address.  
+
+Now for the problem:
+In a number of devices, this address is defined as a decimal value when it should be defined as a hex value.  Example from the kit_psc3m5_evk overlay from the adc_dt sample, which results in a reg value of 12, but an address of 18:
+```
+	channel@12 {
+		reg = <12>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,resolution = <12>;
+	};
+```
+
+I can only verify the problem on the Infineon kit_psc3m5_evk board, but I believe the following overlays suffer from the same bug:  
+ - `samples/drivers/adc/adc_dt/boards/kit_psc3m5_evk.overlay`
+ - `samples/drivers/adc/adc_dt/boards/saml21_xpro.overlay`
+ - `samples/drivers/adc/adc_dt/boards/rzt2m_rsk_r9a07g075m24gbg_cr520.overlay`
+ - `samples/drivers/adc/adc_dt/boards/arduino_uno_r4.overlay`
+ - `samples/drivers/adc/adc_sequence/boards/kit_psc3m5_evk.overlay`
+ - `samples/subsys/usb_c/sink/boards/numaker_m2l31ki.overlay`
+ - `tests/drivers/adc/adc_accuracy_test/boards/frdm_kl25z.overlay`
+ - `tests/drivers/adc/adc_api/boards/kit_psc3m5_evk.overlay`
+ - `tests/drivers/adc/adc_error_cases/boards/kit_psc3m5_evk.overlay`
+ - `tests/drivers/dac/dac_loopback/nxp-dac0-adc23-internal.overlay`
+ - `tests/drivers/dac/dac_loopback/boards/stm32l562e_dk.overlay`
+
+### Regression
+
+- [x] This is a regression.
+
+### Steps to reproduce
+
+_No response_
+
+### Relevant log output
+
+```shell
+*** Booting Zephyr OS build v4.4.0-512-g258beb968873 ***
+Could not setup channel #2 (-134)
+```
+
+### Impact
+
+Functional Limitation – Some features not working as expected, but system usable.
+
+### Environment
+
+_No response_
+
+### Additional Context
+
+_No response_
+
+*--- pdgendt (2026-04-20 16:09:51+00:00)
+> Now for the problem: In a number of devices, this address is defined as a decimal value when it should be defined as a hex value. Example from the kit_psc3m5_evk overlay from the adc_dt sample, which results in a reg value of 12, but an address of 18:
+> 
+> ```
+> 	channel@12 {
+> 		reg = <12>;
+> 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+> 		zephyr,gain = "ADC_GAIN_1";
+> 		zephyr,reference = "ADC_REF_INTERNAL";
+> 		zephyr,resolution = <12>;
+> 	};
+> ```
+
+I think this was a bug before the changes in my PR? Unit addresses are always parsed as hexadecimal.
+
+From [node name requirements](https://devicetree-specification.readthedocs.io/en/latest/chapter2-devicetree-basics.html#node-name-requirements):
+
+> The unit-address must match the first address specified in the reg property of the node.
+
+This is not the case in your snippet.
+
+*--- jsbatch (2026-04-20 22:18:37+00:00)
+Yes, the overlays were never correct.  The `channel@12` should have always been `channel@c` in the example I provided.  The change made in PR https://github.com/zephyrproject-rtos/zephyr/pull/99120 changed the DT parsing in the drivers such that the overlays (at least for Infineon kit_psc3m5_evk) no longer function.
+
+*--- pdgendt (2026-04-21 06:29:03+00:00)
+There are more issues in tree, I've asked Claude to generate a script to find these (see https://gist.github.com/pdgendt/16275a4fadcd142289d51b5f78e4b061)
+
+It might not be perfect, but it makes it easier to spot issues. I've created a few PRs from these: https://github.com/zephyrproject-rtos/zephyr/pull/107640 https://github.com/zephyrproject-rtos/zephyr/pull/107641

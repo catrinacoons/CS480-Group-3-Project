@@ -1,0 +1,73 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115576
+TITLE: scripts: dts: only warn on a locally declared required default
+
+*--- opening post by sylvioalves (2026-08-06 19:31:23+00:00)
+The check that warns when a binding declares both `required: true` and
+`default:` for the same property runs on the property settings left
+after `include:` files are merged. A binding that inherits a `default:`
+and deliberately overrides it with `required: true` was therefore
+reported, even though that combination is well defined: the required
+check runs first and fails the build when the property is absent, so
+the inherited default never applies.
+
+Keep a copy of the properties each binding declares on its own, taken
+before includes are merged, and warn only when both settings come from
+the same file. Included files are merged in place, which also covers
+nested child bindings, so the copy is handed down to each child binding
+in turn.
+
+Also drops the now-redundant `required: true` from bindings that inherit
+a `default:`, but only where a `const:` or `enum:` still rejects that
+default, so an absent property remains a build failure.
+
+Fixes https://github.com/zephyrproject-rtos/zephyr/issues/115573
+
+*--- sylvioalves (2026-08-06 20:21:03+00:00)
+I think those warnings came from https://github.com/zephyrproject-rtos/zephyr/pull/109986
+
+*--- pdgendt (2026-08-07 11:21:30+00:00)
+Ping @etienne-lms
+
+*--- kylebonnici (2026-08-08 13:06:58+00:00)
+IMO this is exposing the internal logic. 
+
+How about:
+
+
+```suggestion
+Note that combining ``default:`` with ``required: true`` implies the user MUST manually override the property in the dts files. Hence combining ``default:`` with ``required: true`` will raise a build  error if the property is not explicitly defined in the dts files. 
+```
+
+*--- rruuaanng (2026-08-09 03:37:03+00:00)
+No issues, but I don't really like recursive parsing.
+(Might carry some risks.)
+
+*--- mathieuchopstm (2026-08-11 11:23:19+00:00)
+For consistency:
+```suggestion
+    if "required" in local_options and "default" in local_options:
+```
+
+But I think we should warn if a `default` is applied *after any `required: true`*, not just at the same spot: providing a `default` for a property that is already `required` never makes sense. I believe this should do it:
+```suggestion
+    if "default" in local_options and "required" in options:
+```
+
+*--- mathieuchopstm (2026-08-11 12:01:50+00:00)
+How about:
+```
+.. warning ::
+
+  Inside one binding file, the `default:` key should never be declared on a
+  property if ``required: true`` is also declared on this same property, either
+  by the binding file itself or any ``include``ed binding file. Doing so will
+  produce a build-time warning as the ``default:`` value can never be used:
+  a value must be explicitly in DTS provided to satisfy ``required: true``, and
+  explicitly provided values override the ``default:``.
+
+  On the other hand, a binding may declare ``required: true`` on a property that
+  was ``include``ed and for which a ``default:`` was previously declared by one
+  of the ``include``ed bindings. This does not produce a build-time warning and
+  is intended for inheritor bindings which want to force the explicit providing
+  of a value for a given property, as ``required: true`` is intended to do.
+```

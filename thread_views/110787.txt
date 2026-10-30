@@ -1,0 +1,486 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/110787
+TITLE: gpio: RFC: Add Fast GPIO API Extension (closes #106831)
+
+*--- opening post by DaAwesomeP (2026-06-08 23:18:00+00:00)
+This commit creates the Fast GPIO API via RFC #106831. It adds low-latency set, clear, toggle, get, etc. functions and helpers for implementing fast bit-bang drivers.
+
+Closes #11917, closes #106831.
+
+**UPDATE:** This has been refactored to use DT instead of overrides; see more recent commits.
+
+~~**NOTE:** This is starting as a draft. I want to get some feedback from @nandojve before opening to other reviewers. Before marking as ready I will separate the WS2812 driver parts into a new PR. It is combined here at first for ease of testing/hardware verification.~~ This is now complete: #111218.
+
+OK, this was a tough one! Here are some notes compared to the original RFC:
+1. I was unable to implement `gpio_fast_send_stream()`. The timing requirements for a driver like WS2812 are too tight to abstract the data out into a struct and for loops. I was only able to make it work by creating a specific 2-operations-per-bit set/clear mode, which defeats the point of the abstraction. It is likely possible, but will take a lot more work and I think should go in a followup PR.
+2. The only way I could make the timings reliable across all platforms was to use `nop`.
+3. I could not use `LISTIFY()` because it created a mess of Kconfig math. We can now automatically calculate timing offsets via the number of CPU cycles required for set and clear in the header/source, so the WS2812 driver no longer requires per-board timing config in Kconfig/DTS.
+4. When implementing future vendor Fast GPIO drivers, it is really a **requirement** that it is tested on real hardware. There are so many edge cases where you may need `__ramfunc` or calculating the cycle offsets are weird. The good thing is, **none of these edge cases are visible from the user-facing API.**
+5. The number of cycles to do operations varies per platform, but **the driver can fully realize if timings can be met at compile time.**
+
+The part I am really proud of: I have verified this works on **6 different platforms!**
+- Adafruit Circuit Playground Express: `sam0`
+- Adafruit Feather ESP32: `esp32`
+- Adafruit KB2040: `rpi_pico`
+- Teensy 4.0: `mcux`
+- STM32 Nucleo-F401RE: `stm32`
+- nRF52840 Dongle : `nrf52840`
+
+All of these work without custom timing in DTS.
+
+@nandojve I added your copyright to some files since you did a lot of work in the RFC. Please let me know if you would prefer me to remove them.
+
+<img width="800" height="450" alt="zephyr_neopixel" src="https://github.com/user-attachments/assets/670f7ffe-8801-4749-a8a8-bb21081f4189" />
+
+I used the help of Claude Opus 4.7 on this PR, and it mostly helped me with vendor-specifics for each platform that I am less familiar with. I have physically tested the set/clear functions on each platform. I do not use this tool for issue/PR comments and take full responsibility for this code.
+
+Assisted-by: Claude:claude-opus-4.7
+
+*--- DaAwesomeP (2026-06-08 23:21:03+00:00)
+I was not sure of the best way to choose a vendor implementation. Please let me know if there is a better way to do this.
+
+*--- kartben (2026-06-08 23:23:47+00:00)
+> Iused the help of Claude Opus 4.7 on this PR,
+
+Please follow the guidelines at https://docs.zephyrproject.org/latest/contribute/guidelines.html#ai-coding-assistants and update the commit message accordingly then :)
+
+*--- DaAwesomeP (2026-06-08 23:28:45+00:00)
+>Please follow the guidelines at https://docs.zephyrproject.org/latest/contribute/guidelines.html#ai-coding-assistants and update the commit message accordingly then :)
+
+@kartben Fixed! Added to the commit and PR top message. Did not see that note before!
+
+*--- nandojve (2026-06-13 09:52:54+00:00)
+Hi @DaAwesomeP ,
+
+I took a look and I think you did!
+I believe this is enough to continue the discussion in the WG.
+
+Very nice!
+
+*--- DaAwesomeP (2026-06-13 18:47:01+00:00)
+@nandojve thank you for the kind words!
+
+OK, I have separated out the `ws2812-gpio` driver migration into  #111218.
+
+**Reviewers, I would highly recommend taking a look at #111218 to see an example of how this driver is intended to be used.**
+
+*--- dnltz (2026-06-16 07:51:39+00:00)
+```suggestion
+ * SPDX-FileCopyrightText: 2026 Perry Naseck, MIT Media Lab <pnaseck@media.mit.edu>
+```
+
+*--- dnltz (2026-06-16 07:54:27+00:00)
+would it be possible to add `GPIO_FAST` to the existing API and provide inline functions or defines to get the function pointer without extra cycles? This feels like a second API added to existing GPIO drivers.
+
+*--- DaAwesomeP (2026-06-16 15:26:38+00:00)
+If there are function pointers at any point in the call, then the compiler won't be able to inline them (with `ALWAYS_INLINE`), right? That's a critical part of ensuring the timings are met.
+
+*--- DaAwesomeP (2026-06-16 15:41:17+00:00)
+Fixed! Updated to `SPDX-FileCopyrightText` for all files.
+
+*--- zejiang0jason (2026-06-17 06:05:29+00:00)
+This function is not GPIO specific, it is better to add in Zephyr generic level?
+
+*--- zejiang0jason (2026-06-17 06:09:06+00:00)
+cortex M7 has a feature called `dual issue`, which means the actual used cycle count is less than instruction count.
+
+> To increase instruction throughput, the Cortex-M7 processor can execute certain pairs of instructions simultaneously. This is called dual issue.
+
+https://developer.arm.com/documentation/dui0646/c/Introduction/About-the-Cortex-M7-processor-and-core-peripherals
+
+*--- zejiang0jason (2026-06-17 06:15:04+00:00)
+This value is not decided by GPIO peripheral, but by the SOC integration, the bus topology
+
+*--- nordicjm (2026-06-17 06:20:29+00:00)
+this is not acceptable for an API
+
+*--- nandojve (2026-06-17 06:24:28+00:00)
+Hi @nordicjm ,
+
+When you say something is not acceptable, you need provide guidance and example.
+What would be acceptable? This kind of comments only delay any advance and put you again the loop to check again the proposal. At end, it is only more work.
+
+*--- nordicjm (2026-06-17 06:27:44+00:00)
+this isn't an API, it's a vendor lock in to files in zephyr, an API would be something that is expandable by users out of tree, it doesn't comply because this is not at all. E.g. a user can add a gpio driver, a user cannot add a "gpio fast" driver not is it possible to use 2 different ones in a project, I don't think it really needs explaining to this level given it's the whole basic concept of APIs in zephyr. Notwithstanding I said the same thing to you in your PR review in the architecture working group
+
+*--- nandojve (2026-06-17 06:43:19+00:00)
+It is not me doing the API implementation proposal, it is another person that, maybe, does not have all the details. This is why I'm asking to you to put in written here so anyone can help and understand your point. I understand your reasons but you are not giving a technical direction about how to solve the issue that you see as a problem.
+
+In your opinion, how we should address the technical detail? How this kind of problem should be addressed?
+
+*--- nordicjm (2026-06-17 06:45:59+00:00)
+that is for the submitter to investigate and implement - not me. I'm just here as a reviewer saying it does not fit into zephyr APIs
+
+*--- erwango (2026-06-17 08:38:33+00:00)
+Not compatible with F1 series
+
+*--- erwango (2026-06-17 08:38:48+00:00)
+Not compatible with F1 series
+
+*--- nandojve (2026-06-17 10:03:43+00:00)
+@carlescufi ,
+
+I think the proposal reach a point that require another round in the WG. This still a proposal for a RFC and I'm interested to know if content proves the RFC and if it enough to take a decision about option A vs B.
+
+@DaAwesomeP , I think it will be very important you participate in the next round because you have valuable information about the implementation and tests.
+
+*--- DaAwesomeP (2026-06-17 15:15:03+00:00)
+Hi all, if you scroll up you will see that I already commented on this code snippet (before any other reviewers) saying that I was not sure of the best way to do the driver selection part and was looking for suggestions. I asked this question because I do not know the best way to implement this part.
+
+From my understanding of C, the usual Zephyr function pointers are not possible for a bit-bang driver due to the timing and portability requirements (because the compiler needs to be able to inline the functions).
+
+The entire purpose of this driver is to prevent vendor-lockin and eventually improve the currently nRF-only `ws2812-gpio` driver. I believe this is the most portable method proposed so far. Other proposals have either a) just added more vendor-specific cases to `ws2812-gpio`, or b) exposed raw registers as an API, which would require the end user to case by vendor anyway.
+
+*--- DaAwesomeP (2026-06-17 18:44:08+00:00)
+That's a cool feature. I did not know the M7 had that. The question is if it applies `dual issue` to `nop`. [This page](https://www.quinapalus.com/cm7cycles.html) says that ARM does not disclose which operations are optimized but it also seems to have measured a bunch of combinations. It seems that person did not test `nop`.
+
+I did test on a Teensy 4.0, and it worked (see GIF at the top of the PR), so it seems that it may not use `dual issue` for `nop` at runtime.
+
+*--- carlescufi (2026-06-18 12:45:43+00:00)
+Architecture WG meeting:
+
+- @DaAwesomeP presents his work, he has tested the port of the ws2812 on six different platforms successfully
+- @henrikbrixandersen comments on the concern of the encapsulation as well as the way that the API includes the vendor header files directly from the main API header, and also the fact that those can't then be implemented out-of-tree
+- @nordicjm agrees with @henrikbrixandersen and also mentions the fact that you can't have different GPIO types handled at the same time, because the APIs resolve to absolute functions at compile time
+- @fabiobaltieri understand the limitations but considers that having something like this is better than having nothing at all. @carlescufi and @jfischer-no agree to this point
+- @jfischer-no asks about how the timing calculations work and whether they can be modified at runtime
+- @cfriedt asks about usermode threads, but @DaAwesomeP counters that this has been designed for minimum overhead. @cfriedt and @carlescufi suggest instead opening up the address space of the GPIO registers
+- @henrikbrixandersen suggests instead having vendor-specific backends to the proposal in https://github.com/zephyrproject-rtos/zephyr/issues/109586. Perhaps @DaAwesomeP and @sylvioalves could consider that as an alternative
+- @nordicjm asks how the timings will work in nRF when they depend on the drive mode and other parameters
+- @DaAwesomeP tried already to implement something like #109586 with vendor-specific backends
+- @carlescufi asks whether the register-based approach in #105263 is considered still viable or should be dropped in favor of this one. @jfischer-no says that both are viable, it's a matter of choosing
+- @DaAwesomeP mentions that he did try to use the approach in #105263, but the differences in registers make it a bit harder to write drivers using the API that are actually vendor neutral
+- The approach in  #105263 resolves two of the main issues brought up with the approach in this PR: multiple GPIO types at the same time, that require multiple register sets and the ability to have out-of-tree drivers implementing the  API
+
+*--- fabiobaltieri (2026-06-18 13:32:26+00:00)
+> * @nordicjm asks how the timings will work in nRF when they depend on the drive mode and other parameters
+
+Hey is that really relevant in this context? IIUC you are talking about the drive setting right, then it would control the pin slew rate, but would that change enough to be significant in this context? Imagine if you are implementing a bit banged protocol (say the debug port stuff) it woud not really matter much.
+
+*--- nordicjm (2026-06-18 13:37:12+00:00)
+> > * @nordicjm asks how the timings will work in nRF when they depend on the drive mode and other parameters
+> 
+> Hey is that really relevant in this context? IIUC you are talking about the drive setting right, then it would control the pin slew rate, but would that change enough to be significant in this context? Imagine if you are implementing a bit banged protocol (say the debug port stuff) it woud not really matter much.
+
+yes, high drive needs configuration for example, not all pins can use high drive so what would this "hard coded" value return given that a user might want to use either and it is in a header used at compile time to assert? I know stm32 has(/had) a similar thing of GPIO port frequencies to set how fast they operate at, which again would impact this. Also what if the CPU itself has frequency selection that can alter this at runtime? The ws2812 parts shown earlier in the working group generally use SPI because they can run at e.g. 800Kbps so this isn't exactly low frequency debug port bit banging
+
+*--- nandojve (2026-06-22 08:57:21+00:00)
+> The approach in drivers: gpio: Add GPIO_GET_REGS  #105263 resolves two of the main issues brought up with the approach in this PR: multiple GPIO types at the same time, that require multiple register sets and the ability to have out-of-tree drivers implementing the API
+
+1. There is no issue with multiple GPIOs from different ports. If you need to access 2 banks the system will need to execute multiple times anyway, which, decrease the performance. The penalty exist in any case independent of the implementation. If someone wants fast GPIO from different banks it needs 2 configs which can be managed using the API.
+2. I could not join the WG last time. It is not clear to me why it is not possible to implement this OOT. Could someone explain the exact issue?
+
+>> @nordicjm asks how the timings will work in nRF when they depend on the drive mode and other parameters
+Hey is that really relevant in this context? IIUC you are talking about the drive setting right, then it would control the pin slew rate, but would that change enough to be significant in this context? Imagine if you are implementing a bit banged protocol (say the debug port stuff) it woud not really matter much.
+
+> yes, high drive needs configuration for example, not all pins can use high drive so what would this "hard coded" value return given that a user might want to use either and it is in a header used at compile time to assert? I know stm32 has(/had) a similar thing of GPIO port frequencies to set how fast they operate at, which again would impact this. Also what if the CPU itself has frequency selection that can alter this at runtime? The ws2812 parts shown earlier in the working group generally use SPI because they can run at e.g. 800Kbps so this isn't exactly low frequency debug port bit banging
+
+There is a fast config which can carry more details like pin slew rate etc. It is just a matter to extended it.
+
+*--- DaAwesomeP (2026-07-09 17:17:49+00:00)
+One thought to help with extensibility given the limitations of the API (can't use function pointers): We could add an option like `CONFIG_FAST_GPIO_CUSTOM_HEADER` which would allow a user to specify/override a header file providing the fast GPIO methods. This would make the `#ifdef` part less rigid.
+
+I'm also wondering if there is a more configurable way to do the Fast GPIO header selection than simply casing on `GPIO_`. In the case that a device does have multiple GPIO peripheral types, you should be able to select which one at build time. Could we have a Kconfig option like `CONFIG_FAST_GPIO_BACKEND=GPIO_NRFX` or `CONFIG_FAST_GPIO_BACKEND=GPIO_STM32` or `CONFIG_FAST_GPIO_BACKEND=CUSTOM_HEADER`?
+
+*--- nordicjm (2026-07-10 06:23:21+00:00)
+> One thought to help with extensibility given the limitations of the API (can't use function pointers): We could add an option like CONFIG_FAST_GPIO_CUSTOM_HEADER which would allow a user to specify/override a header file providing the fast GPIO methods. This would make the #ifdef part less rigid.
+
+this is not what Kconfig is for, this is also not usable for the same reasons given earlier
+
+*--- nandojve (2026-07-10 06:25:38+00:00)
+Why we can not have a similar solution to this?
+
+https://github.com/zephyrproject-rtos/zephyr/blob/cde0a961d820b34c2141792e22971573b52de3aa/modules/trusted-firmware-m/Kconfig.tfm#L12-L20
+
+*--- nordicjm (2026-07-10 06:32:44+00:00)
+As said, specifying files that the build system picks up for includes is not what Kconfig is for, notwithstanding it completely falls apart on FPGAs
+
+*--- teburd (2026-07-16 00:51:14+00:00)
+It has been said a few times now to get really fast GPIO (and really other really fast peripheral APIs) the function pointers and indirection likely need to go away.
+
+There's various ways of doing this and trade offs to each. Having what sort of amounts to weak inlines (selecting a header based on Kconfig) is one option.
+
+Another would be to type alias the gpio devices and use _Generic over those types to create static dispatching based on type.
+
+The nice aspect of using _Generic is that it'd be fairly easy to have multiple GPIO variations even on the same part. I'm not sure that'd be possible here.
+
+*--- DaAwesomeP (2026-07-16 00:53:48+00:00)
+@teburd I just pushed a massive refactor. It is now possible to have multiple drivers without relying on overrides.
+
+*--- DaAwesomeP (2026-07-16 00:55:19+00:00)
+OK, I have refactored this to rely on DT + CMake, allow multiple drivers, and allow bringing in one or more drivers from out of tree:
+- Drivers now get the vendor of the GPIO in question and use `GPIO_FAST_DISPATCH_CALL()` for functions and `GPIO_FAST_DISPATCH_VAL()` for values.
+- Drivers no longer override function names (they are unique and selected with the above macros), so multiple can be included and used in one build.
+- Users can provide out of tree drivers by overriding a stub header and including as many drivers as they would like in that header (I also added a test for this).
+
+The ws2812 driver in #111218 has been updated to demonstrate how this is used.
+
+*--- DaAwesomeP (2026-07-16 01:01:56+00:00)
+Updated to handle F1, please let me know if this looks right (I don't have this hardware).
+
+*--- nordicjm (2026-07-16 07:20:54+00:00)
+no way should global defines be polluted with this
+
+*--- DaAwesomeP (2026-07-16 16:26:53+00:00)
+Realistically only 1, maybe 2 would ever be defined. We can get around this for the includes in `gpio_fast.h` by checking `CONFIG_GPIO_FAST && CONFIG_GPIO_ESP32` (which, it is worth noting we already have a global define per each platform `CONFIG_GPIO_*`).
+
+It is harder to get around it for `Z_GPIO_FAST_DISPATCH_*`, which needs to know which backends are included at preprocessor time in order to fallback to the generic backend. We could remove the automatic fallback, but then each driver that uses fast GPIO would need to add an override attribute to DT and IMO that would be much more confusing to document and consistently implement in every downstream driver.
+
+We could add `CONFIG_GPIO_FAST_BACKEND_atmel_sam0` to Kconfig, but this would break with existing naming scheme (i.e. no manufacturer name and all caps: `CONFIG_GPIO_SAM0`). The existing DT names unfortunately does not mirror the Kconfig options.
+
+We could instead implement the fallback by requiring every single GPIO driver to implement every function regardless, like this, but this is very messy (would requiring updating every driver)
+```c
+#ifdef GPIO_FAST_GENERIC_FALLBACK
+#include <zephyr_gpio_fast_generic.h>
+#define GPIO_FAST_SET_CYCLES_my_vendor GPIO_FAST_SET_CYCLES_generic
+static ALWAYS_INLINE void gpio_fast_toggle_my_vendor(const void *spec)
+{
+	gpio_fast_toggle_generic(spec);
+}
+#endif
+```
+
+What do you recommend?
+
+*--- DaAwesomeP (2026-07-16 22:46:36+00:00)
+OK, refactored again per @nordicjm's review. I have removed `CONFIG_GPIO_FAST_BACKEND_*`. If you need the generic driver, it is now selected by adding `fast-gpio-backend` to the DT node that relies on fast GPIO (this is what the main test does). There is a helper to allow you to rely on `fast-gpio-backend` if it is present, else it will look for the GPIO driver backend name using a property name provided by the driver (i.e. `gpios`).
+
+To recap, the driver now:
+1. Always includes all backends that are available on a platform based on existing `CONFIG_GPIO_*`.
+2. Out of tree drivers can be included by overriding a stub.
+3. A generic backed driver (mainly for tests) can be used by setting DT `fast-gpio-backend`.
+4. The chosen backend driver can be overridden with DT `fast-gpio-backend` (if you want to substitute an out of tree one).
+5. These backends define unique methods that do not conflict.
+6. The driver/user runs `GPIO_FAST_COMPAT()` and feeds the output into `GPIO_FAST_DISPATCH_VAL()`, `GPIO_FAST_DISPATCH_CALL()`, etc. to call the correct driver backend.
+
+Note: CI seems to be having an issue and is giving HTTP 503 errors; I will force-push again later to re-trigger.
+
+*--- nordicjm (2026-07-17 06:12:38+00:00)
+> Realistically only 1, maybe 2 would ever be defined. We can get around this for the includes in gpio_fast.h by checking CONFIG_GPIO_FAST && CONFIG_GPIO_ESP32 (which, it is worth noting we already have a global define per each platform CONFIG_GPIO_*).
+
+That is a Kconfig which is put through via autoconf.h, that is not the same as a global define - https://github.com/zephyrproject-rtos/zephyr/issues/98647
+
+> It is harder to get around it for Z_GPIO_FAST_DISPATCH_*, which needs to know which backends are included at preprocessor time in order to fallback to the generic backend. We could remove the automatic fallback, but then each driver that uses fast GPIO would need to add an override attribute to DT and IMO that would be much more confusing to document and consistently implement in every downstream driver.
+
+use an iterable section?
+
+> We could add CONFIG_GPIO_FAST_BACKEND_atmel_sam0 to Kconfig, but this would break with existing naming scheme (i.e. no manufacturer name and all caps: CONFIG_GPIO_SAM0). The existing DT names unfortunately does not mirror the Kconfig options.
+
+that Kconfig will not be added, it doesn't even comply with the coding requirements
+
+> We could instead implement the fallback by requiring every single GPIO driver to implement every function regardless, like this, but this is very messy (would requiring updating every driver)
+
+sure, seems fine? If you want the functionality and enable it, you need to implement it? Or just don't make it a mandatory function
+
+*--- nordicjm (2026-07-17 06:30:56+00:00)
+I asked this question before and didn't get an answer: how does this work given the nordic_nrf GPIO driver works on cortex m0, cortex m4 and cortex m33, of which the m0 runs at 16MHz, the m4 runs at 64MHz and m33's run at various different frequencies, along with likely having different values for all of these defines. Not withstanding that this doesn't take into consideration features some of them have like high drive strength mode, or extra high drive strength (given that CPU frequency can be changed at runtime, likewise with drive strength)? Same questions about others like st whereby they have power settings for GPIO ports
+
+*--- DaAwesomeP (2026-07-17 17:22:10+00:00)
+OK, there's 3 parts here:
+
+#### Frequency
+
+Frequency is determined from the provided `GPIO_FAST_CPU_FREQ` var (which comes from DT). A driver uses `GPIO_FAST_NS_TO_CYCLES()` to convert from nanoseconds to cycles (this macro uses the correct frequency from `GPIO_FAST_CPU_FREQ`) at compile time.
+
+Currently, this only supports one frequency, so backends need to implement `gpio_fast_pre_stream_<compat>()`/`gpio_fast_post_stream_<compat>()` if clock control is enabled to ensure the frequency is correct. We could add a `CONFIG_GPIO_FAST_CPU_FREQ` to Kconfig to allow the user to override the frequency determined at compile time. We could make it possible for a driver compile for multiple frequency options at compile time (and branch at runtime before the timing-critical section), but this would be in a followup PR.
+
+#### SOC-specific Operation Cycle Counts
+
+The cycle counts per operation are specific to the permutation of 1) the SOC, 2) the particular GPIO peripheral, and 3) the specific implementation written in the backend for manipulating that peripheral. Frequency does not affect this count, although we subtract these counts from the result of `GPIO_FAST_NS_TO_CYCLES()` at compile time to determine the `nop` timing.
+
+Since these are SOC-specific/only on-SOC GPIO peripherals, I think it makes most sense to add an `#ifdef` per SOC that adjust these cycle counts by SOC (same way different SOCs are handled in the general GPIO drivers). I don't think it makes sense to put these in DT, as they are specific to the function implementations written in the driver, not generalization to a SOC as a whole. I have already done this one one case: the STM32 backend has relies on `CONFIG_SOC_SERIES_STM32F1X` and adjusts timings/implementation based on that (which is the same way it works in the general STM32 GPIO driver).
+
+I will work on adding these SOC `#ifdef`s.
+
+#### Drive Strength and Other Peripheral-Specific Features
+
+The drive strength does not affect the number of cycles required to set/read a GPIO register, so it does not affect the cycle timings as implemented. Most protocols, like the WS2812, have some tolerances for different slew rates; in my testing I did not need to offset for slew rate differences between GPIO peripherals for WS2812. For other applications that require more precise timing requirements, we can easily add constants like `GPIO_FAST_SET_SLEW_TIME_NS_<compat>_gpio` that drivers can make use of if necessary (can add in followup PRs). The actual computation of the timings is up to the downstream driver; it uses a combination of the provided frequency, nanosecond conversion helpers, and set/clear/toggle timings to do this. Additionally, drivers/users can override timings in DT with optional per-downstream-driver parameters like `delay-t0h` like the WS2812 driver offers (see #111218).
+
+There is nothing restricting us from adding more DT params (like `fast-gpio-drive-strength` or `fast-gpio-stm32-drive-strength`) in followup PRs that would be consumed by `gpio_fast_configure_<compat>_gpio()`. Since these would go in DT, they can be known at compile time and affect timing constants (like `GPIO_FAST_SET_SLEW_TIME_NS_<compat>_gpio` above). Since the timings need to be known at compile time, I don't think you can switch drive strength at runtime if it affects the timings. I also can't see a reason to need to switch drive strength modes more quickly than the standard GPIO API, although that could easily be added as a method to the backend.
+
+*--- DaAwesomeP (2026-07-17 20:46:01+00:00)
+OK, I pushed an update that groups the timings by SOC. Currently the only vendor that actually needs a change in timings (of the 6 that I implemented) due to SOC is STM32. However, because they are explicitly defined, a build will now fail for a new/unknown SOC.
+
+*--- DaAwesomeP (2026-07-17 21:01:04+00:00)
+Pushed a change to make the out-of-tree backend include optional via `CONFIG_GPIO_FAST_OUT_OF_TREE_BACKEND`, instead of requiring overriding a stub. This makes it easier to troubleshoot (will error if missing) and clearer to implement.
+
+*--- DaAwesomeP (2026-07-17 21:01:57+00:00)
+@carlescufi would it be possible to bring this back to Architecture WG? I think I have resolved most or all of the issues surrounding driver selection/build system. Multiple drivers can exist in one build, drivers can be selected from DT, and users may provide out-of-tree drivers.
+
+My understanding is that the WG still needs to choose between this PR and PR #105263.  The remaining comments in this PR mostly concern the additional timing helpers, which the other PR (#105263) does not offer/implement at all.
+
+Relevant example usage for the WG meeting: See `ws2812_gpio.c` in #111218.
+
+If the WG decides to go forward with this PR, then I will move most of the backends into separate PRs since there will be too many required reviewers in this one PR for each SOC/GPIO area.
+
+*--- carlescufi (2026-07-21 15:37:04+00:00)
+Architecture WG meeting:
+
+- @sylvioalves looked at using pulse_io instead, but the problem is that abstracting more complicated bitcodes than the ones needed for basic stuff like ws2812
+- Using the pulse_io API requires parsing the bit template, and doing that at runtime is not fast enough. The suggestion in https://github.com/zephyrproject-rtos/zephyr/issues/109586#issuecomment-4790236676 would require very complicated sets of macros to inline the different bit templates
+- Many additional improvements have been made to address the comments from the last meeting:
+  - pulse_io as an API has been evaluated
+  - Multiple backends are now supported
+  - An out-of-tree solution has been proposed and at least partially reviewed by @nordicjm 
+  - @DaAwesomeP to take a look at how logging subsystem solves the out-of-tree problem
+- @henrikbrixandersen leans towards this solution vs the register-based one, because it hides any platform-specific code in the driver. @carlescufi agrees. A particular example of his is shown, for the STM32 platform:
+```
+** @brief Switch masked pins to output via MODER/CRL/CRH. */
+static ALWAYS_INLINE void gpio_fast_set_output_st_stm32_gpio(
+	const struct gpio_fast_spec_st_stm32_gpio *spec)
+{
+	sys_write32((sys_read32(spec->moder_reg) & ~spec->moder_mask) |
+		    spec->moder_out, spec->moder_reg);
+#ifdef CONFIG_SOC_SERIES_STM32F1X
+	sys_write32((sys_read32(spec->moder_reg + 4) &
+		    ~spec->moder_mask_hi) |
+		    spec->moder_out_hi, spec->moder_reg + 4);
+#endif
+}
+```
+
+*--- carlescufi (2026-07-21 15:43:54+00:00)
+This should be toolchain-independent, look at the toolchain files
+
+*--- DaAwesomeP (2026-07-21 17:45:39+00:00)
+> @DaAwesomeP to take a look at how logging subsystem solves the out-of-tree problem
+
+OK, I took a look at this. To recap, the current solution I have implemented:
+
+1. User enables `CONFIG_GPIO_FAST_OUT_OF_TREE_BACKEND`
+2. User provides `zephyr_gpio_fast_impl_oot.h`
+3. This header contains more includes or the backend-specific headers and `#define` statements.
+4. This header is included in the main Fast GPIO header, which allows all downstream drivers (i.e. WS2812) to use it at compile time.
+
+The tracing backend seems to work _exactly_ like this (`CONFIG_TRACING_CUSTOM` + `zephyr_custom_tracing.h`):
+https://github.com/zephyrproject-rtos/zephyr/blob/c01ba2033999385e5306b38deddc2fe9501daf74/include/zephyr/tracing/tracing.h#L19-L28
+
+In contrast, the logging backends rely on choosing at runtime:
+
+1. OOT module defines a logging backend struct with function pointers for its API (e.g. `log_backend_msg_process`).
+2. OOT module registers it with `LOG_BACKEND_DEFINE()`, which places the struct into a dedicated linker section via `STRUCT_SECTION_ITERABLE`.
+3. At runtime, the logging core iterates all backends in that linker section using `STRUCT_SECTION_FOREACH` and dispatches log messages through the function pointers.
+4. No in-tree header modification or `#include` of OOT code is needed. The linker collects everything automatically.
+
+This will not work because we need the linker and preprocessor to find all of the methods/macros at compile time (no function pointers).
+
+Another method I can think of (which would work, but more difficult to maintain and I think new to Zephyr):
+
+1. User creates a header with the backend-specific headers and `#define` statements.
+2. User includes the header through a CMake helper like `include_fast_gpio_backend(file)`. This helper can be called multiple times.
+3. CMake generates a header that includes each files specified by `include_fast_gpio_backend()`.
+4. Main Fast GPIO header includes this generated header.
+
+This method would allow a user to include multiple backend headers without needing to assemble them into one header or include them from one header. However, I don't think creating a single `zephyr_gpio_fast_impl_oot.h` is difficult enough to add this complexity (and it matches the tracing subsystem).
+
+*--- DaAwesomeP (2026-07-21 18:27:53+00:00)
+Opened #114239 to add to toolchain.
+
+*--- nordicjm (2026-08-11 09:43:18+00:00)
+looks much better now, only thing is this doesn't really scale well, if you use an in-tree GPIO driver then you just include this header, if not you have to set a Kconfig and make a file? How does that scale if you use 2 modules each with their own GPIO controllers with fast GPIO that do this, suddenly back into the same problem again, but not a blocking issue. Also rebase needed so I can dismiss old review
+
+*--- fabiobaltieri (2026-08-11 13:53:42+00:00)
+hey can't quite recall if we had this conversation but I think this really deserve to be lowercase, it looks like a function, it resolves directly to a function, you can't resolve it in build time, just make it lowercase
+
+*--- DaAwesomeP (2026-08-11 17:00:27+00:00)
+> How does that scale if you use 2 modules each with their own GPIO controllers
+
+If your Fast GPIO headers are `gpio_fast_custom1.h` and `gpio_fast_custom2.h`, then you include them both in `zephyr_gpio_fast_impl_oot.h`. I agree that is not great though, since you would need to change this header for each new one you add.
+
+The other option is the CMake-generated header I mention in [this comment](https://github.com/zephyrproject-rtos/zephyr/pull/110787#issuecomment-5037211848), but I would rather save that for a followup PR if this is not blocking.
+
+I will rebase!
+
+*--- DaAwesomeP (2026-08-11 17:02:07+00:00)
+Got it, I will change these to lowercase.
+
+It does look and "act" like a function to the end user, though the function mapping is resolved at build/compile time.
+
+*--- fabiobaltieri (2026-08-11 17:13:31+00:00)
+I know, it's a hot topic, I don't see how it make any sense you are just aliasing a function no need to engage the "omg this is going to expand at preprocessor time let me think about how this is going to ruin my day" part of your brain.
+
+I mean, `printk` is a macro.
+
+*--- DaAwesomeP (2026-08-11 17:26:54+00:00)
+I see, that makes perfect sense to me. I agree that uppercase macros signal caution. I don't really have a strong opinion on it--I just defaulted to making all macros uppercase.
+
+Should `GPIO_FAST_DISPATCH_VAL` remain uppercase? It evaluates to a constant value, which would also be uppercase.
+
+I assume that `GPIO_FAST_COMPAT`, `GPIO_FAST_DISPATCH_TYPE`, `GPIO_FAST_CONFIGURE_DT`,  `GPIO_FAST_NS_TO_CYCLES`, and `GPIO_FAST_DELAY_NOPS` should rename uppercase. The last two in that list might also move to a non-fast-gpio-specific header.
+
+*--- fabiobaltieri (2026-08-11 17:52:53+00:00)
+`GPIO_FAST_DISPATCH_VAL` makes sense to me, it hints that it's not a function makes it clear what it's doing there (expanding to the type), for the other you mention yeah I also think uppercase make sense.
+
+*--- DaAwesomeP (2026-08-11 17:54:32+00:00)
+Rebased.
+
+*--- DaAwesomeP (2026-08-11 17:54:49+00:00)
+OK, `GPIO_FAST_DISPATCH_CALL` is now `gpio_fast_dispatch_call` in the latest push`.
+
+*--- ajf58 (2026-08-11 20:24:53+00:00)
+```suggestion
+#if defined(CONFIG_SOC_SERIES_RP2040) || defined(CONFIG_SOC_SERIES_RP2350)
+```
+The RR235xx will always define `CONFIG_ARM` or `CONFIG_RISCV`. More generally, this is a bit more defensive programming than elsewhere. It's fine, but perhaps not required.
+
+*--- ajf58 (2026-08-11 20:37:51+00:00)
+On the RP235xx, the Cortex-M33 can use the GPIO coprocessor, which gts things down to  a single instruction https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-008373-DS-2-rp2350-datasheet.pdf#section_gpio_coprocessor .
+
+*--- ajf58 (2026-08-11 20:44:49+00:00)
+This won't always work. On the RP235xB there's 48 GPIOs available https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-008373-DS-2-rp2350-datasheet.pdf .
+
+*--- ajf58 (2026-08-11 20:49:31+00:00)
+Use the Pico SDK's API, which will do the right thing if the GPIO coprocessor is enabled, or if on a RP2350B for example
+```suggestion
+	gpio_set_mask64(spec->pin_mask);
+```
+
+*--- JarmouniA (2026-08-11 22:44:01+00:00)
+missing API version
+
+*--- DaAwesomeP (2026-08-12 01:22:42+00:00)
+Hi all, thank you for the reviews! Yes, I will leave 1 implementation in this PR (probably sam0 since it is one of the simpler ones) and then open draft PRs for the rest.
+
+@ajf58 I will CC you in the RPI Pico draft.
+
+*--- DaAwesomeP (2026-08-12 01:56:44+00:00)
+Fixed!
+
+*--- DaAwesomeP (2026-08-12 02:06:23+00:00)
+OK, removed the implementations for ESP32, nRF, i.MX RT, Pico, and STM32; these will come in followup PRs (I have at least proved that these implementation _can_ work for at least 1 SoC in each of these platforms). I left Atmel SAM0 as the 1 starting implementation.
+
+Question I have: The helpers `GPIO_FAST_DELAY_NOPS`, `GPIO_FAST_CPU_FREQ`, and `GPIO_FAST_NS_TO_CYCLES` are not necessarily specific to Fast GPIO. Where should each of these move?
+
+In the case of `GPIO_FAST_CPU_FREQ`, it needs to support overrides per-platform. The nRF driver has to override with this because `CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC` and it doesn't have `DT_NODE_HAS_PROP(DT_PATH(cpus, cpu_0), clock_frequency)`:
+```c
+#define GPIO_FAST_CPU_FREQ DT_PROP(DT_NODELABEL(hfxo), clock_frequency)
+```
+
+*--- DaAwesomeP (2026-08-19 17:52:17+00:00)
+Rebased and updated to use `TOOLCHAIN_PRAGMA_UNROLL` from #114239.
+
+*--- DaAwesomeP (2026-08-19 17:52:32+00:00)
+Resolved!
+
+*--- DaAwesomeP (2026-08-24 14:01:55+00:00)
+Update on current status:
+- Waiting on:
+  - #116849
+  - #116857
+- Needs review on SAM0 parts (possibly @nandojve)
+- `GPIO_FAST_DELAY_NOPS` could maybe move to toolchain (and becomes `DELAY_NOPS`).
+  **EDIT:** Opened #117341.
+- I think for now `GPIO_FAST_CPU_FREQ` (and `GPIO_FAST_NS_TO_CYCLES` that depends on it) should stay in the Fast GPIO namespace. It is a per-platform variable that works well being included via platform-specific backends (you would never have more than one that provides this macro). The only other thought I have is to add it to DT for each Fast GPIO instance (will explore that today).
+  **UPDATE:** Opened #117747 to replace `GPIO_FAST_NS_TO_CYCLES`.
+
+*--- nandojve (2026-09-17 14:45:41+00:00)
+@DaAwesomeP ,
+
+Check CI, needs to be green
+
+*--- nandojve (2026-09-17 14:46:25+00:00)
+@carlescufi , @henrikbrixandersen ,
+
+Is this content OK to be in v4.5? Can we set the milestone?
+
+*--- DaAwesomeP (2026-09-17 15:33:38+00:00)
+@nandojve this is waiting on #117341 and #117747. Waiting on feedback from reviewers in both.

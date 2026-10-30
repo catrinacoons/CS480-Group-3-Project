@@ -1,0 +1,530 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/issues/113762
+TITLE: Remove non-portable bit-field layout assumptions tree-wide
+
+*--- opening post by parthitce (2026-07-16 18:53:21+00:00)
+### Problem Description
+
+Many places use a C bit-field struct or union to map a fixed bit layout: a hardware register, a DMA descriptor, or a wire or flash field. The C standard does not fix that layout, so this is not portable.
+
+From: https://github.com/zephyrproject-rtos/zephyr/blob/main/doc/contribute/coding_guidelines/index.rst?plain=1#L38
+- C11 6.7.2.1: the bit order within a unit, and whether a field spills into the next unit, are implementation defined.
+- Zephyr already forbids relying on this: MISRA Dir 1.1 (Required) maps to CERT EXP11-C, "Do not make assumptions regarding the layout of structures with bit-fields."
+
+`__packed` does not help. It sets byte padding, not bit order.
+
+Already seen in practice: [#113320](https://github.com/zephyrproject-rtos/zephyr/pull/113320) fixes a bit-field overlay in `irq_multilevel.h` that gave wrong values on big-endian. A guideline PR [#113584](https://github.com/zephyrproject-rtos/zephyr/pull/113584#discussion_r3594911198) was closed as already covered by the rule above.
+
+A scan of `main` at `b5fb5c845b9e` (2026-07-16) finds 738 sites in 238 files. This is a wide clean-up, so it is an RFC, not one bug.
+
+### Proposed Change (Summary)
+
+1. Enforce the rule we already have (EXP11-C). Do not add a new rule. Replace each bit-field overlay with plain integer access using `FIELD_GET`, `FIELD_PREP`, and `GENMASK`, with byte-order helpers (`sys_le32_to_cpu` and so on) at hardware or wire boundaries.
+2. Split the work by tree area. Each area is one small PR set. This issue is the tracking issue.
+3. Add a CI check (checkpatch or Coccinelle) so the pattern does not come back.
+
+No behaviour change is intended. The encodings stay the same. Only the access method changes.
+
+The findings fall into four groups:
+
+| Group | Meaning | Sites | Files | Confidence |
+|-------|---------|------:|------:|------------|
+| C1 | Direct bit-field unions | 264 | 76 | deterministic |
+| C2 | Transitive bit-field unions | 38 | 32 | deterministic |
+| C3 | Packed structs with bit-fields | 192 | 78 | deterministic |
+| C4 | Bit-field struct over raw memory (heuristic) | 244 | 88 | heuristic, confirm each |
+
+Sites per area:
+
+| Area | C1 | C2 | C3 | C4 | Total |
+|------|---:|---:|---:|---:|------:|
+| arch | 2 | 0 | 0 | 0 | 2 |
+| drivers | 132 | 6 | 79 | 175 | 392 |
+| subsys | 12 | 11 | 42 | 19 | 84 |
+| lib | 0 | 0 | 12 | 8 | 20 |
+| soc | 87 | 2 | 8 | 4 | 101 |
+| include | 29 | 16 | 46 | 0 | 91 |
+| boards | 1 | 0 | 1 | 0 | 2 |
+| tests | 0 | 3 | 0 | 37 | 40 |
+| samples | 1 | 0 | 4 | 1 | 6 |
+| Total | 264 | 38 | 192 | 244 | 738 |
+
+Notes: `drivers` has the most work. `soc` is mostly register headers. `include` holds API headers owned by each subsystem. `kernel` has no findings.
+
+### Proposed Change (Detailed)
+
+The fix pattern:
+
+```c
+/* Before: layout is implementation defined */
+union {
+        uint32_t val;
+        struct { uint32_t mode : 2; uint32_t vector : 8; } bits;
+} reg;
+reg.val      = sys_read32(ADDR);
+uint8_t mode = reg.bits.mode;
+
+/* After: portable and explicit */
+#define REG_MODE   GENMASK(1, 0)
+#define REG_VECTOR GENMASK(9, 2)
+uint32_t reg = sys_read32(ADDR);   /* use sys_le32_to_cpu at a LE boundary */
+uint8_t  mode = FIELD_GET(REG_MODE, reg);
+```
+
+Steps per PR: add named `GENMASK` masks, convert reads and writes to `FIELD_GET` and `FIELD_PREP`, add the right byte-order helper at each boundary, keep a `BUILD_ASSERT` on the word size, then remove the bit-field struct or union. Do the big-endian or cross-machine sites (protocol, DMA, flash) first.
+
+C1 to C3 are deterministic and can be treated as a firm list. C4 is heuristic. It keeps only strong signals (register casts, casts of typed byte buffers, memcpy between a bit-field object and a byte buffer). Confirm each C4 site before its PR.
+
+Every site is listed below. Each file is a link to the snapshot. The numbers after it are the lines in that file.
+
+#### C1: Direct bit-field unions (264 sites, 76 files)
+
+| Area | File | Lines |
+|------|------|-------|
+| arch | [arch/arm/core/mmu/arm_mmu_priv.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/arch/arm/core/mmu/arm_mmu_priv.h) | L87, L124 |
+| drivers | [drivers/audio/mic_privacy/intel/mic_privacy_registers.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/audio/mic_privacy/intel/mic_privacy_registers.h) | L23, L95, L125, L206 |
+| drivers | [drivers/can/can_mcan.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/can/can_mcan.h) | L910, L951, L992 |
+| drivers | [drivers/clock_control/clock_control_mchp_pic32cm_jh.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/clock_control/clock_control_mchp_pic32cm_jh.c) | L99 |
+| drivers | [drivers/clock_control/clock_control_mchp_pic32cm_pl.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/clock_control/clock_control_mchp_pic32cm_pl.c) | L48 |
+| drivers | [drivers/clock_control/clock_control_mchp_pic32cz_ca.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/clock_control/clock_control_mchp_pic32cz_ca.c) | L92 |
+| drivers | [drivers/clock_control/clock_control_mchp_sam_d5x_e5x.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/clock_control/clock_control_mchp_sam_d5x_e5x.c) | L118 |
+| drivers | [drivers/crypto/crypto_intel_sha_priv.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/crypto/crypto_intel_sha_priv.h) | L58 |
+| drivers | [drivers/crypto/crypto_intel_sha_registers.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/crypto/crypto_intel_sha_registers.h) | L12, L36, L45, L54, L62, L70, L78, L86, L94, L101, L109, L116, L129, L137, L144 |
+| drivers | [drivers/dai/intel/alh/alh.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/dai/intel/alh/alh.h) | L52 |
+| drivers | [drivers/dai/intel/ssp/dai-params-intel-ipc4.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/dai/intel/ssp/dai-params-intel-ipc4.h) | L136, L162, L187 |
+| drivers | [drivers/ethernet/intel/eth_intel_igc_priv.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/ethernet/intel/eth_intel_igc_priv.h) | L369, L409 |
+| drivers | [drivers/flash/flash_cadence_nand_ll.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/flash/flash_cadence_nand_ll.h) | L334 |
+| drivers | [drivers/fpga/fpga_altera_agilex_bridge.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/fpga/fpga_altera_agilex_bridge.h) | L75, L105, L121 |
+| drivers | [drivers/gpio/gpio_max14906.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/gpio/gpio_max14906.h) | L93, L107, L121, L135, L149, L163, L177, L191, L205, L218, L228, L238, L252, L265 |
+| drivers | [drivers/gpio/gpio_max14916.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/gpio/gpio_max14916.h) | L98, L112, L125, L136, L150, L164, L178, L192 |
+| drivers | [drivers/gpio/gpio_max2219x.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/gpio/gpio_max2219x.c) | L91, L105, L119, L132, L145, L156 |
+| drivers | [drivers/i2c/i2c_dw_registers.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/i2c/i2c_dw_registers.h) | L16, L72, L94, L120, L132, L148 |
+| drivers | [drivers/i2c/i2c_wch.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/i2c/i2c_wch.c) | L40 |
+| drivers | [drivers/interrupt_controller/intc_clic.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/interrupt_controller/intc_clic.h) | L46, L60, L69, L78, L101, L114 |
+| drivers | [drivers/interrupt_controller/intc_intel_vtd.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/interrupt_controller/intc_intel_vtd.h) | L19, L62, L81, L99 |
+| drivers | [drivers/memc/memc_mspi_aps_z8.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/memc/memc_mspi_aps_z8.h) | L43, L55, L65, L75, L86, L96, L104 |
+| drivers | [drivers/mfd/mfd_infineon_hppass.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/mfd/mfd_infineon_hppass.c) | L59, L75, L89, L106, L134, L150 |
+| drivers | [drivers/mipi_dbi/mipi_dbi_nxp_lcdic.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/mipi_dbi/mipi_dbi_nxp_lcdic.c) | L53 |
+| drivers | [drivers/pcie/host/ptm.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/pcie/host/ptm.h) | L15, L29 |
+| drivers | [drivers/pcie/host/vc.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/pcie/host/vc.h) | L16, L33, L44, L72, L89, L108 |
+| drivers | [drivers/sensor/bosch/bmi160/bmi160.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bmi160/bmi160.h) | L444 |
+| drivers | [drivers/sensor/bosch/bmm350/bmm350.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bmm350/bmm350.h) | L454 |
+| drivers | [drivers/sensor/lm75/lm75.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/lm75/lm75.c) | L50 |
+| drivers | [drivers/sensor/lm77/lm77.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/lm77/lm77.c) | L35 |
+| drivers | [drivers/sensor/pixart/paa3905/paa3905.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pixart/paa3905/paa3905.h) | L25 |
+| drivers | [drivers/sensor/pni/rm3100/rm3100.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pni/rm3100/rm3100.h) | L31 |
+| drivers | [drivers/sensor/tdk/icm45686/icm45686.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/tdk/icm45686/icm45686.h) | L50 |
+| drivers | [drivers/spi/spi_it8xxx2.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/spi/spi_it8xxx2.c) | L71 |
+| drivers | [drivers/uaol/uaol_intel_adsp.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/uaol/uaol_intel_adsp.h) | L40, L53, L63, L73, L82, L89, L96, L107, L119, L129, L140, L147, L154, L173, L183, L196 |
+| drivers | [drivers/usb/device/usb_dc_kinetis.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/usb/device/usb_dc_kinetis.c) | L56 |
+| drivers | [drivers/usb/udc/udc_kinetis.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/usb/udc/udc_kinetis.c) | L55 |
+| drivers | [drivers/w1/w1_ds2477_85_common.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/w1/w1_ds2477_85_common.h) | L180 |
+| drivers | [drivers/watchdog/wdt_nxp_fs26.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/watchdog/wdt_nxp_fs26.c) | L51 |
+| subsys | [subsys/bluetooth/controller/ll_sw/lll.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/lll.h) | L515, L517 |
+| subsys | [subsys/bluetooth/controller/ll_sw/lll_conn.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/lll_conn.h) | L90 |
+| subsys | [subsys/bluetooth/controller/ll_sw/ull_conn_iso_types.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/ull_conn_iso_types.h) | L95 |
+| subsys | [subsys/bluetooth/controller/ll_sw/ull_conn_types.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/ull_conn_types.h) | L170 |
+| subsys | [subsys/bluetooth/controller/ll_sw/ull_llcp_internal.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/ull_llcp_internal.h) | L186 |
+| subsys | [subsys/lorawan/services/frag_transport.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/lorawan/services/frag_transport.c) | L93, L108 |
+| subsys | [subsys/net/l2/ethernet/gptp/gptp_messages.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/l2/ethernet/gptp/gptp_messages.h) | L296 |
+| subsys | [subsys/net/l2/wifi/wifi_shell.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/l2/wifi/wifi_shell.c) | L87 |
+| subsys | [subsys/net/lib/ptp/ds.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/lib/ptp/ds.h) | L190 |
+| subsys | [subsys/portability/posix/options/posix_internal.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/portability/posix/options/posix_internal.h) | L39 |
+| soc | [soc/amd/acp_7_0/include/acp70_chip_reg.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/amd/acp_7_0/include/acp70_chip_reg.h) | L15, L25, L33, L42, L107, L120, L133, L142, L154 |
+| soc | [soc/amd/acp_7_0/include/acp70_fw_scratch_mem.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/amd/acp_7_0/include/acp70_fw_scratch_mem.h) | L54 |
+| soc | [soc/amd/acp_7_x/include/acp7x_chip_reg.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/amd/acp_7_x/include/acp7x_chip_reg.h) | L13, L22, L29, L36, L57, L79, L97, L105, L115, L122, L129, L139, L148, L159, L174, L185, L191, L198, L204, L211, L218, L225, L232, L239, L246, L253, L260, L267, L274, L281, L287, L293, L299, L305, L312, L319, L326, L334, L346, L357, L367, L377, L385, L397, L404, L411, L419, L427, L434, L442, L451, L464, L475, L496, L507, L522, L534, L547, L564, L579, L590, L601, L615, L633, L647, L671, L680 |
+| soc | [soc/amd/acp_7_x/include/acp7x_fw_scratch_mem.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/amd/acp_7_x/include/acp7x_fw_scratch_mem.h) | L54 |
+| soc | [soc/intel/intel_adsp/common/include/manifest.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/intel/intel_adsp/common/include/manifest.h) | L40 |
+| soc | [soc/ite/ec/it8xxx2/chip_chipregs.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/ite/ec/it8xxx2/chip_chipregs.h) | L521, L584, L668 |
+| soc | [soc/renesas/rz/common/pinctrl_rza.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/renesas/rz/common/pinctrl_rza.h) | L18 |
+| soc | [soc/renesas/rz/common/pinctrl_rzg.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/renesas/rz/common/pinctrl_rzg.h) | L18 |
+| soc | [soc/renesas/rz/common/pinctrl_rzn.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/renesas/rz/common/pinctrl_rzn.h) | L20 |
+| soc | [soc/renesas/rz/common/pinctrl_rzt.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/renesas/rz/common/pinctrl_rzt.h) | L20 |
+| soc | [soc/renesas/rz/common/pinctrl_rzv.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/renesas/rz/common/pinctrl_rzv.h) | L18 |
+| include | [include/zephyr/acpi/acpi.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/acpi/acpi.h) | L47 |
+| include | [include/zephyr/arch/arc/v2/arc_connect.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/arch/arc/v2/arc_connect.h) | L120, L133, L154 |
+| include | [include/zephyr/arch/x86/ia32/segmentation.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/arch/x86/ia32/segmentation.h) | L132, L150, L186 |
+| include | [include/zephyr/arch/xtensa/mpu.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/arch/xtensa/mpu.h) | L95, L141 |
+| include | [include/zephyr/canbus/isotp.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/canbus/isotp.h) | L176 |
+| include | [include/zephyr/display/mb_display.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/display/mb_display.h) | L38 |
+| include | [include/zephyr/drivers/dac/dac161s997.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/dac/dac161s997.h) | L36 |
+| include | [include/zephyr/drivers/flash/ra_flash_api_extensions.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/flash/ra_flash_api_extensions.h) | L58 |
+| include | [include/zephyr/drivers/mic_privacy/intel/mic_privacy.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/mic_privacy/intel/mic_privacy.h) | L27 |
+| include | [include/zephyr/drivers/misc/renesas_rx_dtc/renesas_rx_dtc.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/misc/renesas_rx_dtc/renesas_rx_dtc.h) | L98 |
+| include | [include/zephyr/drivers/sensor_data_types.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/sensor_data_types.h) | L157 |
+| include | [include/zephyr/drivers/usb_c/usbc_pd.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/usb_c/usbc_pd.h) | L320, L351, L427, L474, L533, L552, L599, L618, L665, L698, L730 |
+| include | [include/zephyr/irq_multilevel.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/irq_multilevel.h) | L25 |
+| include | [include/zephyr/net/ethernet.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/ethernet.h) | L361 |
+| boards | [boards/arduino/opta/board.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/boards/arduino/opta/board.h) | L19 |
+| samples | [samples/subsys/logging/syst/src/main.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/samples/subsys/logging/syst/src/main.c) | L21 |
+
+#### C2: Transitive bit-field unions (38 sites, 32 files)
+
+| Area | File | Lines |
+|------|------|-------|
+| drivers | [drivers/dai/intel/ssp/dai-params-intel-ipc4.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/dai/intel/ssp/dai-params-intel-ipc4.h) | L315 |
+| drivers | [drivers/timer/apic_tsc.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/timer/apic_tsc.c) | L78 |
+| drivers | [drivers/usb/device/usb_dc_sam_usbc.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/usb/device/usb_dc_sam_usbc.c) | L74, L78, L82 |
+| drivers | [drivers/usb/udc/udc_sam_usbc.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/usb/udc/udc_sam_usbc.c) | L42 |
+| subsys | [subsys/bluetooth/audio/cap_internal.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/audio/cap_internal.h) | L163 |
+| subsys | [subsys/bluetooth/controller/ll_sw/lll.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/lll.h) | L444 |
+| subsys | [subsys/bluetooth/controller/ll_sw/nordic/lll/pdu_vendor.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/nordic/lll/pdu_vendor.h) | L18 |
+| subsys | [subsys/bluetooth/controller/ll_sw/pdu.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/pdu.h) | L451, L570, L916 |
+| subsys | [subsys/logging/frontends/log_frontend_stmesp.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/logging/frontends/log_frontend_stmesp.c) | L94 |
+| subsys | [subsys/net/ip/net_private.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/ip/net_private.h) | L31 |
+| subsys | [subsys/net/lib/ptp/msg.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/lib/ptp/msg.h) | L257 |
+| subsys | [subsys/usb/device_next/class/usbd_cdc_ecm.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/usb/device_next/class/usbd_cdc_ecm.c) | L45 |
+| subsys | [subsys/usb/device_next/class/usbd_cdc_ncm.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/usb/device_next/class/usbd_cdc_ncm.c) | L50 |
+| soc | [soc/ite/ec/it8xxx2/chip_chipregs.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/ite/ec/it8xxx2/chip_chipregs.h) | L726 |
+| soc | [soc/nuvoton/npcx/common/pinctrl_soc.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/nuvoton/npcx/common/pinctrl_soc.h) | L122 |
+| include | [include/zephyr/arch/x86/ia32/thread.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/arch/x86/ia32/thread.h) | L199 |
+| include | [include/zephyr/bluetooth/mesh/cfg_cli.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/bluetooth/mesh/cfg_cli.h) | L1739 |
+| include | [include/zephyr/instrumentation/instrumentation.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/instrumentation/instrumentation.h) | L72 |
+| include | [include/zephyr/logging/log_frontend_stmesp_demux.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/logging/log_frontend_stmesp_demux.h) | L80 |
+| include | [include/zephyr/logging/log_msg.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/logging/log_msg.h) | L133 |
+| include | [include/zephyr/net/ethernet.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/ethernet.h) | L453 |
+| include | [include/zephyr/net/ethernet_mgmt.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/ethernet_mgmt.h) | L140 |
+| include | [include/zephyr/net/ieee802154_frame.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/ieee802154_frame.h) | L901 |
+| include | [include/zephyr/net/mqtt.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/mqtt.h) | L668 |
+| include | [include/zephyr/net/net_pkt.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/net_pkt.h) | L348 |
+| include | [include/zephyr/shell/shell.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/shell/shell.h) | L1017, L1025 |
+| include | [include/zephyr/sys/mpsc_packet.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/sys/mpsc_packet.h) | L49 |
+| include | [include/zephyr/usb/usb_ch9.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/usb/usb_ch9.h) | L51, L438 |
+| include | [include/zephyr/usb/usbd.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/usb/usbd.h) | L175 |
+| tests | [tests/bluetooth/controller/ctrl_isoal/src/isoal_test_common.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/bluetooth/controller/ctrl_isoal/src/isoal_test_common.h) | L70 |
+| tests | [tests/drivers/build_all/sensor/src/generic_test.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/drivers/build_all/sensor/src/generic_test.c) | L21 |
+| tests | [tests/lib/mpsc_pbuf/src/main.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/lib/mpsc_pbuf/src/main.c) | L41 |
+
+#### C3: Packed structs with bit-fields (192 sites, 78 files)
+
+| Area | File | Lines |
+|------|------|-------|
+| drivers | [drivers/adc/adc_ad405x.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_ad405x.c) | L212 |
+| drivers | [drivers/adc/adc_max2253x.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_max2253x.c) | L102 |
+| drivers | [drivers/adc/adc_max32.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_max32.c) | L86 |
+| drivers | [drivers/adc/adc_stm32.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_stm32.c) | L270 |
+| drivers | [drivers/can/can_mcan.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/can/can_mcan.h) | L909, L950, L991, L1033, L1052 |
+| drivers | [drivers/dai/intel/ssp/dai-params-intel-ipc4.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/dai/intel/ssp/dai-params-intel-ipc4.h) | L181, L281, L298 |
+| drivers | [drivers/dma/dma_iproc_pax.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/dma/dma_iproc_pax.h) | L411 |
+| drivers | [drivers/dma/dma_iproc_pax_v1.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/dma/dma_iproc_pax_v1.h) | L62, L76, L85, L92, L104 |
+| drivers | [drivers/dma/dma_iproc_pax_v2.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/dma/dma_iproc_pax_v2.h) | L69, L86, L94, L101 |
+| drivers | [drivers/interrupt_controller/intc_intel_vtd.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/interrupt_controller/intc_intel_vtd.h) | L25, L65, L84, L102 |
+| drivers | [drivers/sdhc/sdhc_ti_am654.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sdhc/sdhc_ti_am654.c) | L257 |
+| drivers | [drivers/sensor/adi/adxl345/adxl345.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl345/adxl345.h) | L213 |
+| drivers | [drivers/sensor/adi/adxl362/adxl362.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl362/adxl362.h) | L259 |
+| drivers | [drivers/sensor/adi/adxl367/adxl367.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl367/adxl367.h) | L408 |
+| drivers | [drivers/sensor/adi/adxl372/adxl372.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl372/adxl372.h) | L383 |
+| drivers | [drivers/sensor/adi/max32664c/max32664c.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/max32664c/max32664c.h) | L77 |
+| drivers | [drivers/sensor/ams/ens210/ens210.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/ams/ens210/ens210.h) | L63, L69, L75, L80, L86, L92, L98 |
+| drivers | [drivers/sensor/bosch/bma4xx/bma4xx_decoder.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bma4xx/bma4xx_decoder.h) | L17, L24 |
+| drivers | [drivers/sensor/bosch/bme280/bme280.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bme280/bme280.h) | L226 |
+| drivers | [drivers/sensor/bosch/bme680/bme680.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bme680/bme680.h) | L281 |
+| drivers | [drivers/sensor/bosch/bmm350/bmm350.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bmm350/bmm350.h) | L456 |
+| drivers | [drivers/sensor/lm75/lm75.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/lm75/lm75.c) | L52 |
+| drivers | [drivers/sensor/lm77/lm77.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/lm77/lm77.c) | L37 |
+| drivers | [drivers/sensor/memsic/mmc56x3/mmc56x3.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/memsic/mmc56x3/mmc56x3.h) | L125 |
+| drivers | [drivers/sensor/pixart/paa3905/paa3905.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pixart/paa3905/paa3905.h) | L27 |
+| drivers | [drivers/sensor/pni/rm3100/rm3100.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pni/rm3100/rm3100.h) | L33 |
+| drivers | [drivers/sensor/st/iis3dwb/iis3dwb.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/iis3dwb/iis3dwb.h) | L102, L110, L124 |
+| drivers | [drivers/sensor/st/lis2dux12/lis2dux12_decoder.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lis2dux12/lis2dux12_decoder.h) | L21, L29, L42 |
+| drivers | [drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_decoder.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_decoder.h) | L21, L28, L44 |
+| drivers | [drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx.h) | L253, L262, L277 |
+| drivers | [drivers/sensor/tdk/icm4268x/icm4268x_decoder.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/tdk/icm4268x/icm4268x_decoder.h) | L35 |
+| drivers | [drivers/sensor/tdk/icm45686/icm45686.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/tdk/icm45686/icm45686.h) | L52 |
+| drivers | [drivers/spi/spi_it8xxx2.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/spi/spi_it8xxx2.c) | L73 |
+| drivers | [drivers/uaol/uaol_intel_adsp.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/uaol/uaol_intel_adsp.c) | L125, L128, L147, L150, L162, L165 |
+| drivers | [drivers/usb/device/usb_dc_kinetis.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/usb/device/usb_dc_kinetis.c) | L55, L59, L68 |
+| drivers | [drivers/usb/udc/udc_kinetis.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/usb/udc/udc_kinetis.c) | L54, L58, L67 |
+| drivers | [drivers/usb/udc/udc_sam0.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/usb/udc/udc_sam0.c) | L28, L47 |
+| drivers | [drivers/wifi/esp_hosted/esp_hosted_wifi.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/wifi/esp_hosted/esp_hosted_wifi.h) | L87 |
+| subsys | [subsys/bluetooth/controller/hal/ccm.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/hal/ccm.h) | L8 |
+| subsys | [subsys/bluetooth/controller/ll_sw/nordic/hal/nrf5/ecb.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/nordic/hal/nrf5/ecb.c) | L42, L44 |
+| subsys | [subsys/bluetooth/controller/ll_sw/nordic/hal/nrf5/radio/radio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/nordic/hal/nrf5/radio/radio.c) | L2063, L2065, L2552, L2554 |
+| subsys | [subsys/bluetooth/controller/ll_sw/pdu.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/pdu.h) | L397, L400, L420, L443, L474, L553, L812, L836, L895, L977, L1023, L1043, L1075, L1137, L1199, L1200, L1254 |
+| subsys | [subsys/bluetooth/controller/ll_sw/pdu_df.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/pdu_df.h) | L7 |
+| subsys | [subsys/bluetooth/host/classic/avdtp_internal.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/host/classic/avdtp_internal.h) | L79, L122, L203 |
+| subsys | [subsys/bluetooth/mesh/cdb.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/mesh/cdb.c) | L57 |
+| subsys | [subsys/bluetooth/mesh/net.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/mesh/net.c) | L74 |
+| subsys | [subsys/bluetooth/mesh/subnet.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/mesh/subnet.c) | L53 |
+| subsys | [subsys/logging/frontends/log_frontend_dict_uart.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/logging/frontends/log_frontend_dict_uart.c) | L16 |
+| subsys | [subsys/mem_mgmt/demand_paging/eviction/lru.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/mem_mgmt/demand_paging/eviction/lru.c) | L58 |
+| subsys | [subsys/mgmt/mcumgr/transport/include/mgmt/mcumgr/transport/smp_internal.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/mgmt/mcumgr/transport/include/mgmt/mcumgr/transport/smp_internal.h) | L22 |
+| subsys | [subsys/net/ip/icmpv6.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/ip/icmpv6.h) | L73 |
+| subsys | [subsys/net/ip/ipv4.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/ip/ipv4.h) | L94 |
+| subsys | [subsys/net/ip/tcp_private.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/ip/tcp_private.h) | L168 |
+| subsys | [subsys/net/l2/ethernet/gptp/gptp_messages.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/l2/ethernet/gptp/gptp_messages.h) | L273 |
+| subsys | [subsys/net/lib/ptp/msg.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/lib/ptp/msg.h) | L230 |
+| subsys | [subsys/net/lib/sntp/sntp_pkt.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/lib/sntp/sntp_pkt.h) | L12 |
+| subsys | [subsys/portability/posix/options/posix_internal.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/portability/posix/options/posix_internal.h) | L26 |
+| subsys | [subsys/usb/device_next/class/usbd_msc_scsi.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/usb/device_next/class/usbd_msc_scsi.c) | L265 |
+| lib | [lib/net_buf/buf_simple.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/lib/net_buf/buf_simple.c) | L217, L230, L265, L278, L291, L304, L503, L515, L547, L559, L571, L583 |
+| soc | [soc/ite/ec/it8xxx2/chip_chipregs.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/ite/ec/it8xxx2/chip_chipregs.h) | L523, L586, L670 |
+| soc | [soc/nuvoton/npcx/common/pinctrl_soc.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/nuvoton/npcx/common/pinctrl_soc.h) | L72, L91, L108, L121, L128 |
+| include | [include/zephyr/arch/x86/ia32/segmentation.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/arch/x86/ia32/segmentation.h) | L54, L108 |
+| include | [include/zephyr/arch/xtensa/mpu.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/arch/xtensa/mpu.h) | L275 |
+| include | [include/zephyr/bluetooth/hci_types.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/bluetooth/hci_types.h) | L4315, L4329, L4342, L4360, L4381, L4399, L4419, L4447, L4470 |
+| include | [include/zephyr/drivers/dac/dac161s997.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/dac/dac161s997.h) | L44 |
+| include | [include/zephyr/drivers/rtc/mcp7940n.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/rtc/mcp7940n.h) | L13, L19, L25, L32, L40, L46, L53, L58, L68, L73, L79, L85, L92, L99, L105 |
+| include | [include/zephyr/drivers/usb/udc.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/drivers/usb/udc.h) | L187 |
+| include | [include/zephyr/instrumentation/instrumentation.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/instrumentation/instrumentation.h) | L50 |
+| include | [include/zephyr/logging/log_output_dict.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/logging/log_output_dict.h) | L39 |
+| include | [include/zephyr/net/gptp.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/gptp.h) | L147 |
+| include | [include/zephyr/net/ieee802154_frame.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/ieee802154_frame.h) | L194, L200, L424, L531, L550, L571, L594, L621, L674, L824 |
+| include | [include/zephyr/net/ieee802154_ie.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/ieee802154_ie.h) | L141 |
+| include | [include/zephyr/net/wifi_mgmt.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/net/wifi_mgmt.h) | L1181 |
+| include | [include/zephyr/usb/usb_ch9.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/include/zephyr/usb/usb_ch9.h) | L30, L406 |
+| boards | [boards/arduino/opta/board.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/boards/arduino/opta/board.h) | L16 |
+| samples | [samples/boards/phytec/reel_board/mesh_badge/src/mesh.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/samples/boards/phytec/reel_board/mesh_badge/src/mesh.c) | L47, L53 |
+| samples | [samples/subsys/logging/syst/src/main.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/samples/subsys/logging/syst/src/main.c) | L17 |
+| samples | [samples/tfm_integration/psa_crypto/src/util_sformat.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/samples/tfm_integration/psa_crypto/src/util_sformat.h) | L20 |
+
+#### C4: Bit-field struct over raw memory (heuristic) (244 sites, 88 files)
+
+| Area | File | Lines |
+|------|------|-------|
+| drivers | [drivers/adc/adc_ad405x.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_ad405x.c) | L1123, L1138, L1247, L1283 |
+| drivers | [drivers/adc/adc_max2253x.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_max2253x.c) | L402, L417, L482 |
+| drivers | [drivers/adc/adc_max32.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_max32.c) | L307, L317, L519 |
+| drivers | [drivers/adc/adc_stm32.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/adc/adc_stm32.c) | L1431 |
+| drivers | [drivers/ieee802154/ieee802154_silabs_efr32.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/ieee802154/ieee802154_silabs_efr32.c) | L160 |
+| drivers | [drivers/pwm/pwm_renesas_rx_mtu.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/pwm/pwm_renesas_rx_mtu.c) | L619 |
+| drivers | [drivers/sensor/adi/adxl345/adxl345_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl345/adxl345_decoder.c) | L105, L191, L266, L279 |
+| drivers | [drivers/sensor/adi/adxl345/adxl345_rtio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl345/adxl345_rtio.c) | L32 |
+| drivers | [drivers/sensor/adi/adxl345/adxl345_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl345/adxl345_stream.c) | L182, L204, L348 |
+| drivers | [drivers/sensor/adi/adxl355/adxl355_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl355/adxl355_decoder.c) | L45, L106, L247, L253, L297 |
+| drivers | [drivers/sensor/adi/adxl355/adxl355_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl355/adxl355_stream.c) | L39, L154, L184, L196, L201, L253, L333, L374 |
+| drivers | [drivers/sensor/adi/adxl362/adxl362.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl362/adxl362.c) | L364 |
+| drivers | [drivers/sensor/adi/adxl362/adxl362_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl362/adxl362_decoder.c) | L70, L259, L353, L366 |
+| drivers | [drivers/sensor/adi/adxl362/adxl362_rtio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl362/adxl362_rtio.c) | L32 |
+| drivers | [drivers/sensor/adi/adxl362/adxl362_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl362/adxl362_stream.c) | L56, L159, L196, L213, L264, L361, L397 |
+| drivers | [drivers/sensor/adi/adxl367/adxl367.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl367/adxl367.c) | L651 |
+| drivers | [drivers/sensor/adi/adxl367/adxl367_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl367/adxl367_decoder.c) | L508, L627, L735, L748 |
+| drivers | [drivers/sensor/adi/adxl367/adxl367_rtio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl367/adxl367_rtio.c) | L33 |
+| drivers | [drivers/sensor/adi/adxl367/adxl367_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl367/adxl367_stream.c) | L80, L204, L278, L372, L423, L514, L550 |
+| drivers | [drivers/sensor/adi/adxl372/adxl372_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl372/adxl372_decoder.c) | L38, L168, L267, L280 |
+| drivers | [drivers/sensor/adi/adxl372/adxl372_rtio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl372/adxl372_rtio.c) | L34 |
+| drivers | [drivers/sensor/adi/adxl372/adxl372_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/adi/adxl372/adxl372_stream.c) | L218, L256, L389 |
+| drivers | [drivers/sensor/bosch/bma4xx/bma4xx_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bma4xx/bma4xx_decoder.c) | L51, L304, L390 |
+| drivers | [drivers/sensor/bosch/bma4xx/bma4xx_rtio_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bma4xx/bma4xx_rtio_stream.c) | L152, L159, L271 |
+| drivers | [drivers/sensor/bosch/bme280/bme280_async.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bme280/bme280_async.c) | L45 |
+| drivers | [drivers/sensor/bosch/bme280/bme280_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bme280/bme280_decoder.c) | L12, L59 |
+| drivers | [drivers/sensor/bosch/bme680/bme680_async.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bme680/bme680_async.c) | L106 |
+| drivers | [drivers/sensor/bosch/bme680/bme680_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bme680/bme680_decoder.c) | L21, L71 |
+| drivers | [drivers/sensor/bosch/bmm350/bmm350.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bmm350/bmm350.c) | L803 |
+| drivers | [drivers/sensor/bosch/bmm350/bmm350_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bmm350/bmm350_decoder.c) | L140, L175, L219, L297 |
+| drivers | [drivers/sensor/bosch/bmm350/bmm350_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/bosch/bmm350/bmm350_stream.c) | L132 |
+| drivers | [drivers/sensor/broadcom/afbr_s50/afbr_s50_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/broadcom/afbr_s50/afbr_s50_decoder.c) | L44, L91, L157 |
+| drivers | [drivers/sensor/memsic/mmc56x3/mmc56x3_async.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/memsic/mmc56x3/mmc56x3_async.c) | L43 |
+| drivers | [drivers/sensor/memsic/mmc56x3/mmc56x3_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/memsic/mmc56x3/mmc56x3_decoder.c) | L12, L71 |
+| drivers | [drivers/sensor/pixart/paa3905/paa3905.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pixart/paa3905/paa3905.c) | L75 |
+| drivers | [drivers/sensor/pixart/paa3905/paa3905_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pixart/paa3905/paa3905_decoder.c) | L84, L135, L199, L232 |
+| drivers | [drivers/sensor/pixart/pat9136/pat9136.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pixart/pat9136/pat9136.c) | L113 |
+| drivers | [drivers/sensor/pixart/pat9136/pat9136_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pixart/pat9136/pat9136_decoder.c) | L153, L210, L296, L329 |
+| drivers | [drivers/sensor/pni/rm3100/rm3100.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pni/rm3100/rm3100.c) | L74 |
+| drivers | [drivers/sensor/pni/rm3100/rm3100_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pni/rm3100/rm3100_decoder.c) | L38, L90, L153, L225 |
+| drivers | [drivers/sensor/pni/rm3100/rm3100_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/pni/rm3100/rm3100_stream.c) | L89 |
+| drivers | [drivers/sensor/st/iis3dwb/iis3dwb.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/iis3dwb/iis3dwb.c) | L155 |
+| drivers | [drivers/sensor/st/iis3dwb/iis3dwb_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/iis3dwb/iis3dwb_decoder.c) | L79, L80, L109, L167, L304, L370, L403 |
+| drivers | [drivers/sensor/st/iis3dwb/iis3dwb_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/iis3dwb/iis3dwb_stream.c) | L239, L306, L397, L444, L445 |
+| drivers | [drivers/sensor/st/lis2dux12/lis2dux12_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lis2dux12/lis2dux12_decoder.c) | L134, L135, L164, L221, L420, L487, L521 |
+| drivers | [drivers/sensor/st/lis2dux12/lis2dux12_rtio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lis2dux12/lis2dux12_rtio.c) | L42 |
+| drivers | [drivers/sensor/st/lis2dux12/lis2dux12_rtio_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lis2dux12/lis2dux12_rtio_stream.c) | L181, L249, L343, L392, L393 |
+| drivers | [drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_decoder.c) | L154, L155, L191, L278, L569, L659 |
+| drivers | [drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_rtio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_rtio.c) | L42 |
+| drivers | [drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_rtio_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsv16x/lsm6dsv16x_rtio_stream.c) | L379, L454, L553, L606, L607 |
+| drivers | [drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx.c) | L196 |
+| drivers | [drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx_decoder.c) | L117, L118, L156, L271, L302, L333, L361, L400, L430, L457, L595, L718 |
+| drivers | [drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/st/lsm6dsvxxx/lsm6dsvxxx_stream.c) | L245, L317, L411, L485, L486 |
+| drivers | [drivers/sensor/tdk/icm4268x/icm4268x_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/tdk/icm4268x/icm4268x_decoder.c) | L197, L361, L578, L667, L679, L680, L771 |
+| drivers | [drivers/sensor/tdk/icm4268x/icm4268x_rtio.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/tdk/icm4268x/icm4268x_rtio.c) | L68 |
+| drivers | [drivers/sensor/tdk/icm4268x/icm4268x_rtio_stream.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/tdk/icm4268x/icm4268x_rtio_stream.c) | L136 |
+| drivers | [drivers/sensor/tdk/icm45686/icm45686_decoder.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/sensor/tdk/icm45686/icm45686_decoder.c) | L377 |
+| drivers | [drivers/serial/uart_async_rx.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/drivers/serial/uart_async_rx.c) | L22 |
+| subsys | [subsys/bluetooth/controller/ll_sw/ull_adv_aux.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/ull_adv_aux.c) | L1963 |
+| subsys | [subsys/bluetooth/controller/ll_sw/ull_sync.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/controller/ll_sw/ull_sync.c) | L1903 |
+| subsys | [subsys/bluetooth/host/classic/a2dp.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/bluetooth/host/classic/a2dp.c) | L1332 |
+| subsys | [subsys/logging/frontends/log_frontend_dict_uart.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/logging/frontends/log_frontend_dict_uart.c) | L163 |
+| subsys | [subsys/mgmt/mcumgr/smp/src/smp.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/mgmt/mcumgr/smp/src/smp.c) | L100 |
+| subsys | [subsys/mgmt/mcumgr/smp_client/src/client.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/mgmt/mcumgr/smp_client/src/client.c) | L265, L278, L305 |
+| subsys | [subsys/modem/modem_cmux.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/modem/modem_cmux.c) | L1913, L1935, L1967, L1996 |
+| subsys | [subsys/net/ip/ipv6.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/ip/ipv6.h) | L127 |
+| subsys | [subsys/net/l2/ethernet/gptp/gptp_messages.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/l2/ethernet/gptp/gptp_messages.c) | L66, L80 |
+| subsys | [subsys/net/l2/ieee802154/ieee802154.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/l2/ieee802154/ieee802154.c) | L111 |
+| subsys | [subsys/net/l2/ieee802154/ieee802154_frame.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/l2/ieee802154/ieee802154_frame.c) | L44, L219 |
+| subsys | [subsys/net/lib/sntp/sntp.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/subsys/net/lib/sntp/sntp.c) | L66 |
+| lib | [lib/net_buf/buf_simple.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/lib/net_buf/buf_simple.c) | L507, L519, L551, L563, L575, L587 |
+| lib | [lib/utils/ring_buffer.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/lib/utils/ring_buffer.c) | L162, L202 |
+| soc | [soc/intel/intel_adsp/ace/include/ace20_lnl/adsp_power.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/intel/intel_adsp/ace/include/ace20_lnl/adsp_power.h) | L32, L48 |
+| soc | [soc/intel/intel_adsp/ace/include/adsp_memory.h](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/soc/intel/intel_adsp/ace/include/adsp_memory.h) | L139, L195 |
+| tests | [tests/subsys/mgmt/mcumgr/cb_notifications/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/cb_notifications/src/smp_test_util.c) | L36 |
+| tests | [tests/subsys/mgmt/mcumgr/enum_mgmt/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/enum_mgmt/src/smp_test_util.c) | L40, L60, L82, L118 |
+| tests | [tests/subsys/mgmt/mcumgr/fs_mgmt_hash_supported/src/main.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/fs_mgmt_hash_supported/src/main.c) | L77 |
+| tests | [tests/subsys/mgmt/mcumgr/img_mgmt_slot_info/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/img_mgmt_slot_info/src/smp_test_util.c) | L40 |
+| tests | [tests/subsys/mgmt/mcumgr/mcumgr_client/src/smp_stub.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/mcumgr_client/src/smp_stub.c) | L60, L78 |
+| tests | [tests/subsys/mgmt/mcumgr/os_mgmt_datetime/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/os_mgmt_datetime/src/smp_test_util.c) | L40, L58 |
+| tests | [tests/subsys/mgmt/mcumgr/os_mgmt_info/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/os_mgmt_info/src/smp_test_util.c) | L38 |
+| tests | [tests/subsys/mgmt/mcumgr/os_mgmt_mpstat/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/os_mgmt_mpstat/src/smp_test_util.c) | L37 |
+| tests | [tests/subsys/mgmt/mcumgr/settings_mgmt/src/main.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/settings_mgmt/src/main.c) | L184, L238, L314, L368, L455, L730, L869, L1032, L1150, L1480, L1717, L1809, L1924, L2039 |
+| tests | [tests/subsys/mgmt/mcumgr/settings_mgmt/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/settings_mgmt/src/smp_test_util.c) | L40, L62, L81, L97, L113, L130, L150 |
+| tests | [tests/subsys/mgmt/mcumgr/smp_client/src/smp_transport_stub.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/smp_client/src/smp_transport_stub.c) | L22 |
+| tests | [tests/subsys/mgmt/mcumgr/smp_version/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/smp_version/src/smp_test_util.c) | L39 |
+| tests | [tests/subsys/mgmt/mcumgr/transport_raw_uart/src/smp_test_util.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/tests/subsys/mgmt/mcumgr/transport_raw_uart/src/smp_test_util.c) | L38 |
+| samples | [samples/bluetooth/channel_sounding/src/distance_estimation.c](https://github.com/zephyrproject-rtos/zephyr/blob/b5fb5c845b9e82b842c50e0fc5f4072d0586ed5a/samples/bluetooth/channel_sounding/src/distance_estimation.c) | L223 |
+
+### Dependencies
+
+This touches many maintainer areas: arch, drivers, subsys, soc, lib, include, boards, tests, and samples. See the per-area table in the summary for the size of each area. `include` headers are owned by their subsystems, not one owner. No external modules and no on-wire or on-flash encodings change. Only the access method in the code changes.
+
+### Concerns and Unresolved Questions
+
+- Some sites run only on little-endian GCC or Clang and work today. Do we fix all of them, or fix the big-endian, protocol, DMA, and flash sites first and treat the rest as low priority?
+- C4 is heuristic. It may hold a few false positives. Confirm each before change.
+- Which CI tool for the guard: checkpatch (simple) or Coccinelle (semantic)? How strict, so it does not warn on internal bit-fields where layout is never assumed?
+- Scope: do we also convert reserved or padding-only fields, or only fields whose value crosses a boundary?
+- Order: land the CI guard first, or the clean-up first?
+
+### Alternatives Considered
+
+- Do nothing and rely on the current compiler. Rejected. It breaks the adopted rule and it already broke (PR #113320).
+- Byte-order guards only. Rejected. They fix endianness but not the bit order or the spill behaviour.
+- Add a new coding guideline. Tried in PR #113584 and closed as already covered by MISRA Dir 1.1 and EXP11-C. So this RFC proposes enforcement, not new policy.
+- Compiler-specific packing attributes. Non-standard and still do not fix the bit order.
+- Use `FIELD_GET` and `FIELD_PREP` over a plain word. Chosen. Standard C, already common in the tree, same idea as Linux `linux/bitfield.h`.
+
+Also to add, Linux documents mmap'd bitfield structs over hardware as non-portable and steers toward shift/mask instead: https://docs.kernel.org/core-api/packing.html#problem-statement (and FIELD_GET/FIELD_PREP in include/linux/bitfield.h is the concrete pattern).
+
+Reports can be generated using the attached python script: [bitfield_layout_audit.py](https://github.com/user-attachments/files/30099750/bitfield_layout_audit.py)
+
+NOTE: Issue details and tree wide search is done using Claude Opus 4.8 LLM. Although the data is cross checked multiple time before posting here, please be aware the data could be error-prone.
+
+*--- parthitce (2026-07-17 06:48:57+00:00)
+List of pull request in open state with Authors tagged:
+
+| PR | Line number details | Author |
+|----|---------------------|--------|
+| [#113509](https://github.com/zephyrproject-rtos/zephyr/pull/113509) | `drivers/wifi/esp_hosted/esp_hosted_wifi.h`:L83 (packed struct) | @iabdalkader |
+| [#112993](https://github.com/zephyrproject-rtos/zephyr/pull/112993) | `drivers/usb/udc/udc_mchp_g1.c`:L62 (packed struct)<br>`drivers/usb/udc/udc_mchp_g1.c`:L95 (packed struct) | @shijas-mayan |
+| [#112964](https://github.com/zephyrproject-rtos/zephyr/pull/112964) | `drivers/sensor/bosch/bmi270/bmi270_decoder.h`:L16 (packed struct) | @mbarchie |
+| [#112582](https://github.com/zephyrproject-rtos/zephyr/pull/112582) | `drivers/clock_control/clock_control_mchp_pic32cm_sg_gc.c`:L91 (union) | @sunil-abraham |
+| [#112362](https://github.com/zephyrproject-rtos/zephyr/pull/112362) | `drivers/sensor/tdk/icm566xx/icm566xx.h`:L76 (union) | @akim-invn |
+| [#111476](https://github.com/zephyrproject-rtos/zephyr/pull/111476) | `include/zephyr/drivers/clock_control/mchp_xec_clock_control.h`:L34 (union) | @Manimaran-A |
+| [#109976](https://github.com/zephyrproject-rtos/zephyr/pull/109976) | `drivers/dac/dac_infineon_hppass_csg.c`:L54 (union) | @jsbatch |
+| [#109967](https://github.com/zephyrproject-rtos/zephyr/pull/109967) | `drivers/dac/dac_infineon_hppass_csg.c`:L53 (union) | @jsbatch |
+| [#109879](https://github.com/zephyrproject-rtos/zephyr/pull/109879) | `drivers/comparator/comparator_infineon_hppass_csg.c`:L99 (union) | @jsbatch |
+| [#109632](https://github.com/zephyrproject-rtos/zephyr/pull/109632) | `drivers/adc/adc_infineon_hppass_sar.c`:L171 (union)<br>`drivers/adc/adc_infineon_hppass_sar.c`:L188 (union) | @jsbatch |
+| [#109456](https://github.com/zephyrproject-rtos/zephyr/pull/109456) | `drivers/i2c/i2c_dw_con.h`:L21 (union) | @puneetdixit200 |
+| [#109130](https://github.com/zephyrproject-rtos/zephyr/pull/109130) | `drivers/clock_control/clock_control_mchp_pic32ck_sg_gc.c`:L105 (union) | @Sountharya-MCHP |
+| [#106624](https://github.com/zephyrproject-rtos/zephyr/pull/106624) | `soc/egis/et171/et171_otp.c`:L16 (union) | @jackylee-go |
+| [#106326](https://github.com/zephyrproject-rtos/zephyr/pull/106326) | `include/zephyr/drivers/clock_control/mchp_xec_clock_control.h`:L21 (union) | @scottwcpg |
+| [#104603](https://github.com/zephyrproject-rtos/zephyr/pull/104603) | `include/zephyr/net/rtp.h`:L73 (union)<br>`include/zephyr/net/rtp.h`:L88 (union) | @javlands |
+| [#104178](https://github.com/zephyrproject-rtos/zephyr/pull/104178) | `drivers/sensor/bosch/bma400/bma400_decoder.h`:L20 (packed struct)<br>`drivers/sensor/bosch/bma400/bma400_decoder.h`:L31 (packed struct) | @lucagessi |
+| [#97791](https://github.com/zephyrproject-rtos/zephyr/pull/97791) | `drivers/adc/adc_mcp342x.c`:L33 (union) | @AUtech-dev |
+| [#89478](https://github.com/zephyrproject-rtos/zephyr/pull/89478) | `include/zephyr/drivers/counter/ti_am3352_eqep.h`:L104 (packed struct)<br>`include/zephyr/drivers/counter/ti_am3352_eqep.h`:L132 (packed struct)<br>`include/zephyr/drivers/counter/ti_am3352_eqep.h`:L196 (packed struct) | @natto1784 |
+
+Note: This data is grep'd and generated by LLM and manually verified, please ignore / flag if it's false positive.
+
+*--- natto1784 (2026-07-17 08:32:59+00:00)
+This is something I am interested to hear opinions on. So far all the drivers I have written (and the drivers I am writing) use bitfields for descriptors and such and yes, there are pros and cons to both approaches. So it would be great to reach a consensus here.
+
+*--- aescolar (2026-07-17 09:48:42+00:00)
+@parthitce This RFC is based on a set of presumptions that I do not believe hold.
+
+Background: We do not follow all MISRA rules, and for the ones we do, we do not do it dogmatically. We follow those that we consider useful, where we consider them useful.
+
+**Principal**:
+
+That MISRA rule states:
+"**Any implementation-defined behaviour** on which the output of the program depends **shall be documented and understood**"
+That is, we can (and certainly do, as we need to, as we are writing low level code) write some code whose behaviour is implementation defined given the C standard.
+
+In the documentation for Dir 1.1, there is a link to CERT C rule for *reference*. That does not imply we need to follow that CERT C rule.
+
+> Already seen in practice: #113320 
+
+That is a just a plain bug. Just because somebody makes a mistake while using a C language feature it does not mean we now need to ban that C language feature. That particular bug can be fixed trivially. And the use in that code is not the most typical use of bitfields.
+
+> A guideline PR #113584 was closed as already covered by the rule above.
+
+That PR had been rejected by two people on the principle of the PR.
+
+> ...finds 738 sites in 238 files...
+
+The fact that bitfields are used in hundredths of places/files, would be an indication that maybe we should not just forbid their use wholesale.
+
+> Proposed Change (Summary)
+
+I fundamentally reject this proposal as misguided.
+a) It would create a lot of churn (for us and downstreams, complicate backports), result in less readable code, and with all likelihood introduced bugs for no practical benefit.
+b) It would create an unnecessary constraint for vendors / driver contributors who are trying to contribute perfectly valid code. Similarly it would prevent us from importing to the tree perfectly valid libraries.
+
+> Steps per PR: add named GENMASK masks,
+
+This would mean adding *thousands* of such macros, effectively replacing HALs headers that use bitfields.
+
+> Do nothing and rely on the current compiler. Rejected.
+
+"Rejected" by you ;). Not by others.
+We rely on knowing what the compiler does with bitfields. This is not a "one compiler does this in this version and may change at any point". This is: all compilers do the same in these cases, and no compiler designer will change this behavior as they would break tons of existing code.
+
+> Byte-order guards only. Rejected. They fix endianness but not the bit order or the spill behaviour.
+
+I fail to see what you mean with that.
+What do you mean with "spill behaviour"? One does not use bitfields to access across word/bus access boundaries, because that does not represent proper HW registers. And I doubt anybody would expect a compiler to handle it properly for data packages.
+The "bit order" is what we fix with the bigendian/little endian check. In big endian architectures the compiler places bitfields from MSbit to LSBit. While in little endian it starts from LSBit.
+
+> Also to add, Linux..
+
+We are not Linux, and we have constraints Linux does not have.
+
+*--- henrikbrixandersen (2026-07-17 10:14:07+00:00)
+@parthitce Thank you for putting in the legwork performing this analysis. 
+
+I will be taking care of the identified issues in the `drivers/can/can_mcan.h` file and driver.
+
+*--- teburd (2026-07-18 12:33:40+00:00)
+I wonder if cocci could detect such patterns and reject them?
+
+*--- nashif (2026-07-18 18:32:45+00:00)
+wait, MISRA Dir 1.1 says:
+
+"Any implementation-defined behaviour on which the output of the program depends shall be documented and understood."
+
+The directive does not say:
+
+- implementation-defined behavior shall not be used;
+- bit-field representation shall not affect output;
+- bit-fields may not represent hardware registers;
+- all bit-field overlays must be replaced by masks and shifts.
+- ....
+
+It says the dependency must be documented and understood.
+
+Compliance may be achieved by documenting and understanding that:
+- the code is restricted to a particular architecture;
+- a particular ABI defines the layout;
+- ...
+
+@RobertoBagnara  Can you please weigh in?
+
+*--- henrikbrixandersen (2026-07-19 22:34:31+00:00)
+[EXP11-C](https://cmu-sei.github.io/secure-coding-standards/sei-cert-c-coding-standard/recommendations/expressions-exp/exp11-c/), which we refer to from MISRA directive 1.1 in our coding guidelines, states the following:
+
+> Consequently, it is impossible to write portable safe code that makes assumptions regarding the layout of bit-field structure members.
+
+I do not believe we can say we document nor fully understand where the current usage of bit-fields structure members in Zephyr, as outlined in this PR, can lead to issues or has certain dependencies on the compiler ABI or CPU architecture.
+
+*--- parthitce (2026-08-21 04:41:10+00:00)
+Removed stale. Looking forward for inputs. Thanks.
+
+*--- teburd (2026-08-21 09:59:34+00:00)
+The main place I'd think this matters is against hardware registers where bit position greatly matters.
+
+I think it'd be just fine to have a cocci script for example warn on bitfield usage in drivers/ or arch/ myself. Though sensors themselves often use bitfields in their software encoded headers against a buffer as read+decode works more like a protocol from sensor driver to application... so exceptions abound.
+
+Doing this for things like protocols or bit packing data to save some memory in subsystems and such makes little sense to me.
+
+*--- teburd (2026-08-21 10:03:58+00:00)
+Maybe, crucially...
+
+"Also to add, Linux documents mmap'd bitfield structs over hardware as non-portable and steers toward shift/mask instead: https://docs.kernel.org/core-api/packing.html#problem-statement (and FIELD_GET/FIELD_PREP in include/linux/bitfield.h is the concrete pattern)."
+
+I mean yes, but how can we automatically check for this sort of thing? Without automatic checking and enforcement it will be difficult, besides documenting and trying to spread culturally which takes a lot of time and always has gaps.

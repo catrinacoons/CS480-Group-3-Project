@@ -1,0 +1,219 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111071
+TITLE: net: l2: ethernet: validate MAC after driver start
+
+*--- opening post by krish2718 (2026-06-11 16:28:22+00:00)
+net: l2: ethernet: validate MAC after driver start
+    
+  Commit 481035cf8e1 ("net: ethernet: check mac address when bringing a
+  eth iface up") validated the link address before eth->start() was
+  called. That broke Wi-Fi interfaces whose MAC is learnt from firmware
+  during bring-up (e.g. nRF70 reads it from OTP once the companion
+  firmware boots), leaving them unable to admin-up and preventing WPA
+  supplicant from registering them. The offending commit was reverted in
+  d8065e9f87c to unblock nRF Wi-Fi.
+  
+  Reintroduce the validation, but run eth->start() first so that drivers
+  which populate their address during bring-up have a valid link address
+  by the time it is checked. This keeps the useful diagnostic for
+  misconfigured MACs while supporting drivers that only know their
+  address after start.
+  
+  A failure of the post-start validation is terminal: net_if_up() fails
+  and the interface is left unusable, the same as if eth->start() itself
+  had failed. Return -EINVAL directly rather than rolling back with
+  eth->stop(), so the behaviour is consistent for drivers that do not
+  implement a stop op.
+  
+  Signed-off-by: Chaitanya Tata <Chaitanya.Tata@nordicsemi.no>
+  Assisted-by: Claude:claude-opus-4.8
+
+*--- krish2718 (2026-06-11 16:50:34+00:00)
+> you should set the mac address in the iface init and not the start function.
+> 
+> this has also been documented:
+> 
+> https://github.com/zephyrproject-rtos/zephyr/blob/c49b758d87914e185ff611e93473bf8ec84a378a/doc/releases/migration-guide-4.5.rst#L254-L257
+> 
+> try this: #110926
+
+I saw that, but I don't think that's the right approach, we need to be flexible as each driver has its own design/constraints. We only need to ensure that interface has valid MAC address before the `net_if_up()` returns.
+
+*--- maass-hamburg (2026-06-11 17:34:08+00:00)
+> I saw that, but I don't think that's the right approach, we need to be flexible as each driver has its own design/constraints. We only need to ensure that interface has valid MAC address before the `net_if_up()` returns.
+
+then move more stuff into the iface init, that is the point where a driver should set the default mac address.
+
+*--- krish2718 (2026-06-11 18:14:14+00:00)
+> > I saw that, but I don't think that's the right approach, we need to be flexible as each driver has its own design/constraints. We only need to ensure that interface has valid MAC address before the `net_if_up()` returns.
+> 
+> then move more stuff into the iface init, that is the point where a driver should set the default mac address.
+
+Each driver can do things differently, its not necessary to have a valid MAC in the iface init, we only need a valid MAC before the iface is advertized as administratively. And its not power efficient to start the comms on init, hence the design of typing the comms crreation/deletion to iface up/down.
+
+What's the problem in this approach? We still do the check for valid MAC before the `net_if_up` returns, this PR is just giving drivers option to do the MAC address either in init/start, its flexible.
+
+*--- jukkar (2026-06-11 19:45:37+00:00)
+You could set a "dummy" MAC address in driver iface init, and then adjust it properly in the device start function.
+
+*--- krish2718 (2026-06-11 20:16:00+00:00)
+> You could set a "dummy" MAC address in driver iface init, and then adjust it properly in the device start function.
+
+Yes, that was my first instinct as well, but then I realized that we can improve the current design flexibility with the approach in this PR, I can always add a fixed dummy address in the init, if this approach is rejected.
+
+*--- jukkar (2026-06-12 07:02:02+00:00)
+> Yes, that was my first instinct as well, but then I realized that we can improve the current design flexibility with the approach in this PR, I can always add a fixed dummy address in the init, if this approach is rejected.
+
+The problem with this PR is that we have the behavior documented and working the way it does for a long time. Both in-tree and out-of-tree drivers are expecting certain way how the Ethernet L2 works atm. I would recommend in this case to use the workaround and adjust the driver.
+
+*--- krish2718 (2026-06-12 07:46:02+00:00)
+> > Yes, that was my first instinct as well, but then I realized that we can improve the current design flexibility with the approach in this PR, I can always add a fixed dummy address in the init, if this approach is rejected.
+> 
+> The problem with this PR is that we have the behavior documented and working the way it does for a long time. Both in-tree and out-of-tree drivers are expecting certain way how the Ethernet L2 works atm. I would recommend in this case to use the workaround and adjust the driver.
+
+No, the MAC address validation change was quite recent and it broken nRF Wi-Fi drivers, it was not caught as CI only runs build tests. This PR just fixes the order giving a chance for drivers to setup MAC.
+
+*--- jukkar (2026-06-12 10:33:29+00:00)
+> No, the MAC address validation change was quite recent and it broken nRF Wi-Fi drivers, it was not caught as CI only runs build tests. This PR just fixes the order giving a chance for drivers to setup MAC.
+
+Indeed, I thought it was much older code (was introduced by commit 481035cf8e1e65a12e9755c639cc563b62220a0d). That changes things as no one is using that code yet.
+What you are proposing makes sense, we could verify that the MAC address is set after the driver has done with the initialization and the beast is ready to be taken up. @maass-hamburg WDYT?
+
+*--- maass-hamburg (2026-06-15 09:19:39+00:00)
+As I already said, I don't think, that drivers should change the mac address themself after iface init.
+
+I also think, that communication with the device should not only start in iface start. The basic config should already be set in the dev init or as latest in iface init. 
+
+Therfore I don't like this approach, where the iface is first started and then stopped if the mac address is invalid. This would for example not have the same effect, with drivers that don't implement iface stop.
+
+*--- krish2718 (2026-06-15 12:34:55+00:00)
+> As I already said, I don't think, that drivers should change the mac address themself after iface init.
+> 
+> I also think, that communication with the device should not only start in iface start. The basic config should already be set in the dev init or as latest in iface init.
+> 
+> Therfore I don't like this approach, where the iface is first started and then stopped if the mac address is invalid. This would for example not have the same effect, with drivers that don't implement iface stop.
+
+As the original commit caused a regression (nRF Wi-Fi driver broken), should we revert and continue the discussion here? This looks like it might take longer, WDYT? AFAIK, the original commit isn't solving any real issue, but please correct me if I am wrong.
+
+*--- maass-hamburg (2026-06-15 12:39:06+00:00)
+> > As I already said, I don't think, that drivers should change the mac address themself after iface init.
+> > I also think, that communication with the device should not only start in iface start. The basic config should already be set in the dev init or as latest in iface init.
+> > Therfore I don't like this approach, where the iface is first started and then stopped if the mac address is invalid. This would for example not have the same effect, with drivers that don't implement iface stop.
+> 
+> As the original commit caused a regression (nRF Wi-Fi driver broken), should we revert and continue the discussion here? This looks like it might take longer, WDYT? AFAIK, the original commit isn't solving any real issue, but please correct me if I am wrong.
+
+the real issue is that, invalid mac addresses were not detected and logged before and the ethernet controller would then not work without any notice.
+
+*--- maass-hamburg (2026-06-15 12:42:28+00:00)
+@krish2718 just add a workaround to your nrf driver by setting a dummy mac in the iface init like @jukkar suggested.
+
+*--- krish2718 (2026-06-15 13:05:35+00:00)
+> @krish2718 just add a workaround to your nrf driver by setting a dummy mac in the iface init like @jukkar suggested.
+
+No. Respectfully using a "dummy MAC" address during iface_init as a workaround introduces several silent failure modes and defeats the entire purpose of the original validation feature (commit 481035c):
+
+1. Defeats the Validation Logic: If the driver populates a dummy MAC during init just to satisfy an early check, the Ethernet L2 layer will validate a placeholder. If the firmware subsequently fails to load or fail to retrieve the actual OTP MAC during eth->start(), the interface will stay up using an invalid or duplicated dummy MAC. This brings us right back to the original issue where invalid MACs pass without notice.
+2. Race Conditions with Network Management: If the interface initialized with a dummy MAC is exposed to user-space or network management daemons (like WPA Supplicant) before eth->start() finishes swapping it with the real burned-in address, it can cause race conditions where upper layers cache or bind to the wrong hardware address.
+3. Power Management Violations: To avoid a dummy MAC, the driver would have to power up the chip, clock the SPI/QSPI buses, boot the companion firmware, and read the OTP during iface_init. Forcing this during early system boot—when the interface might not even be administratively brought up until much later—violates basic low-power embedded design principles.
+
+Delaying validation until the device is actually entering the start phase ensures we are validating the real hardware state without introducing side-channel workarounds.
+
+*--- krish2718 (2026-06-15 13:06:41+00:00)
+> > > As I already said, I don't think, that drivers should change the mac address themself after iface init.
+> > > I also think, that communication with the device should not only start in iface start. The basic config should already be set in the dev init or as latest in iface init.
+> > > Therfore I don't like this approach, where the iface is first started and then stopped if the mac address is invalid. This would for example not have the same effect, with drivers that don't implement iface stop.
+> > 
+> > 
+> > As the original commit caused a regression (nRF Wi-Fi driver broken), should we revert and continue the discussion here? This looks like it might take longer, WDYT? AFAIK, the original commit isn't solving any real issue, but please correct me if I am wrong.
+> 
+> the real issue is that, invalid mac addresses were not detected and logged before and the ethernet controller would then not work without any notice.
+
+Is this a reported bug or just a speculative fix?
+
+*--- maass-hamburg (2026-06-15 13:28:58+00:00)
+> > > > As I already said, I don't think, that drivers should change the mac address themself after iface init.
+> > > > I also think, that communication with the device should not only start in iface start. The basic config should already be set in the dev init or as latest in iface init.
+> > > > Therfore I don't like this approach, where the iface is first started and then stopped if the mac address is invalid. This would for example not have the same effect, with drivers that don't implement iface stop.
+> > > 
+> > > 
+> > > As the original commit caused a regression (nRF Wi-Fi driver broken), should we revert and continue the discussion here? This looks like it might take longer, WDYT? AFAIK, the original commit isn't solving any real issue, but please correct me if I am wrong.
+> > 
+> > 
+> > the real issue is that, invalid mac addresses were not detected and logged before and the ethernet controller would then not work without any notice.
+> 
+> Is this a reported bug or just a speculative fix?
+
+yes: https://github.com/zephyrproject-rtos/zephyr/issues/110266
+
+*--- maass-hamburg (2026-06-15 13:42:52+00:00)
+> 2\. Race Conditions with Network Management: If the interface initialized with a dummy MAC is exposed to user-space or network management daemons (like WPA Supplicant) before eth->start() finishes swapping it with the real burned-in address, it can cause race conditions where upper layers cache or bind to the wrong hardware address.
+
+as long as the iface is not up, the mac address can be changed at any time with ``net_mgmt(NET_REQUEST_ETHERNET_SET_MAC_ADDRESS``, applications or subsystems can't expect that a mac address doesn't change when it is not up.
+
+*--- krish2718 (2026-06-15 14:16:21+00:00)
+> > 2. Race Conditions with Network Management: If the interface initialized with a dummy MAC is exposed to user-space or network management daemons (like WPA Supplicant) before eth->start() finishes swapping it with the real burned-in address, it can cause race conditions where upper layers cache or bind to the wrong hardware address.
+> 
+> as long as the iface is not up, the mac address can be changed at any time with `net_mgmt(NET_REQUEST_ETHERNET_SET_MAC_ADDRESS`, applications or subsystems can't expect that a mac address doesn't change when it is not up.
+
+To look at this from the perspective of upper-layer applications: many subsystems do not explicitly set a MAC address. Instead, they rely entirely on the L2/driver to fetch the authentic OTP address from the hardware. They expect that the moment net_if_up() completes, the interface's MAC is its finalized, true identity.
+
+If a driver uses a dummy MAC placeholder during iface_init to satisfy an early L2 check, and then updates it to the real OTP address inside eth->start(), we create a critical timing hazard for things like DHCP, IPv6 DAD, or WPA Supplicant. If any upper-layer network event triggers or binds to the interface identity right as the state transitions to UP, it risks capturing or caching the transient dummy MAC instead of the real burned-in address.
+
+Overall, using a dummy MAC to bypass a check during iface_init only to overwrite it during eth->start() is entirely pointless for those drivers/devices that actually start the operations in start.
+
+*--- krish2718 (2026-06-15 14:20:33+00:00)
+> Therfore I don't like this approach, where the iface is first started and then stopped if the mac address is invalid. This would for example not have the same effect, with drivers that don't implement iface stop.
+
+If the only concern here is calling `stop` in case of failure we could just fail and return without calling stop, if `net_if_up()` fails then device cannot be used same as invalid MAC, so, something like this:
+
+```
+diff --git a/subsys/net/l2/ethernet/ethernet.c b/subsys/net/l2/ethernet/ethernet.c
+index a1b2c3d4e..f6e7d8c9b 100644
+--- a/subsys/net/l2/ethernet/ethernet.c
++++ b/subsys/net/l2/ethernet/ethernet.c
+@@ -123,19 +123,21 @@ static int ethernet_iface_up(struct net_if *iface)
+ 	struct ethernet_context *ctx = net_if_l2_data(iface);
+ 	const struct ethernet_api *eth = net_if_get_device(iface)->api;
+ 
+-	/* Validate the MAC address before starting the driver */
+-	if (!is_valid_ethernet_mac(iface)) {
+-		NET_ERR("Invalid MAC address for interface %p", iface);
+-		return -EINVAL;
+-	}
+-
+ 	if (eth && eth->start) {
+ 		int ret = eth->start(net_if_get_device(iface));
+ 		if (ret < 0) {
+ 			return ret;
+ 		}
+ 	}
+ 
++	/* Validate the MAC address after driver start to allow companion 
++	 * chipsets to boot firmware and retrieve their address from OTP.
++	 */
++	if (!is_valid_ethernet_mac(iface)) {
++		NET_ERR("Invalid MAC address for interface %p after start", iface);
++		return -EINVAL;
++	}
++
+ 	ethernet_mgmt_raise_carrier_on_event(iface);
+ 
+ 	return 0;
+```
+
+*--- krish2718 (2026-06-18 12:02:15+00:00)
+@jukkar is OOO and the longer we keep this open, the longer nRF Wi-Fi is broken. So, either we conclude on the fix or revert temporarily and then discuss on the final fix.
+
+*--- krish2718 (2026-07-07 18:30:46+00:00)
+As the revert was merged to fix the nRF70, I have now updated the fix as discussed in https://github.com/zephyrproject-rtos/zephyr/pull/111071#issuecomment-4708890933 this solves the original problem but without breaking drivers like nRF Wi-Fi.
+
+*--- maass-hamburg (2026-07-07 18:41:17+00:00)
+We could also have a Kconfig that drivers, that have a late setting of the mac, can select and only then check the mac after start and check the mac address otherwise before start. Or then leave it to the driver inside start to check it.
+
+*--- krish2718 (2026-07-07 19:28:56+00:00)
+> We could also have a Kconfig that drivers, that have a late setting of the mac, can select and only then check the mac after start and check the mac address otherwise before start. Or then leave it to the driver inside start to check it.
+
+Checking after start() is a strict superset of checking before it: a MAC set in init is still valid after start() (start does not clobber it), so the after-start check catches every statically-misconfigured MAC the before-start check would, and additionally handles drivers that only learn their address during bring-up (nRF70 reads it from OTP once firmware boots). The before-start check catches a subset and cannot validate late-MAC drivers at all.
+
+On avoiding a power-on with a bad MAC: the drivers where powering on is actually expensive (companion chips that clock a bus and boot firmware) are precisely the late-MAC drivers, which have no address to check before start() — so an early check cannot help them. The drivers where you can check early (MAC set in init) are on-die MACs where bring-up is cheap. The early check only ever fires where it does not matter, and is impossible where it would. On top of that, a statically-invalid MAC is a deterministic DTS/build error: you hit it once on the first bring-up during development and get a clear log; in production the address is valid and the path is never taken. There is no recurring runtime cost being traded away.
+
+Given that, a Kconfig only adds a second code path and doubles the behavior we have to reason about and test, for a knob almost no driver would set. So I'd keep it as a single unconditional check right after start() returns.

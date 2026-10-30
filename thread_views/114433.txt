@@ -1,0 +1,93 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114433
+TITLE: modem: cellular: on-demand neighbour cells
+
+*--- opening post by wkhadgar (2026-07-23 22:14:19+00:00)
+Today the cellular API can report the serving cell on demand, but offers no view of the neighbouring cells the modem measures around it.
+
+This adds a `scan_neighbor_cells` driver operation and `cellular_scan_neighbor_cells()`, which measures the neighbour cells and writes them into a caller provided buffer.
+
+The Quectel EG25-G drives the feature end to end, decoding its AT+QENG="neighbourcell" report.
+
+The periodic timer is also rearmed when the periodic script cannot start in await dial and await registered, matching registered.
+
+*--- zafersn (2026-07-23 22:21:24+00:00)
+is there a missing quote here?
+
+*--- zafersn (2026-07-23 22:25:07+00:00)
+Wouldnt it be better to have all of these definitions and enums at the beginning of the file? I think it would make things a bit easier to follow, but it's up to you.
+
+*--- zafersn (2026-07-23 22:27:29+00:00)
+maybe adding a range here?
+
+*--- wkhadgar (2026-07-23 23:06:53+00:00)
+Not really, the argv tokens keep their quotes, so it's `"neighbourcell intra" / ...inter"` and this is a strncmp prefix that catches both
+
+*--- wkhadgar (2026-07-23 23:07:45+00:00)
+Agreed, will move them up
+
+*--- wkhadgar (2026-07-23 23:08:43+00:00)
+Oof, forgot about it, thanks for catching this 🙏
+
+*--- Copilot (2026-07-24 12:58:42+00:00)
+modem_cellular_add_neighbor_cell() updates neighbor_staging[]/neighbor_staging_count without holding api_lock, while modem_cellular_commit_neighbor_cells() and other code can run concurrently. This creates a data race and can corrupt the staged list or publish partially written entries.
+
+This issue also appears on line 266 of the same file.
+
+*--- Copilot (2026-07-24 12:58:42+00:00)
+Cache invalidation on registration changes currently only runs when modem_cellular_is_registered() is true. On deregistration transitions, neighbor_cells_valid remains true, so cellular_get_neighbor_cells() can continue returning a stale neighbor list even though the Doxygen contract says -ENODATA after a registration change until the next poll refreshes it.
+
+*--- wkhadgar (2026-07-24 17:40:30+00:00)
+moved the cache invalidation to fire on any registration change including deregistration
+
+*--- wkhadgar (2026-07-24 17:41:53+00:00)
+`add()` and `commit()` both run on the modem workqueue, so they never overlap. And the getter only reads the published cache (`neighbor_cells`) under `api_lock`, it never touches `neighbor_staging`
+
+*--- SeppoTakalo (2026-07-27 11:44:08+00:00)
+Is this now extending the cellular driver API to direction what 3GPP standard does not offer?
+
+Why does it need to be on the driver API, instead of custom scripts that can possibly run on separate CMUX channel?
+
+*--- wkhadgar (2026-07-27 14:37:04+00:00)
+> Is this now extending the cellular driver API to direction what 3GPP standard does not offer?
+
+The fields (EARFCN, PCI, RSRP, RSRQ) are standard 3GPP measurement quantities, until here nothing new, what's non-standard is the vendor AT to read them, and that's exactly why a typed API helps here. 
+
+> Why does it need to be on the driver API, instead of custom scripts that can possibly run on separate CMUX channel?
+
+`QENG` (Quectel), `%NCELLMEAS` (Nordic), `#MONI` (Telit), `+UCGED` (u-blox), all report the same thing in different ways of their own, so a custom script hands the app raw per-modem text it has to parse and redo for every vendor... The getter gives one vendor-neutral struct so consumers stay portable, and the driver already polls + parses this over its existing CMUX channel, so exposing the parsed result is cheaper than every app re-implementing it on a user pipe. I would think of it like serving-cell status, wich already belongs on the API, neighbours are nothing but a consistent extension.
+
+*--- Copilot (2026-09-14 16:59:27+00:00)
+Clearing staging only after a commit leaves partial rows behind when the periodic script times out or aborts (for example on `+CME ERROR`, which is not handled by `qeng_neighbourcell_match`). The state machine retries the periodic script, so its next empty/short scan can publish or append those stale rows as the newest measurement. Reset/discard staging at the start of each neighbour query and on failed script completion.
+
+*--- Copilot (2026-09-14 16:59:28+00:00)
+This shared API table is used by every `MODEM_CELLULAR_DEFINE_INSTANCE`, but only the EG2x-G vendor ever populates the new cache. All other generic cellular modems therefore advertise this optional operation and return `-ENODATA` forever instead of the documented `-ENOSYS` for an unsupported device. Please gate the operation on a vendor capability (or provide a vendor-specific API table) so unsupported modems remain distinguishable from supported modems that have not measured yet.
+
+*--- Copilot (2026-09-14 16:59:28+00:00)
+The new tests exercise only the generic accumulator with prebuilt cells; no test feeds an EG2x-G `+QENG: "neighbourcell ..."` response through modem chat. Consequently the new field offsets, intra/inter handling, placeholder rejection, and serving-cell filtering can all regress without detection. Extend the existing EG25-G UART-emulation coverage with representative response lines and assert the accessor output.
+
+*--- Copilot (2026-09-14 16:59:28+00:00)
+The implementation explicitly returns `-EINVAL` when either pointer is NULL, but this public API documentation omits that discrete return value. Document it so callers can distinguish invalid arguments from unavailable data.
+
+*--- wkhadgar (2026-09-15 19:14:13+00:00)
+added
+
+*--- wkhadgar (2026-09-15 19:18:19+00:00)
+fixed
+
+*--- wkhadgar (2026-09-15 19:19:58+00:00)
+fixed
+
+*--- wkhadgar (2026-09-15 21:41:56+00:00)
+Both the callback and the match table in `cellular_quectel_eg2x_g.c` are static, and `MODEM_CHAT_MATCHES_DEFINE` too, so a test can't reach either without making part of the vendor file non-static, or including the .c and dragging the devicetree instance glue along. I'd rather not restructure the vendor file for testability inside this PR.
+
+*--- zafersn (2026-09-17 16:51:50+00:00)
+i wonder if it d be better to add access_tech here so we can carry nr or gsm neighbors without introducing an ABI break. This feature is being added unconditionally to struct modem_cellular_data, which is a public header that every vendor driver embeds. the cellular_evt_network_status already carries access_tech alongside its union, so perhaps we could follow the same approach here.
+
+*--- zafersn (2026-09-17 17:38:49+00:00)
+Correct me if im wrong here, all these (especially arrays, since the CONFIG_MODEM_CELLULAR_MAX_NEIGHBOR_CELLS's default is 6) land unconditionally in struct modem_cellular_data, which is a public header every vendor driver embeds. it seems the cost is small, but its paid by every modem_cellular user. So I wonder if it d better to gate the whole feature behind a CONFIG_MODEM_CELLULAR_NEIGHBOR_CELLS
+
+*--- zafersn (2026-09-17 17:45:55+00:00)
+the -ENOMEM contract copies nothing and reports the available count. is this intentional? In some cases, it might be preferable to "copy what fits, return the total" instead
+
+*--- zafersn (2026-09-17 18:00:09+00:00)
+As far as I can see, this looks quite aggressive, since the default value of MODEM_CELLULAR_PERIODIC_SCRIPT_MS is only 2 seconds. In my experience, searching for neighboring cells can take quite a bit of time. I'd make the neighbour poll opt-in (Kconfig), or give it its own slower cadence. also worth checking that the periodic script's 4 s timeout still comfortably covers the longer response at 115200 over CMUX.

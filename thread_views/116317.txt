@@ -1,0 +1,41 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116317
+TITLE: dap: report a connect failure when the port cannot be enabled
+
+*--- opening post by leonardojc90 (2026-08-14 12:46:55+00:00)
+## Why this change
+
+`swdp_port_on()` returns an error code, but `dap_connect()` ignores it and always answers `DAP_PORT_SWD`. So when the debug port cannot be enabled — for example the driver fails to configure its pins, or the port is not available at that moment — the host is told the connect worked. It then starts a debug session in which every transfer fails, and nothing on the wire explains why.
+
+The CMSIS-DAP protocol already defines the correct answer: the `DAP_Connect` response byte is the port that was actually initialized, and `0` (`DAP_PORT_DISABLED`) means the connect failed. Hosts handle this today — pyOCD and OpenOCD both check the response byte and abort cleanly when it is 0.
+
+The stale state left behind is a problem of its own, in two ways:
+
+- a later `DAP_Disconnect` calls `swdp_port_off()` for a port that was never turned on — an unbalanced release the driver can only report as an error on an already-failed path;
+- a retried `DAP_Connect` returns early on the still-set `DAP_STATE_CONNECTED` bit instead of attempting the port again, so a single failed enable wedges the connect path until reset.
+
+## What changed
+
+Check the return of `swdp_port_on()`. On failure, answer `DAP_PORT_DISABLED` and clear `DAP_STATE_CONNECTED` and `ctx->debug_port`, so both a disconnect and a retried connect behave correctly afterwards.
+
+## Testing
+
+Verified on hardware with a probe firmware whose swdp driver can refuse `port_on()` (shared pins held by another interface): with the fix, the failed connect answers 0, no unbalanced `port_off` follows, and a later `DAP_Connect` succeeds once the pins are free; without the fix, the same situation answers 1 and the host proceeds into a dead session.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+*--- jfischer-no (2026-08-14 15:26:52+00:00)
+`if (swdp_port_on(ctx->dev) != 0) {`
+
+*--- jfischer-no (2026-08-14 15:29:08+00:00)
+I thin it should be `port = DAP_ERROR;`
+
+*--- leonardojc90 (2026-08-14 15:46:47+00:00)
+Done in c80831b.
+
+*--- leonardojc90 (2026-08-14 15:47:00+00:00)
+I looked at what this byte means to hosts before picking it, and I believe `DAP_PORT_DISABLED` is the safer answer here:
+
+- The spec defines the `DAP_Connect` response as the **selected port**, with 0 meaning the connect failed; the reference implementation answers `DAP_PORT_DISABLED` on its no-port path as well ([DAP.c L263-L268](https://github.com/ARM-software/CMSIS-DAP/blob/main/Firmware/Source/DAP.c#L263-L268)).
+- pyOCD treats exactly 0 as the failure answer ([cmsis_dap_core.py L239-L241](https://github.com/pyocd/pyOCD/blob/main/pyocd/probe/pydapaccess/cmsis_dap_core.py#L239-L241)) and then converts any non-zero byte into its `PORT` enum ([dap_access_cmsis_dap.py L918-L919](https://github.com/pyocd/pyOCD/blob/main/pyocd/probe/pydapaccess/dap_access_cmsis_dap.py#L918-L919)) — so `DAP_ERROR` (0xFF) would escape as a `ValueError` from the enum conversion instead of its intended "DAP_CONNECT failed" error. OpenOCD compares the byte against the requested mode, so it fails cleanly with either value.
+
+Happy to switch it if you prefer `DAP_ERROR` for consistency with the JTAG-unsupported case above, but by the same argument that case seems to be the one worth aligning to 0 eventually.

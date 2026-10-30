@@ -1,0 +1,75 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109456
+TITLE: drivers: i2c: dw: rebuild target mode IC_CON
+
+*--- opening post by puneetdixit200 (2026-05-20 05:49:16+00:00)
+Fixes #109178.
+
+## Summary
+
+- Rebuild DesignWare target-mode `IC_CON` from a zeroed value instead of preserving the previous hardware register contents.
+- Set `addr_slave_10bit` only when `I2C_TARGET_FLAGS_ADDR_10_BITS` is requested by the target configuration.
+- Keep target-mode speed programming explicit and add a unit test for the target-mode `IC_CON` helper.
+
+## Validation
+
+- `git diff HEAD^..HEAD --check`
+- `scripts/checkpatch.pl --git HEAD --no-signoff`
+- `/tmp/zephyr-venv-109178/bin/python scripts/ci/check_compliance.py -c upstream/main..HEAD -m Checkpatch -m GitDiffCheck -m Nits -m LicenseAndCopyrightCheck -m TextEncoding -m BinaryFiles -m YAMLLint -m CMakeStyle`
+- Direct host compile/run of `drivers/i2c/i2c_dw_con.h` helper assertions with Apple `cc`.
+
+## Known draft blockers
+
+- DCO/Identity is intentionally unresolved because Zephyr's AI contribution guidance says AI agents must not add `Signed-off-by` tags. The human submitter needs to amend this commit with a real author email and their own `Signed-off-by` line before marking the PR ready for review.
+- `twister -T tests/unit/i2c_dw_target_con` was attempted locally. Default Twister requires Zephyr SDK, which is not installed on this machine. With `ZEPHYR_TOOLCHAIN_VARIANT=host`, AppleClang fails in ztest iterable-section attributes on Mach-O before running this test.
+
+AI assistance disclosure: OpenAI GPT-5.
+
+*--- puneetdixit200 (2026-05-25 21:03:42+00:00)
+Pushed `6a9d955e87` to address the failing Twister shard.
+
+The failure was `drivers.i2c.dw.target_con` on `unit_testing/unit_testing` with `No prj.conf file(s) was found` for the new `tests/unit/i2c_dw_target_con` directory. I added the same minimal unit-test config used by nearby unit tests:
+
+```text
+CONFIG_ZTEST=y
+```
+
+Verification:
+- `git diff --check HEAD~1..HEAD`
+- checked the failing `twister-build (8)` log for the exact test ID and CMake error
+
+I could not run `west twister` locally from this sparse checkout because the local Zephyr tooling is not installed here. The new CI run is starting on the pushed head.
+
+*--- puneetdixit200 (2026-05-28 01:46:19+00:00)
+Rebased this branch onto current `main` (`e07c8cf4d64`) and force-pushed the replayed PR commit as `e02f08fc58`.
+
+The only conflict was in `i2c_dw_slave_register()`. I kept the PR change that passes `cfg->flags` into the rebuilt target-mode `IC_CON` path, and also kept upstream's new `DW_INTR_MASK_START_DET` interrupt mask bit.
+
+Local verification:
+- `git diff --check upstream/main...HEAD`
+- checked the touched I2C driver/test paths for conflict markers
+
+The local checkout is sparse and this machine does not have `west` installed, so I did not run Twister locally. GitHub has started the new Manifest and PR assignment checks on the pushed head.
+
+*--- puneetdixit200 (2026-05-28 01:57:19+00:00)
+Follow-up: I force-pushed the replayed branch again as `ee00eea4ea` after rechecking Zephyr's AI-assistance guidance and local checkpatch behavior. The code resolution is unchanged from the rebase: `i2c_dw_slave_register()` keeps the PR change that passes `cfg->flags` and returns on `i2c_dw_set_slave_mode()` errors, and also keeps upstream `DW_INTR_MASK_START_DET` in the target interrupt mask.
+
+Local checks on `ee00eea4ea`:
+
+```text
+git diff --check upstream/main...HEAD
+scripts/checkpatch.pl --no-tree --git HEAD --no-signoff
+UV_CACHE_DIR=/Users/deepakkudi23/zephyr-109456-uv-cache PYTHONPYCACHEPREFIX=/Users/deepakkudi23/zephyr-109456-pycache uv run --with-requirements scripts/requirements-compliance.txt python scripts/ci/check_compliance.py -c upstream/main..HEAD -m Checkpatch -m GitDiffCheck -m Nits -m Licensing -m Gitlint
+```
+
+`checkpatch.pl` reports 0 errors and 0 warnings, and the selected compliance modules complete successfully. I also attempted the focused Twister scenario with `unit_testing/unit_testing` and `host/llvm`; locally it reaches CMake but errors before compiling because the standalone checkout does not generate the module Kconfig metadata expected at `twister-out/.../Kconfig/kconfig_module_dirs.cmake`.
+
+AI assistance disclosure for this conflict-resolution pass: I used OpenAI GPT-5 to help inspect the conflict and local verification output. I did not leave an `Assisted-by` commit trailer because direct Zephyr checkpatch currently reports that trailer as `BAD_SIGN_OFF`.
+
+*--- teburd (2026-06-16 17:40:56+00:00)
+Why are bitfields packed here? this is an odd attribute addition
+
+*--- teburd (2026-07-15 16:08:11+00:00)
+#113584 seems related here
+
+*--- parthitce (2026-07-17 08:18:11+00:00)
+True.  __packed on a bit-field is a no-op. Also I see same usage all across drivers/i2c/i2c_dw_registers.h.

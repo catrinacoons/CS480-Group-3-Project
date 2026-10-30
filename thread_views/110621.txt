@@ -1,0 +1,15 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/110621
+TITLE: drivers: spi: nrfx_spim: chunk transfers exceeding EasyDMA MAXCNT
+
+*--- opening post by krish2718 (2026-06-05 08:55:37+00:00)
+The reworked SPIM driver passes the whole continuous chunk returned by spi_context_max_continuous_chunk() straight to the common transfer layer, which rejects anything larger than the controller MAXCNT with -EINVAL. On SoCs with a small EasyDMA MAXCNT (e.g. nRF91 SPIM with 13 bits, max 8191 bytes) a transfer of 8192 bytes or more fails outright.
+
+The old monolithic driver used to cap the chunk to the MAXCNT limit and let the event handler walk the rest of the buffer. That behaviour was lost in the rework, so any caller pushing a buffer larger than MAXCNT now breaks. One example is the nRF70 firmware patch download, which copies the patch in 8192 byte chunks and ends up corrupting RPU memory, leading to a boot signature mismatch.
+
+Restore the cap in transfer_start() so an oversized chunk is split across multiple EasyDMA transfers, with the remainder handled by the next call from the event handler once the current chunk completes.
+
+
+Assisted-by: Cursor:Auto
+
+*--- bjarki-andreasen (2026-06-05 17:52:12+00:00)
+You can use MIN() macro to to make this a oneliner

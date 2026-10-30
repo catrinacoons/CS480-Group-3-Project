@@ -1,0 +1,58 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108315
+TITLE: samples: Bluetooth: Audio: add ARG_UNUSED to unused function parameters
+
+*--- opening post by Thalley (2026-05-01 08:27:57+00:00)
+Apply ARG_UNUSED() to unused function arguments as per the Zephyr coding guidelines
+
+Assisted-by: GitHub Copilot
+
+*--- Copilot (2026-05-04 05:36:31+00:00)
+In `security_changed()`, the success log prints `err` even though `err == 0` in this branch, and the security level parameter is ignored. This is misleading; consider printing `level` (and optionally the peer) and removing `ARG_UNUSED(level)` if you use it.
+
+*--- Copilot (2026-05-04 05:36:32+00:00)
+There is a blank line immediately after the opening brace of `tx_thread_func()`. Zephyr/kernel style generally avoids leading blank lines at the start of a block; please remove the extra empty line to prevent checkpatch-style warnings.
+
+*--- Copilot (2026-05-04 05:36:32+00:00)
+There is a blank line immediately after the opening brace of `tx_thread_func()`. Please remove the extra empty line to match the surrounding style and avoid checkpatch-style warnings.
+
+*--- Copilot (2026-05-04 05:36:32+00:00)
+`lc3_enable()` uses `rsp` only under `CONFIG_LIBLC3`. When that config is disabled, `rsp` becomes unused and may still trigger `-Wunused-parameter` warnings. Consider adding `ARG_UNUSED(rsp)` (unconditionally or in the `#else` path) to fully address the warning this PR targets.
+
+*--- Copilot (2026-05-04 05:36:32+00:00)
+In `security_changed()`, the success log prints `err` even though `err == 0` in this branch, and the actual security level is currently ignored. This makes the message misleading; consider printing `level` (and optionally the peer) and dropping `ARG_UNUSED(level)` if you do so.
+
+*--- Copilot (2026-05-04 06:23:24+00:00)
+The `connected_cb()` callback ignores the `err` status and unconditionally `bt_conn_ref()`s `conn` and signals `sem_state_change`. If the connection attempt fails (`err != 0`), this can leave `peer_conn` set incorrectly and the rest of the flow may proceed as if connected. Handle the non-zero `err` case explicitly (log and return without taking a ref / giving the connected semaphore).
+
+*--- Copilot (2026-05-04 06:23:25+00:00)
+`connected_cb()` ignores the `err` parameter but still takes a reference to `conn` and signals `sem_state_change`. On a failed connection attempt (`err != 0`), this can leave `peer.conn` set even though the link isn't established. Handle `err != 0` explicitly (log and return without `bt_conn_ref()` / semaphore give).
+
+*--- Copilot (2026-05-04 06:23:25+00:00)
+`connected_cb()` ignores the `err` status and always signals `sem_conn_state_change`. If `err != 0`, `scan_and_connect()` will continue and attempt `bt_conn_set_security(peer_conn, ...)` even though the connection failed. Handle the failure case explicitly (e.g., log, clean up/reset `peer_conn`, and avoid proceeding as if connected).
+
+*--- Copilot (2026-05-04 06:23:25+00:00)
+The `connected()` callback ignores the connection status (`err`) but still `bt_conn_ref()`s `conn`. If `err != 0` (connection failed), this can leave `default_conn` set to a non-connected object and affect later logic. Please handle `err != 0` explicitly (log/return without taking a ref).
+
+*--- Copilot (2026-05-04 06:23:25+00:00)
+In security_changed(), the success path logs `err` even though `err == 0` here, so the message is always "Security changed: 0" and the `level` argument is ignored. Consider using `level` in the log (and dropping `ARG_UNUSED(level)`) so the output reflects the actual security level change.
+
+*--- Copilot (2026-05-04 06:23:26+00:00)
+In security_changed(), the success path logs `err` even though `err == 0` in that branch, so the message is always "Security changed: 0" and the `level` argument is ignored. Consider logging `level` (and removing `ARG_UNUSED(level)`) so the message reflects the negotiated security level.
+
+*--- Thalley (2026-05-04 07:49:56+00:00)
+Not applicable for peripherals
+
+*--- Copilot (2026-05-04 07:55:09+00:00)
+`connected_cb()` now unconditionally `bt_conn_unref(peer_conn)` and sets `peer_conn = NULL`. This breaks later logic (e.g., `scan_and_connect()` expects `peer_conn` to remain valid for `bt_conn_set_security()` and discovery) and can also call `bt_conn_unref()` with `peer_conn == NULL` if the connection attempt failed before `peer_conn` was assigned. Keep the reference on success (or re-`bt_conn_ref(conn)`), and only unref/clear `peer_conn` on error/disconnect when it is non-NULL.
+
+*--- Copilot (2026-05-04 07:55:10+00:00)
+In `security_changed()`, the success log prints `err` (which is always 0 when this branch runs) while the function also receives `level`. This makes the output misleading and is likely unintended. Consider logging `level` (and then `level` is no longer unused, so `ARG_UNUSED(level)` can be dropped).
+
+*--- Copilot (2026-05-04 07:55:10+00:00)
+In `security_changed()`, the success log prints `err` (which is always 0 when this branch runs) while the function also receives `level`. This makes the output misleading and is likely unintended. Consider logging `level` (and then `level` is no longer unused, so `ARG_UNUSED(level)` can be dropped).
+
+*--- Copilot (2026-05-04 08:25:25+00:00)
+`connected_cb()` now unrefs `peer_conn` on failure without verifying that `peer_conn` is non-NULL and corresponds to the `conn` passed into the callback. Since `bt_conn_unref()` asserts on NULL, this can crash if the callback is invoked for a connection other than the one stored in `peer_conn` (similar to why `disconnected_cb()` guards with `if (conn != peer_conn) return;`). Prefer unref’ing `conn` directly on error and only clearing/unref’ing `peer_conn` when `conn == peer_conn`.
+
+*--- Copilot (2026-05-04 08:25:26+00:00)
+This PR is described as only adding `ARG_UNUSED()` for unused parameters, but this hunk also changes connection handling logic (failure path, unref, and new `-ENOTCONN` return). If these behavioral changes are intentional, the PR title/description should be updated to reflect that; otherwise, consider splitting the functional change into a separate PR to keep this one purely mechanical.

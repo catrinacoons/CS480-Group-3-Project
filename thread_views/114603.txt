@@ -1,0 +1,28 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114603
+TITLE: pm: add @since and @version to subsys_pm_device
+
+*--- opening post by nashif (2026-07-26 21:08:04+00:00)
+The subsys_pm_device group declared no @version, so neither tooling nor
+readers could tell what stability guarantees the API offers. Groups
+with no version are assumed stable by scripts/ci/check_api_compat.py
+so that it fails closed, but assuming is not the same as stating.
+
+Evidence from the tree:
+  - shipped in 15 releases since 2.7
+  - 408 in-tree users outside include/
+
+That clears the bar doc/develop/api/overview.rst sets for stable:
+in use and available in at least two development releases.
+
+358 of its users are drivers, so the device PM contract is relied on
+across the whole driver model.
+
+enum pm_device_state landed on 2021-06-03 ("pm: use enum for device PM
+states"), first released in v2.7.0.
+
+Note that stable does not mean frozen: it means backwards
+compatibility is maintained where reasonable, and that removals go
+through a deprecation period of at least two releases.
+
+Assisted-by: Claude:claude-opus-4-8
+Signed-off-by: Anas Nashif <anas.nashif@intel.com>

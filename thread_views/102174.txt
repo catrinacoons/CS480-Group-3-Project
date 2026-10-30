@@ -1,0 +1,15 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/102174
+TITLE: bluetooth: Classic: l2cap: accept peer MPS larger than TX MTU
+
+*--- opening post by lylezhu2012 (2026-01-13 10:29:59+00:00)
+Fix L2CAP configuration negotiation failure when peer device sends MPS value larger than its own TX MTU in the configuration request.
+
+This issue occurs when connecting to certain devices (e.g., iPhone) using enhanced retransmission mode with MAP or PBAP profiles. The peer may send an MPS that exceeds the TX MTU specified in the same L2CAP_CONFIGURATION_REQ packet.
+
+Instead of rejecting the configuration, adjust the MPS to match the peer's TX MTU and include the corrected value in the L2CAP_CONFIGURATION_RSP packet. This allows the connection to proceed while ensuring MPS stays within valid bounds.
+
+*--- Copilot (2026-01-13 10:33:09+00:00)
+Grammatical error in the comment. The phrase "the it's tx mtu" should be "its tx mtu". The possessive pronoun "its" does not use an apostrophe.
+```suggestion
+			 * a mps value that is bigger than its tx mtu (sent in the same
+```

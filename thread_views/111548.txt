@@ -1,0 +1,68 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111548
+TITLE: soc: infineon: edge: pse84: scope MPU regions to owning core
+
+*--- opening post by billwatersiii (2026-06-17 22:49:24+00:00)
+The PSE84 static MPU region table is shared between the Cortex-M33 and
+Cortex-M55 cores, but several of the regions only belong to one core.
+Instantiating every region on both cores wastes scarce hardware MPU
+slots. On a core with few data regions this leaves no room for
+memory-domain partitions: the default domain can no longer allocate its
+libc/malloc partitions and initialization fails with `-ENOSPC`
+(`Failed to add default memory partition (-28)` /
+`no free partition slots available`), which traps the kernel at boot and
+breaks the userspace / memory-protection tests.
+
+This scopes each single-core region to the core that actually owns it.
+
+### Changes
+
+- **`m55_allocatable_shared`** — a CM55-only nocache window; unused on
+  the CM33. Now gated to `CONFIG_CPU_CORTEX_M55`.
+- **`m33s_code` / `m33_code`** — hold the CM33 secure / non-secure code
+  images; the CM55 never executes from them. `m33_code` is additionally
+  only meaningful for a non-secure CM33 image (it is empty on the secure
+  CM33 build), so it is gated off there too. Now gated to
+  `!CONFIG_CPU_CORTEX_M55` (and, for `m33_code`,
+  `CONFIG_CPU_CORTEX_M33 && !CONFIG_TRUSTED_EXECUTION_SECURE`).
+- **`itcm` / `dtcm`** — the CM55 tightly-coupled memories; the CM33 cores
+  never access them. Now gated to `CONFIG_CPU_CORTEX_M55`.
+- **`m33_allocatable_shared`** is intentionally left on both cores, since
+  it backs shared-memory consumers and is not specific to a single core.
+
+On the secure CM33 build this reduces the static set to
+`{FLASH, SRAM, SHARED_MEMORY_33, M33S_CODE}` (4 regions), restoring the
+partition slots the default memory domain needs.
+
+### Testing
+
+- **CM55** (`kit_pse84_ai/pse846gps2dbzc4a/m55`, sysbuild,
+  `tests/kernel/mem_protect/userspace`): before — boot trap,
+  `no free partition slots available`, no tests run; after — full suite
+  passes (`userspace` 32/0/2, `userspace_domain` 4/0/0,
+  `userspace_domain_ctx` 3/0/0, `PROJECT EXECUTION SUCCESSFUL`).
+- **CM33**: verified the static region table is reduced to 4 entries
+  (`mpu_config.num_regions == 4`), so the default memory domain regains
+  its partition budget.
+
+*--- parthitce (2026-06-18 15:45:05+00:00)
+it's already compile controlled with node label. cm33 doesn't seem to have itcm and dtcm. do we need this guard?
+
+*--- parthitce (2026-06-18 15:50:08+00:00)
+Does any CM55 code read from the m33 code/data regions? read is also dropped here, not just exec
+
+*--- billwatersiii (2026-06-22 23:22:43+00:00)
+Right - the itcm/dtcm node labels only exist in the CM55 devicetree (the CM33 uses separate itcm_m33s/dtcm_m33s nodes), so the `DT_NODE_EXISTS()` guard already scopes these two entries to the CM55 build. There is no extra `CONFIG_CPU_CORTEX_M55` guard on them; `DT_NODE_EXISTS` alone is sufficient. I kept the comment above the block to make that reasoning explicit.
+
+*--- billwatersiii (2026-06-22 23:22:46+00:00)
+No CM55 code reads the CM33 code/data regions. The CM55 runs its own image out of its TCMs and the CM55 code/shared windows, and all cross-core shared data goes through the dedicated allocatable-shared windows: `m55_allocatable_shared` (mapped on the CM55) and `m33_allocatable_shared` / SHARED_MEMORY_33 (no core guard, so it stays mapped on both cores). The M33S_CODE / M33_CODE entries are CM33 code-in-SRAM windows that the CM55 neither executes nor reads, so dropping both exec and read access on the CM55 is intentional - it recovers an HW MPU region without removing any access the CM55 actually uses.
+
+*--- parthitce (2026-06-23 10:57:00+00:00)
+m33s_code is secure-only but enable on !CONFIG_CPU_CORTEX_M55, so it still maps on the non-secure CM33
+
+*--- billwatersiii (2026-06-23 18:33:36+00:00)
+Good catch. Fixed in ad05ac0: M33S_CODE is now gated on
+`CPU_CORTEX_M33 && TRUSTED_EXECUTION_SECURE` (mirroring the non-secure
+gate on M33_CODE), so it only maps on the secure CM33 and no longer maps
+on the non-secure CM33 or the CM55. I also updated the commit message to
+describe the new gating. Verified the secure M33 build still includes the
+M33S_CODE region (it shows up in the map output as before).

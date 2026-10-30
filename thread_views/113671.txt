@@ -1,0 +1,22 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113671
+TITLE: scripts: zspdx: use reuse (!) and honor REUSE.toml for license and copyright detection
+
+*--- opening post by kartben (2026-07-16 09:32:26+00:00)
+Improves `west spdx` license detection and module handling:
+
+- Load `REUSE.toml` files and surface their per-file license declarations in the generated SBOM. Drop the now redundant homebrew SPDX tag scanner (REUSE covers it)
+- Used this as an opportunity to add spdx tooling test coverage for west modules (and fixed a bug this surfaced as it wouldn't correctly attribute sources of the nested `used_module` to its own package).
+
+**False positive re: `no_header.c` intentionally missing a copyright header, since the point is to demonstrate/test that REUSE.toml provides a default one as a fallback.**
+
+*--- rettichschnidi (2026-07-16 10:28:36+00:00)
+Missed chance, subject should be: "scripts: zspdx: **re**use reuse ..."
+
+*--- kartben (2026-07-16 11:00:11+00:00)
+re-assigning to myself as spdx maintainer
+
+*--- kartben (2026-08-16 09:01:04+00:00)
+Rebased to fix merge conflict in CMakeLists.txt file
+
+*--- kartben (2026-08-17 15:01:51+00:00)
+@erwango can you please refresh your +1? Thanks!

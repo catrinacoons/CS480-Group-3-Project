@@ -1,0 +1,216 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/110679
+TITLE: samples: Bluetooth: Central plus Peripheral with notifications
+
+*--- opening post by cvinayak (2026-06-06 05:03:04+00:00)
+Add three new Bluetooth samples:
+- peripheral_gatt_notify: Peripheral that sends GATT notifications
+- central_notify_receive: Central that receives GATT notifications
+- central_peripheral_notify_send_receive: Central plus Peripheral
+
+Add bsim CI test tests/bsim/bluetooth/host/multirole_gatt_relay to verify the 3-device notification relay topology under simulation.
+
+Assisted-by: GitHub CoPilot: Claude Opus 4.6
+
+Steps to run:
+-----
+Terminal 1:
+```
+mkdir -p build/central_notify_receive
+```
+```
+cd build/central_notify_receive
+```
+```
+cmake -GNinja -DBOARD=nrf52_bsim/native ../../samples/bluetooth/central_notify_receive
+```
+```
+ninja
+```
+```
+./zephyr/zephyr.exe -s=temp -d=0
+```
+
+-----
+Terminal 2:
+```
+mkdir -p build/central_peripheral_notify_send_receive
+```
+```
+cd build/central_peripheral_notify_send_receive
+```
+```
+cmake -GNinja -DBOARD=nrf52_bsim/native ../../samples/bluetooth/central_peripheral_notify_send_receive
+```
+```
+ninja
+```
+```
+./zephyr/zephyr.exe -s=temp -d=1 -xo_drift=+100e-6
+```
+
+-----
+Terminal 3:
+```
+mkdir -p build/peripheral_gatt_notify
+```
+```
+cd build/peripheral_gatt_notify
+```
+```
+cmake -GNinja -DBOARD=nrf52_bsim/native ../../samples/bluetooth/peripheral_gatt_notify
+```
+```
+ninja
+```
+```
+./zephyr/zephyr.exe -s=temp -d=2
+```
+
+-----
+Terminal 4:
+```
+cd ../tools/bsim/bin
+```
+```
+./bs_2G4_phy_v1 -s=temp -D=3 -sim_length=600e6 -argschannel -at=40
+```
+-----
+
+Logs:
+-----
+Terminal 1:
+```
+d_00: @00:00:00.000000  *** Booting Zephyr OS build v4.4.0-4476-ga823bbf7c143 ***
+d_00: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: HW Platform: Nordic Semiconductor (0x0002)
+d_00: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: HW Variant: unknown (0x0002)
+d_00: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: Firmware: Standard Bluetooth controller (0x00) Version 4.4 Build 99
+d_00: @00:00:00.000000  [00:00:00.000,000] <wrn> bt_id: No static addresses stored in controller
+d_00: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: HCI transport: Controller
+d_00: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: Identity: FD:9E:B2:48:47:39 (random)
+d_00: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: HCI: version 5.4 (0x0d) revision 0x0000, manufacturer 0x05f1
+d_00: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: LMP: version 5.4 (0x0d) subver 0xffff
+d_00: @00:00:00.002648  [Central] Bluetooth initialized
+d_00: @00:00:00.002648  [Central] GATT Notify receive forever.
+d_00: @00:00:00.003368  [Central] Scanning successfully started
+d_00: @00:00:00.088183  [00:00:00.088,165] <wrn> bt_conn: *conn should be unreferenced and initialized to NULL
+d_00: @00:00:00.123721  [Central] Updated MTU: TX: 23 RX: 23 bytes
+d_00: @00:00:00.123721  [Central] Connected: EB:E9:0E:54:A6:09 (random)
+d_00: @00:00:00.175380  [Central] Updated MTU: TX: 247 RX: 247 bytes
+d_00: @00:00:00.176556  [Central] Updated MTU: TX: 247 RX: 247 bytes
+d_00: @00:00:00.176556  [Central] MTU exchange successful (247)
+d_00: @00:00:00.176556  [Central] Discover ...
+d_00: @00:00:00.625298  [Central] Discovered attr handle 13
+d_00: @00:00:00.625298  [Central] Subscribed to notifications
+d_00: @00:00:01.029687  [Central] Notify RX: count= 0, len= 0, rate= 0 bps.
+d_00: @00:00:02.034571  [Central] Notify RX: count= 78, len= 19032, rate= 152256 bps.
+d_00: @00:00:03.039455  [Central] Notify RX: count= 78, len= 19032, rate= 152256 bps.
+d_00: @00:00:04.075223  [Central] Notify RX: count= 78, len= 19032, rate= 152256 bps.
+d_00: @00:00:05.075719  [Central] Notify RX: count= 77, len= 18788, rate= 155879 bps.
+d_00: @00:00:05.823273  [Central] Conn params updated: int 0x0028 lat 0 to 42
+d_00: @00:00:06.075762  [Central] Notify RX: count= 72, len= 17568, rate= 145826 bps.
+d_00: @00:00:07.080646  [Central] Notify RX: count= 76, len= 18544, rate= 148352 bps.
+d_00: @00:00:08.085530  [Central] Notify RX: count= 76, len= 18544, rate= 148352 bps.
+d_00: @00:00:09.090414  [Central] Notify RX: count= 76, len= 18544, rate= 148352 bps.
+d_00: @00:00:10.091902  [Central] Notify RX: count= 75, len= 18300, rate= 146897 bps.
+```
+-----
+Terminal 2:
+```
+d_01: @00:00:00.000000  *** Booting Zephyr OS build v4.4.0-4476-ga823bbf7c143 ***
+d_01: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: HW Platform: Nordic Semiconductor (0x0002)
+d_01: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: HW Variant: unknown (0x0002)
+d_01: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: Firmware: Standard Bluetooth controller (0x00) Version 4.4 Build 99
+d_01: @00:00:00.000000  [00:00:00.000,000] <wrn> bt_id: No static addresses stored in controller
+d_01: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: HCI transport: Controller
+d_01: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: Identity: EB:E9:0E:54:A6:09 (random)
+d_01: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: HCI: version 5.4 (0x0d) revision 0x0000, manufacturer 0x05f1
+d_01: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: LMP: version 5.4 (0x0d) subver 0xffff
+d_01: @00:00:00.002648  [Multirole] Bluetooth initialized
+d_01: @00:00:00.002648  [Multirole] [Peripheral] Advertising successfully started
+d_01: @00:00:00.002648  [Multirole] [Central] Scanning successfully started
+d_01: @00:00:00.002648  [Multirole] Notify relay forever.
+d_01: @00:00:00.004908  [00:00:00.004,882] <wrn> bt_conn: *conn should be unreferenced and initialized to NULL
+d_01: @00:00:00.043467  [Multirole] Updated MTU: TX: 23 RX: 23 bytes
+d_01: @00:00:00.043467  [Multirole] Connected: DD:FD:C1:CE:9A:C0 (random) role 0
+d_01: @00:00:00.095724  [Multirole] Updated MTU: TX: 247 RX: 247 bytes
+d_01: @00:00:00.095724  [Multirole] MTU exchange successful (247)
+d_01: @00:00:00.095724  [Multirole] [Central] Discover ...
+d_01: @00:00:00.123736  [Multirole] Updated MTU: TX: 23 RX: 23 bytes
+d_01: @00:00:00.123736  [Multirole] Connected: FD:9E:B2:48:47:39 (random) role 1
+d_01: @00:00:00.175112  [Multirole] Updated MTU: TX: 247 RX: 247 bytes
+d_01: @00:00:00.176288  [Multirole] Updated MTU: TX: 247 RX: 247 bytes
+d_01: @00:00:00.176288  [Multirole] MTU exchange successful (247)
+d_01: @00:00:00.595076  [Multirole] [Central] Discovered attr handle 13
+d_01: @00:00:00.595076  [Multirole] [Central] Subscribed to notifications
+d_01: @00:00:00.775112  [Multirole] [Peripheral] Notifications enabled
+d_01: @00:00:01.002656  [Multirole] [Peripheral] Notify TX: count= 0, len= 0, rate= 0 bps.
+d_01: @00:00:01.049426  [Multirole] [Central] Notify RX: count= 0, len= 0, rate= 0 bps.
+d_01: @00:00:02.030084  [Multirole] [Peripheral] Notify TX: count= 78, len= 19032, rate= 153549 bps.
+d_01: @00:00:02.053815  [Multirole] [Central] Notify RX: count= 122, len= 29768, rate= 238260 bps.
+d_01: @00:00:03.030184  [Multirole] [Peripheral] Notify TX: count= 77, len= 18788, rate= 155874 bps.
+d_01: @00:00:03.058699  [Multirole] [Central] Notify RX: count= 123, len= 30012, rate= 240096 bps.
+d_01: @00:00:04.030284  [Multirole] [Peripheral] Notify TX: count= 77, len= 18788, rate= 151027 bps.
+d_01: @00:00:04.063583  [Multirole] [Central] Notify RX: count= 124, len= 30256, rate= 242048 bps.
+d_01: @00:00:05.030384  [Multirole] [Peripheral] Notify TX: count= 77, len= 18788, rate= 151027 bps.
+d_01: @00:00:05.068469  [Multirole] [Central] Notify RX: count= 124, len= 30256, rate= 242048 bps.
+d_01: @00:00:05.442994  [Multirole] Conn params updated: int 0x0028 lat 0 to 42
+d_01: @00:00:05.823792  [Multirole] Conn params updated: int 0x0028 lat 0 to 42
+d_01: @00:00:06.030527  [Multirole] [Peripheral] Notify TX: count= 72, len= 17568, rate= 145821 bps.
+d_01: @00:00:06.069408  [Multirole] [Central] Notify RX: count= 117, len= 28548, rate= 229286 bps.
+d_01: @00:00:07.030627  [Multirole] [Peripheral] Notify TX: count= 75, len= 18300, rate= 151907 bps.
+d_01: @00:00:07.073376  [Multirole] [Central] Notify RX: count= 124, len= 30256, rate= 242269 bps.
+d_01: @00:00:08.030727  [Multirole] [Peripheral] Notify TX: count= 75, len= 18300, rate= 151907 bps.
+d_01: @00:00:08.095980  [Multirole] [Central] Notify RX: count= 125, len= 30500, rate= 244365 bps.
+d_01: @00:00:09.030827  [Multirole] [Peripheral] Notify TX: count= 75, len= 18300, rate= 147100 bps.
+d_01: @00:00:09.100864  [Multirole] [Central] Notify RX: count= 126, len= 30744, rate= 245952 bps.
+d_01: @00:00:10.032339  [Multirole] [Peripheral] Notify TX: count= 75, len= 18300, rate= 146897 bps.
+d_01: @00:00:10.105747  [Multirole] [Central] Notify RX: count= 126, len= 30744, rate= 245952 bps.
+```
+-----
+Terminal 3:
+```
+d_02: @00:00:00.000000  *** Booting Zephyr OS build v4.4.0-4476-ga823bbf7c143 ***
+d_02: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: HW Platform: Nordic Semiconductor (0x0002)
+d_02: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: HW Variant: unknown (0x0002)
+d_02: @00:00:00.000000  [00:00:00.000,000] <inf> bt_hci_core: Firmware: Standard Bluetooth controller (0x00) Version 4.4 Build 99
+d_02: @00:00:00.000000  [00:00:00.000,000] <wrn> bt_id: No static addresses stored in controller
+d_02: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: HCI transport: Controller
+d_02: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: Identity: DD:FD:C1:CE:9A:C0 (random)
+d_02: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: HCI: version 5.4 (0x0d) revision 0x0000, manufacturer 0x05f1
+d_02: @00:00:00.002648  [00:00:00.002,624] <inf> bt_hci_core: LMP: version 5.4 (0x0d) subver 0xffff
+d_02: @00:00:00.002648  [Peripheral] Bluetooth initialized
+d_02: @00:00:00.002648  [Peripheral] Advertising successfully started
+d_02: @00:00:00.002648  [Peripheral] GATT Notify forever on connection.
+d_02: @00:00:00.043466  [Peripheral] Updated MTU: TX: 23 RX: 23 bytes
+d_02: @00:00:00.043466  [Peripheral] Connected: EB:E9:0E:54:A6:09 (random)
+d_02: @00:00:00.094824  [Peripheral] Updated MTU: TX: 247 RX: 247 bytes
+d_02: @00:00:00.694704  [Peripheral] Notifications enabled
+d_02: @00:00:01.002656  [Peripheral] Notify: count= 0, len= 0, rate= 0 bps.
+d_02: @00:00:02.004305  [Peripheral] Notify: count= 117, len= 28548, rate= 229125 bps.
+d_02: @00:00:03.004625  [Peripheral] Notify: count= 122, len= 29768, rate= 239239 bps.
+d_02: @00:00:04.009409  [Peripheral] Notify: count= 124, len= 30256, rate= 242070 bps.
+d_02: @00:00:05.014192  [Peripheral] Notify: count= 124, len= 30256, rate= 242070 bps.
+d_02: @00:00:05.442444  [Peripheral] Conn params updated: int 0x0028 lat 0 to 42
+d_02: @00:00:06.015108  [Peripheral] Notify: count= 117, len= 28548, rate= 229293 bps.
+d_02: @00:00:07.019398  [Peripheral] Notify: count= 124, len= 30256, rate= 242195 bps.
+d_02: @00:00:08.022770  [Peripheral] Notify: count= 125, len= 30500, rate= 244365 bps.
+d_02: @00:00:09.046757  [Peripheral] Notify: count= 126, len= 30744, rate= 245982 bps.
+d_02: @00:00:10.051541  [Peripheral] Notify: count= 126, len= 30744, rate= 245982 bps.
+```
+
+*--- Thalley (2026-06-08 08:03:51+00:00)
+@cvinayak What are the purpose of these samples? We already have samples that perform these GATT operations, do we not?
+
+*--- cvinayak (2026-06-08 19:41:06+00:00)
+The sample is intended to cover multirole usecase similar to wireless split keyboards; analysis related to https://github.com/zmkfirmware/zmk/pull/3370#issuecomment-4585155386
+
+I suspect regression in Zephyr Bluetooth Controller after v3.5.0.
+
+*--- Thalley (2026-06-09 07:53:35+00:00)
+> The sample is intended to cover multirole usecase similar to wireless split keyboards; analysis related to [zmkfirmware/zmk#3370 (comment)](https://github.com/zmkfirmware/zmk/pull/3370#issuecomment-4585155386)
+> 
+> I suspect regression in Zephyr Bluetooth Controller after v3.5.0.
+
+The multi-role response somewhat covers why the central_peripheral_notify sample is being added, but why the other 2? 
+
+And if this is to find and fix a regression, wouldn't it be better with just a test rather than a sample that more or less just does the same as other samples we have?

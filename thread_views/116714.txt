@@ -1,0 +1,17 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116714
+TITLE: cmake: flash: remove deprecated flash/debug/attach/rtt targets
+
+*--- opening post by kartben (2026-08-19 07:20:13+00:00)
+Removes the CMake `flash`, `debug`, `debugserver`, `attach` and `rtt` generator targets, deprecated in Zephyr 4.3 by #93985. 
+
+Use the equivalent `west` commands instead. `west build -t <target>` and `ninja <target>` are the same mechanism, so both spellings are affected.
+
+Also drops `cmake/flash/check_runner_dependencies.cmake` and the `RUNNERS_DEPS` variable, which only served the removed targets, and updates the docs that told users to run `ninja flash` / `ninja debug` / `ninja attach`.
+
+> [!NOTE]
+> Note that this never got a release note entry when it was deprecated, maybe should have so as to make everyone aware the ability to flash/debug/attach/rtt without west was going away?
+
+*--- fabiobaltieri (2026-08-27 11:21:15+00:00)
+> Yeah, I wasn't even aware these were deprecated. I am curious as to why?
+
+Because Torsten said so. https://github.com/zephyrproject-rtos/zephyr/pull/92406#pullrequestreview-3074389981

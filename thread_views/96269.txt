@@ -1,0 +1,34 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/96269
+TITLE: Add architecture documentation (zephyr_architecture_Diagram.md)
+
+*--- opening post by Nithinnithu0610 (2025-09-19 09:02:49+00:00)
+This PR adds a new Markdown file under `doc/architecture/` that documents the Zephyr technical architecture.
+
+- Provides high-level system overview
+- Helps contributors and users understand the project structure
+- Complements existing developer documentation
+
+*--- Nithinnithu0610 (2025-09-19 09:03:39+00:00)
+Hello Maintainers,
+
+I have added a new architecture documentation file (doc/architecture/zephyr_architecture_Diagram.md) as part of my contribution.
+This document provides a high-level overview of Zephyr’s architecture for easier understanding and future reference.
+
+Kindly review this PR and let me know if any improvements or changes are required.
+
+Thank you for your time and guidance! 🙏
+
+— Nithin H (GitHub: @nithinnithu0610)
+
+*--- pdgendt (2025-09-19 09:13:52+00:00)
+I don't think this should live alongside the existing documentation. Also feels 🤖-generated...
+
+*--- kartben (2025-09-20 08:13:42+00:00)
+@Nithinnithu0610 thanks for the contribution. Given we use neither mermaid (but might one day) nor Markdown we can't really accept this PR.
+
+I don't necessarily mind you using an LLM to look at ways to improve our docs but I would suggest your work towards incrementally improving our existing doc pages.
+
+I'll probably close this PR in a few days unless you want to update it with changes more align with our current doc style and doc infrastructure. Thank you!
+
+*--- kartben (2025-09-22 12:26:30+00:00)
+please feel free to re-open or open a new issue at a later date, and take some time to go through our contribution and documentation guidelines as well. Thanks!

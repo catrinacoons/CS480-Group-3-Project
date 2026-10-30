@@ -1,0 +1,25 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/95213
+TITLE: boards: shields: Add Adafruit DRV2605L haptics driver shield
+
+*--- opening post by pyhys (2025-08-30 21:23:06+00:00)
+Product photo from https://learn.adafruit.com/assets/122966 with license CC BY-SA 3.0
+
+Tested with the command mentioned in the index.rst page.
+
+*--- kartben (2025-08-30 21:37:03+00:00)
+would be nice to use an alias in the sample, but this is of course very much out of scope for this PR
+
+*--- Copilot (2025-08-30 21:37:41+00:00)
+The tag 'sensors' is incorrect for a haptics driver. Haptic devices are actuators, not sensors. Consider using 'haptics' or 'actuators' as the tag instead.
+```suggestion
+    tags: haptics
+```
+
+*--- kartben (2025-08-30 21:39:41+00:00)
+nope :)
+
+*--- pyhys (2025-08-30 21:48:36+00:00)
+@kartben  I think it is a valid point. Should I change it to "haptics"?
+
+*--- kartben (2025-08-30 22:00:13+00:00)
+ohhh -- of course! I read too quickly thought it was making a suggestion to do it the other way around, and that you had initially `haptics` already. So yes, please!

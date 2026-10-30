@@ -1,0 +1,47 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111395
+TITLE: doc: security: split vulnerabilities by year
+
+*--- opening post by d3zd3z (2026-06-16 14:03:17+00:00)
+The vulnerabilities page had grown to over 2400 lines covering every CVE since
+2017, making the current year's entries hard to find. This change moves each
+previous year (2017, 2019–2025) into its own page under
+`doc/security/vulnerabilities/` and links to them from a toctree at the top of
+the main page, which now shows only the current year (2026).
+
+It also gives the 2026 entries a proper CVE-2026 section heading; they had
+previously been listed under the CVE-2025 header.
+
+This is a docs-only reorganization with no content changes to the individual
+CVE entries. It is split out from the CVE-disclosure work into its own PR
+because the large file move would otherwise trip the compliance/size review.
+
+https://builds.zephyrproject.io/zephyr/pr/111395/docs/security/vulnerabilities.html
+
+*--- d3zd3z (2026-06-16 14:05:49+00:00)
+This will fail conformance as it will see "changes" for old vulnerabilities which will have references to out of date Kconfigs.
+
+*--- Copilot (2026-06-16 14:07:37+00:00)
+Duplicate word in this sentence ("performs performs"). Please remove the repetition to avoid a typo in the CVE description.
+
+*--- Copilot (2026-06-16 14:07:38+00:00)
+Missing space after the period in "address.This".
+
+*--- Copilot (2026-06-16 14:07:38+00:00)
+The displayed PR numbers don't match the linked PR IDs (e.g., "PR 47957" links to /pull/55024). This makes the references confusing and likely incorrect; please align the visible PR numbers with the URLs.
+
+*--- Copilot (2026-06-16 14:07:38+00:00)
+The displayed PR number doesn't match the linked PR ID ("PR 47959" links to /pull/55022). Please align the visible PR number with the URL.
+
+*--- Copilot (2026-06-16 14:07:39+00:00)
+Link text says PR32808, but the URL points to /pull/26571. This looks like a copy/paste error and likely breaks the reference; please make the URL match the PR number.
+
+*--- d3zd3z (2026-06-16 15:20:04+00:00)
+> non-blocking but the TOC is a bit awkward with 2026 at the bottom and not following the same order as the others
+> <img alt="Image" width="235" height="360" src="https://private-user-images.githubusercontent.com/128251/608649468-49031994-ab46-41c5-9f39-67fba4b7b893.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3ODE2MjMwMzAsIm5iZiI6MTc4MTYyMjczMCwicGF0aCI6Ii8xMjgyNTEvNjA4NjQ5NDY4LTQ5MDMxOTk0LWFiNDYtNDFjNS05ZjM5LTY3ZmJhNGI3Yjg5My5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwNjE2JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDYxNlQxNTEyMTBaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT05NjFmMDVlNDAwMzcxYjk3ZjEwNzU3OTgyNDk3ODlkZjUwMjViNmNiODM2MjE5ZDJkMzI4Y2JjMGVjMjVhZWUxJlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.tQ1Vkz3JMxoW3ubqqfY_Irb94zXfMs_7fVVPucY2fJQ">
+
+I'm not actually sure what to do about this. The toc doesn't have 2026 as that is just below, and the renderer seems to put the TOC at the top above the one at the bottom. I suppose the easiest fix is to just reverse the order of the toc.
+
+*--- d3zd3z (2026-06-16 15:23:43+00:00)
+> I'm not actually sure what to do about this. The toc doesn't have 2026 as that is just below, and the renderer seems to put the TOC at the top above the one at the bottom. I suppose the easiest fix is to just reverse the order of the toc.
+
+I just reversed the TOC so it all should be coherent. No changes otherwise.

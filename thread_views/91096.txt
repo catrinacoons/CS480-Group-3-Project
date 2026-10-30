@@ -1,0 +1,550 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/91096
+TITLE: Border router sample code
+
+*--- opening post by Cristib05 (2025-06-05 05:29:57+00:00)
+This is a first sample of Border Router functionality that we want to implement.
+Added a new application for OpenThread Border Router.
+
+### Known issues and missing stuff in this initial implementation:
+* OpenThread is not processing messages from AIL on its own context. Message queues and events signaling should be implemented.
+* Newly added files do not contain a full implementation; minimum work was done at POC level as this is an experimental feature for the moment.
+
+### Testing the implementation
+
+The setup is very simple: An RW612 device that acts as a Border Router, an OpenThread node and a Linux host machine (used for initiating ping requests). The Border Router acts as the network leader, the other OpenThread node is a router and is also subscribing a multicast address to the BR.
+For this proposed PR, testing consists in creating a network and being able to ping the BR and the OpenThread node from the Linux host.
+
+*--- Cristib05 (2025-06-05 05:32:25+00:00)
+Related to #90850
+
+*--- jukkar (2025-06-05 07:08:48+00:00)
+typo s/OpenThrea/OpenThread/
+
+*--- jukkar (2025-06-05 07:11:46+00:00)
+The last sentence is probably not needed, net-shell is useful to have here for a sample that is basically just enabling options etc., so no need to specifically mention it.
+
+*--- jukkar (2025-06-05 07:13:19+00:00)
+Do not enable debugging automatically in the board file. If you want to set debugging options, create a overlay file for those setting so that they are in one place and can be enabled for all the boards.
+
+*--- jukkar (2025-06-05 07:14:58+00:00)
+Why this sample is placed under wifi directory, now it gives impression that it is only available for wifi
+
+*--- jukkar (2025-06-05 07:16:00+00:00)
+remove extra empty line
+
+*--- Cristib05 (2025-06-05 07:21:15+00:00)
+As I said, this sample was used for the sake of simplicity, I wanted something that already had wifi integrated, so I thought this was the fastest approach. Sample can be moved somewhere else, I used it here just for the reason mentioned above
+
+*--- Cristib05 (2025-06-05 07:22:24+00:00)
+This file was copied as is from existing wifi/shell application.
+
+*--- Cristib05 (2025-06-05 07:31:33+00:00)
+Maybe a better solution will be to create a Border router sample which will eventually have 2 subdirectories, like wifi and ethernet, or just a border router sample and .conf files for specific needed interface.
+
+*--- Cristib05 (2025-06-05 09:04:40+00:00)
+Also tagging @rlubos for feedback.
+
+*--- rlubos (2025-06-05 09:18:05+00:00)
+A general note - please don't modify existing code base if not necessary, it makes the actual meaningful changes hard to reveiw.
+
+*--- rlubos (2025-06-05 09:24:30+00:00)
+The file implements OpenThread platform API - wouldn't it belong to `modules/openthread/platform`?
+
+*--- rlubos (2025-06-05 09:26:44+00:00)
+Please avoid magic numbers, we have a symbol for it in `icmpv.6`: `NET_ICMPV6_RA`
+
+*--- pdgendt (2025-06-05 09:27:13+00:00)
+Pulled in all OpenThread area collaborators as reviewers.
+
+*--- rlubos (2025-06-05 09:28:44+00:00)
+Instead of semi-blindly selecting BR interface, perhaps we could have a Kconfig option to configure the interface name to use? That should be more future-proof.
+
+*--- rlubos (2025-06-05 09:29:37+00:00)
+note: Zephyr CS requires C-style comments to be used.
+
+*--- rlubos (2025-06-05 09:33:30+00:00)
+I think I would prefer if we extract these BR-specific code into a separate source file to avoid this massive ifdef-sclicing and to keep the "core" OT L2 implementation concise.
+
+*--- rlubos (2025-06-05 09:36:56+00:00)
+We have a common `platform-zephyr.h` header, maybe just move the declarations there instead of having those litlle header files with only init in it?
+
+*--- rlubos (2025-06-05 09:51:40+00:00)
+I think we can handle mDNS like this for the initial implementation, but at least we need to add Kconfig dependency to `OPENTHREAD_BORDER_ROUTER` option so that it won't be possible to enable it together with native mDNS resolver/responder as it wont work. Something like:
+```
+depends on !MDNS_RESPONDER
+depends on !MDNS_RESOLVER
+```
+
+*--- rlubos (2025-06-05 10:00:29+00:00)
+I wonder if we could avoid heap dependency in OT platform, perhaps a mutex-protected static buffer shared between platoform modules (mDNS/UDP)? Just an idea.
+
+*--- rlubos (2025-06-05 10:02:48+00:00)
+Is there anything to implement in this case though? If remote port or address in unspecified, we don't really have a peer to connect to. IMHO that's an error condition.
+
+*--- rlubos (2025-06-05 10:03:27+00:00)
+`default n` is unnecessary, it's implicit.
+
+*--- rlubos (2025-06-05 10:04:31+00:00)
+I think we should have single sample, in openthread directory, and the backbone interface to use should be configured with Kconfig, as I stated in some earlier comment.
+
+*--- Cristib05 (2025-06-05 10:13:53+00:00)
+Will do that as a later step, for now I just focused on providing something to discuss on, I will address all coding style.
+
+*--- Cristib05 (2025-06-05 10:15:52+00:00)
+Ok, I will think about that. Any reason to avoid heap dependency, except possible memory leaks?
+
+*--- Cristib05 (2025-06-05 10:18:29+00:00)
+I know and I tried to avoid this as much as possible; I need to disable my VSCode pretty format extension when working on this. :(
+
+*--- Cristib05 (2025-06-05 10:19:45+00:00)
+I think I decided to move it here for the moment because I was not able to include <route.h>. But I plan to move it where it belongs. For the moment I was more curios to get some feedback on the approach.
+
+*--- rlubos (2025-06-05 10:20:56+00:00)
+I'm not really worried about memory leaks, choosing a valid heap size is just another variable that need to be taken into account when configuring application, especially when there are other heap users in the system, and any mistakes here will only show up in runtime. Fixed buffers just work regardless of other system components.
+
+*--- Cristib05 (2025-06-05 10:21:26+00:00)
+Do you think it will be a good idea to create a new file 'openthread_border_router' and move all related core there? Should it reside in net/l2/openthread? Where do you think it will be more suitable?
+
+*--- Cristib05 (2025-06-05 10:23:38+00:00)
+I was under the impression that this case handles the disconnect case.
+
+*--- Cristib05 (2025-06-05 10:24:31+00:00)
+should we do 'default y if CONFIG_OPENTHREAD_BORDER_ROUTING'?
+
+*--- rlubos (2025-06-05 10:27:04+00:00)
+It's probably just a matter of adding the include path in the OT platform CMakeLists.txt file, something like:
+```
+if(CONFIG_OPENTHREAD_BORDER_ROUTER)
+  zephyr_library_include_directories(${ZEPHYR_BASE}/subsys/net/ip)
+endif()
+```
+
+*--- rlubos (2025-06-05 10:32:13+00:00)
+Yes, I think we should have those in a separate file. About the location - I have mixed feelings there, on one hand it makes sense to keep it close to other OpenThread files under `net/l2/openthread`, but on the other hand, we're not really implementing L2 here anymore... I would say to keep it under `net/l2/openthread` for now for simplicity, not sure how large this OTBR integration would eventually be - if it grows, we can consider creating a separate lib for it.
+
+*--- rlubos (2025-06-05 10:37:36+00:00)
+Ah, you're right, providing unspecified address to `net_context_connect()` just resets the remote address, I don't think any extra handling is needed though, just pass it to `net_context_connect()`.
+
+*--- rlubos (2025-06-05 10:42:51+00:00)
+That's one option, or `imply NET_ROUTING` from OTBR config.
+
+A side note, one reflection about Kconfig that came to me - I wonder if we shall separate Zephyr's OTBR implementation from the actual `CONFIG_OPENTHREAD_BORDER_ROUTING` option. The latter enables OTBR functionality in the OT stack - perhaps someone would need to use that w/o enabling OTBR features on the Zephyr side (for example to enable his own OTBR implementation). Maybe we need to introduce a new Kconfig option to for Zephyr's OTBR impelmentatation, that would then select/imply all other prerequisites on Zephyr's/OT side.
+
+*--- Cristib05 (2025-06-05 10:43:42+00:00)
+Beside this heap subject, is it ok to use net_context API instead of BSD sockets and using select? For me, this approach is more reasonable. I was thinking to create a message queue which will be processed alongside ot tasklets. And this approach would be used as well by other modules, like udp_platform, TREL, whatever will be implemented. Thoughts?
+
+*--- Cristib05 (2025-06-05 10:45:12+00:00)
+Sounds good, I have to study a little bit more on this subject to fully understand those configurations.
+
+*--- rlubos (2025-06-05 10:57:42+00:00)
+I was thinking about this as well. In general, it's not a big issue to use `net_context` if we need async API, however we lose the advantage of using well-known API. If you prefer to use socket API, I think we already have the functionality you need, called `socket_services`:
+https://docs.zephyrproject.org/latest/connectivity/networking/api/socket_service.html
+If enabled, it allows to register a socket with a callback func to be polled by an internal thread, and whenever new data arrives on a socket, the callback function is called so the user can read it from the socket.
+
+*--- jukkar (2025-06-05 11:26:12+00:00)
+We have already mDNS resolver and responder APIs then they can even be used at the same time. Why we are not using those API here?
+
+*--- Cristib05 (2025-06-10 12:45:10+00:00)
+Is `config OPENTHREAD_ZEPHYR_BORDER_ROUTER` a good option to be placed in zephyr/modules/openthread/Kconfig?
+
+*--- rlubos (2025-06-10 12:56:57+00:00)
+Sounds fine
+
+*--- Cristib05 (2025-06-11 05:35:37+00:00)
+Initial rework based on received feedback.
+
+*--- Cristib05 (2025-06-11 08:08:17+00:00)
+> I wonder if we could avoid heap dependency in OT platform, perhaps a mutex-protected static buffer shared between platoform modules (mDNS/UDP)? Just an idea.
+
+How about using `NET_BUF_POOL_DEFINE` with a configurable number of buffers from Kconfig? Calls to `net_buf_alloc` and `net_buf_unref` should be protected with a mutex. I am not quite sure what would be the ideal buffer size, I was thinking of max UDP MTU, but 1.5k is a bit too much. I've seen that mDNS responder implementation has a value of  512 bytes as per RFC 1035. Thoughts on this?
+
+*--- rlubos (2025-06-11 08:23:39+00:00)
+Using a predfined memory pool could also be an option, but I don't think we need a complexity of net buffers for this, it has an extra memory overhead and we won't really be using features like fragmentation here. Perhaps a simple mem slab would be a better option:
+https://docs.zephyrproject.org/latest/kernel/memory_management/slabs.html
+
+*--- rlubos (2025-06-11 11:00:37+00:00)
+nit: Alignment (should be on tab and two extra spaces for help text)
+
+*--- rlubos (2025-06-11 11:07:58+00:00)
+That would create an include cycle, as `zephyr/net/openthread.h` already includes this header. 
+
+I wonder if those new declaration wouldn't belong to `zephyr/net/openthead.h` instead, the idea behind having two separate headers was:
+* This header - functions for bare-bone OpenThread support, i. e. not needing Zephyr's network stack to be enabled to work
+* `zephyr/net/openthread.h` - OpenThread integration with Zephyr's network stack.
+
+*--- rlubos (2025-06-11 11:09:17+00:00)
+That should still use `CONFIG_OPENTHREAD_ZEPHYR_BORDER_ROUTER` I think?
+
+*--- rlubos (2025-06-11 11:12:32+00:00)
+Why do we have those functions here and not in `openthread_border_router.c`? I think it'd be better to keep all border router related functionality (non-platform) together.
+
+*--- rlubos (2025-06-11 11:18:14+00:00)
+A general note, we typically keep all local variable definitions on top of the block, w/o extra empty lines inbetween.
+
+*--- rlubos (2025-06-11 11:19:24+00:00)
+And Zephyr CS requires an empty line after a variable definition (unless it's another definition).
+
+*--- rlubos (2025-06-11 11:19:58+00:00)
+Please use true/false for boolean values.
+
+*--- rlubos (2025-06-11 11:23:27+00:00)
+Out of curiosity - do you still plan to explore sockets/socket_services option?
+
+*--- rlubos (2025-06-11 11:26:10+00:00)
+Is this the right palce for those declarations? The functions are defined in `net/l2/openthread/openthread_border_router.c`, not platform.
+
+*--- rlubos (2025-06-11 11:30:36+00:00)
+Please remove those empty lines.
+
+*--- rlubos (2025-06-11 11:32:14+00:00)
+This actually should be done unconditionally even if BR isn't enabled, had some discussion in https://github.com/zephyrproject-rtos/zephyr/pull/89248#issuecomment-2865983249
+
+Plus I think we need to take NAT64-translated packets into cosideration, so something like
+`net_pkt_set_ll_proto_type(pkt, PKT_IS_IPv4(pkt) ? ETH_P_IP : ETH_P_IPV6);`
+
+*--- rlubos (2025-06-11 11:35:22+00:00)
+I think we've discussed this already, it would be nice if the backbone interface could be configured with Kconfig (for instance by name) instead of hardcoding the first Ethernet interface encountered.
+
+*--- rlubos (2025-06-11 11:35:36+00:00)
+Why is this actually needed?
+
+*--- rlubos (2025-06-11 11:39:03+00:00)
+The diff in this file needs some cleanup, it's hard to tell what actually changed here (did anything actually beside this include?).
+
+*--- rlubos (2025-06-11 11:42:21+00:00)
+Perhaps add `openthread_stop_border_router_services()` for consistency?
+
+*--- rlubos (2025-06-11 11:45:56+00:00)
+`snake_case` in Zephyr code please.
+
+*--- rlubos (2025-06-11 11:48:50+00:00)
+I would consider making it a more generic `openthread_border_router_init()` - it could install all the callbacks, but also for example I would consider initializaing a pointer to the backbone interface in there, so it can be done once, and then used in the code instead of having to call `net_if_get_first_by_type()` or another here and there.
+
+*--- rlubos (2025-06-11 11:49:11+00:00)
+The file is already conditionally compiled, so this is redundant.
+
+*--- Cristib05 (2025-06-11 12:02:44+00:00)
+yes, saw it now, error from my side.
+
+*--- Cristib05 (2025-06-11 12:08:00+00:00)
+pointer to backbone interface was also on my TODO list. I will rename it as per your proposal.
+
+*--- Cristib05 (2025-06-11 12:08:40+00:00)
+it is, I copy-pasted and forgot to remove the statement.
+
+*--- Cristib05 (2025-06-11 12:08:54+00:00)
+sure, will do
+
+*--- Cristib05 (2025-06-11 12:10:50+00:00)
+I don't think it is actually needed, but at first when I have started developing, I had in mind that backbone interface should be the default interface.
+
+*--- Cristib05 (2025-06-11 12:12:16+00:00)
+I was planning to do this; I did not forget about it. I just have to take some time to understand how to do it.
+
+*--- Cristib05 (2025-06-11 12:15:55+00:00)
+I will take time to format all the files. I am planning to do this as last task.
+
+*--- Cristib05 (2025-06-11 12:17:01+00:00)
+I was not planning, or at least for this moment, but if you think we should take that approach, I will. Please let me know.
+
+*--- rlubos (2025-06-11 12:24:17+00:00)
+No need to do it now, I was just curious - we can always update in the future if needed.
+
+*--- Cristib05 (2025-06-11 12:25:21+00:00)
+I will move them
+
+*--- Cristib05 (2025-06-11 12:30:06+00:00)
+For the moment, I would like to keep it as it is. From my understanding, socket services require an additional thread that monitors incoming packets and notifies. `net_context_recv` has a `net_context_recv_cb_t` which can be used to allocate a buffer from a slab and process it on existing `openthread_process` function. My initial idea was to add under border router define calls to udp/mdns processing under `otSysProcessDrivers`
+
+*--- Cristib05 (2025-06-11 12:33:39+00:00)
+Could we please define what would be the minimum for this PR to be integrated and become a starting point for future functionalities which will be added in specific PRs? Is it too early to have this discussion?
+
+*--- rlubos (2025-06-11 12:53:11+00:00)
+> Could we please define what would be the minimum for this PR to be integrated and become a starting point for future functionalities which will be added in specific PRs? Is it too early to have this discussion?
+
+I'm personally in favour of an incremental approach rather than putting every single piece of BR functionality into a single PR. Having a fucntional sample, where you are able to ping OT node from an outside network, as you wrote in the description, seems like a good starting point IMHO.
+
+*--- rlubos (2025-06-11 12:55:06+00:00)
+Forgot that earlier - I think we should mark this feature as experimental for now:
+```suggestion
+	bool "Enables support for Border Router functionality [EXPERIMENTAL]"
+	select EXPERIMENTAL
+```
+
+*--- Cristib05 (2025-06-11 12:58:50+00:00)
+> > Could we please define what would be the minimum for this PR to be integrated and become a starting point for future functionalities which will be added in specific PRs? Is it too early to have this discussion?
+> 
+> I'm personally in favour of an incremental approach rather than putting every single piece of BR functionality into a single PR. Having a fucntional sample, where you are able to ping OT node from an outside network, as you wrote in the description, seems like a good starting point IMHO.
+
+Then maybe I should remove platform files like udp/mdns, etc.. and focus on what you have just described. I will let in this draft only what is of interest for reaching OT network from backbone interface and then start an incremental approach.
+
+*--- Cristib05 (2025-06-13 13:31:51+00:00)
+Updated some changes I have managed to do, unfortunately not all that have been discussed. Tried to add only what would be considered as initial version of this project. @rlubos , I will be OOO next week, there will be some delay from my side.
+
+*--- Cristib05 (2025-07-11 08:53:42+00:00)
+removed this
+
+*--- Cristib05 (2025-07-11 10:02:46+00:00)
+Hi @rlubos, I have made some changes based on the recevied feedback. Can you please let me know your thougths now?
+On my side, I still have to figure how to configure backbone interface name from Kconfig (still not clear at this moment) and have a look at memory slabs for storing messages from backbone and process them on OT context (for infrastructure interface for the moment). Please let me know if this can be done in next step where I plan to implement platform UDP module and other modules needed for a Border Router. Thanks!
+
+Also, I cannot understand for the moment the coding style errors, can you please have a look? On my local setup, running the compliance has not shown both errors mentioned on PR.
+
+*--- rlubos (2025-07-11 10:46:40+00:00)
+> Also, I cannot understand for the moment the coding style errors, can you please have a look? On my local setup, running the compliance has not shown both errors mentioned on PR.
+
+TBH both errors look like a false positives to me but are fixable.
+
+>  SPACING: need consistent spacing around '*' (ctx:WxV)
+File:modules/openthread/platform/infra_if.c
+Line:22
+
+This is likely related to the limitation described in https://github.com/zephyrproject-rtos/zephyr/blob/e22ca6b132840efb23b4a00ff7718225a0dd9f29/doc/project/dev_env_and_tools.rst?plain=1#L215-L223
+Apparently checkpatch is not dealing with typedefs well, using explicit `struct otInstance *` seems to help.
+
+>  LINE_SPACING: Missing a blank line after declarations
+File:subsys/net/l2/openthread/openthread_border_router.c
+Line:172
+
+This I'm not sure, probably checkpatch gets confused with `const`, simply moving the const definition to the beginning of the list helps (or adding an empty line before const).
+
+In any case, the following changes made it pass for me localy:
+```diff
+iff --git a/modules/openthread/platform/infra_if.c b/modules/openthread/platform/infra_if.c
+index 7228c71ca90..5ea3419e0bf 100644
+--- a/modules/openthread/platform/infra_if.c
++++ b/modules/openthread/platform/infra_if.c
+@@ -19,7 +19,7 @@
+ #include <platform-zephyr.h>
+ #include "openthread_border_router.h"
+ 
+-static otInstance *ot_instance;
++static struct otInstance *ot_instance;
+ static struct net_if *ail_iface_ptr;
+ 
+ static void handle_ra_from_ot(const uint8_t *aBuffer, uint16_t aBufferLength);
+diff --git a/subsys/net/l2/openthread/openthread_border_router.c b/subsys/net/l2/openthread/openthread_border_router.c
+index 056d55050c9..9ae41424d2b 100644
+--- a/subsys/net/l2/openthread/openthread_border_router.c
++++ b/subsys/net/l2/openthread/openthread_border_router.c
+@@ -166,10 +166,10 @@ void openthread_border_router_init(struct openthread_context *ot_ctx)
+ 
+ const otIp6Address *get_ot_slaac_address(otInstance *instance)
+ {
++       const otNetifAddress *unicast_addrs = otIp6GetUnicastAddresses(instance);
+        otIp6Address *slaac_address = {0};
+        otIp6Prefix omr_prefix_local = {0};
+        otIp6Prefix addr_prefix = {0};
+-       const otNetifAddress *unicast_addrs = otIp6GetUnicastAddresses(instance);
+ 
+        if (otBorderRoutingGetOmrPrefix(instance, &omr_prefix_local) == OT_ERROR_NONE) {
+                for (const otNetifAddress *addr = unicast_addrs; addr; addr = addr->mNext) {
+
+
+```
+
+*--- rlubos (2025-07-11 10:54:23+00:00)
+> On my side, I still have to figure how to configure backbone interface name from Kconfig (still not clear at this moment) 
+
+There is a function to obtain inerface index by name:
+https://github.com/zephyrproject-rtos/zephyr/blob/e22ca6b132840efb23b4a00ff7718225a0dd9f29/include/zephyr/net/net_if.h#L3399
+And then interface pointer by index:
+https://github.com/zephyrproject-rtos/zephyr/blob/e22ca6b132840efb23b4a00ff7718225a0dd9f29/include/zephyr/net/net_if.h#L3001
+The Kconfig option could be passed as an argument for the former, and then the interface pointer stored on BR initalization.
+
+> Please let me know if this can be done in next step where I plan to implement platform UDP module and other modules needed for a Border Router. Thanks!
+
+Sure things can be improved later, but I need to review the overall PR first to check the current approach.
+
+*--- rlubos (2025-07-11 11:09:11+00:00)
+Why?
+
+*--- rlubos (2025-07-11 11:16:52+00:00)
+`NET_EVENT_L4_CONNECTED` might not be a good choice. The thing with this event is that it will only be called when **any** of the interfaces in the system is considered to have connectivity (i.e. is up and has IP address assigned). So for example in a scenario when Thread interface connects to network first, this event would only be called then (so the iface pointer won't match). If the Ethernet/Wi-Fi interface is considered "connected" after this, the event won't be called for the second time. 
+
+Probably better to stick to `NET_EVENT_IF_UP/DOWN` events monitoring to start/stop BR functionality, which is called for each interface separately.
+
+*--- rlubos (2025-07-11 11:20:00+00:00)
+Any reason this is commented out? Please uncomment or remove.
+
+*--- rlubos (2025-07-11 11:25:00+00:00)
+That's enabled by default, no need to enable native networking explicitly.
+
+*--- rlubos (2025-07-11 11:25:12+00:00)
+That would better fit in the OT section below?
+
+*--- rlubos (2025-07-11 11:29:30+00:00)
+Do we really need such enormous stacks? Please try to optimize (kernel shell can show the actual stack usage).
+
+*--- rlubos (2025-07-11 11:32:09+00:00)
+Why disabling net logging?
+
+*--- rlubos (2025-07-11 11:34:24+00:00)
+I'd prefer to remove commented out options, unelss explictly documented in the comment why is it present.
+
+*--- Cristib05 (2025-07-11 12:00:20+00:00)
+I wanted to have OT message processing on its own thread, just to avoid any possible issue; I am not aware that OT API is thread safe.
+
+*--- Cristib05 (2025-07-14 07:49:21+00:00)
+> > On my side, I still have to figure how to configure backbone interface name from Kconfig (still not clear at this moment)
+> 
+> There is a function to obtain inerface index by name:
+> 
+> https://github.com/zephyrproject-rtos/zephyr/blob/e22ca6b132840efb23b4a00ff7718225a0dd9f29/include/zephyr/net/net_if.h#L3399
+> 
+> 
+> And then interface pointer by index:
+> https://github.com/zephyrproject-rtos/zephyr/blob/e22ca6b132840efb23b4a00ff7718225a0dd9f29/include/zephyr/net/net_if.h#L3001
+> 
+> 
+> The Kconfig option could be passed as an argument for the former, and then the interface pointer stored on BR initalization.
+> > Please let me know if this can be done in next step where I plan to implement platform UDP module and other modules needed for a Border Router. Thanks!
+> 
+> Sure things can be improved later, but I need to review the overall PR first to check the current approach.
+
+I have updated #90850 with the test scenario based on this version of code
+
+*--- rlubos (2025-07-18 08:41:06+00:00)
+Is this actually needed, I don't see any usage of the contents of this header within `platform-zephyr.h`, and it is the actual  culprit for the test breakages we see (now it's about undefined symbols).
+
+*--- Copilot (2025-07-21 05:53:21+00:00)
+Incorrect initialization syntax. Should be `otIp6Address *slaac_address = NULL;` instead of `= {0};` for pointer variables.
+```suggestion
+	otIp6Address *slaac_address = NULL;
+```
+
+*--- Copilot (2025-07-21 05:53:22+00:00)
+Duplicate include. The header `zephyr/net/openthread.h` is included twice (lines 13 and 16).
+```suggestion
+
+```
+
+*--- Copilot (2025-07-21 05:53:22+00:00)
+Incorrect field access. Should use `address->mFields.m8` instead of `address->mFields.m32` for byte-level copying to `s6_addr` array.
+```suggestion
+	memcpy(mcast_prefix.s6_addr, address->mFields.m8, sizeof(otIp6Address));
+```
+
+*--- Copilot (2025-07-21 05:53:22+00:00)
+Incorrect initialization syntax. Should be `struct in6_addr addr = {0};` (value) or `struct in6_addr *addr = NULL;` (pointer), not mixing both patterns.
+```suggestion
+	struct in6_addr *addr = NULL;
+
+	struct in6_addr temp_addr;
+	addr = &temp_addr;
+```
+
+*--- Copilot (2025-07-21 05:53:23+00:00)
+Using uninitialized pointer. The `addr` pointer is initialized to NULL-equivalent but then dereferenced. Should be `memcpy(addr.s6_addr, aAddress->mFields.m8, sizeof(otIp6Address));` if `addr` is changed to a value variable.
+```suggestion
+	struct in6_addr addr = {0};
+
+	memcpy(addr.s6_addr, aAddress->mFields.m8, sizeof(otIp6Address));
+
+	STRUCT_SECTION_FOREACH(net_if, tmp) {
+		if (net_if_get_by_iface(tmp) != aInfraIfIndex) {
+			continue;
+		}
+		ifaddr = net_if_ipv6_addr_lookup_by_iface(tmp, &addr);
+```
+
+*--- Copilot (2025-07-21 05:53:23+00:00)
+Passing pointer where value expected. Should be `&addr` if `addr` is changed to a value variable, or fix the initialization pattern.
+```suggestion
+	struct in6_addr addr = {0};
+
+	memcpy(addr.s6_addr, aAddress->mFields.m8, sizeof(otIp6Address));
+
+	STRUCT_SECTION_FOREACH(net_if, tmp) {
+		if (net_if_get_by_iface(tmp) != aInfraIfIndex) {
+			continue;
+		}
+		ifaddr = net_if_ipv6_addr_lookup_by_iface(tmp, &addr);
+```
+
+*--- Copilot (2025-07-21 05:53:23+00:00)
+Incorrect initialization syntax for pointer. Should be `struct net_if_ipv6_prefix *prefix_added = NULL;`.
+```suggestion
+	struct net_if_ipv6_prefix *prefix_added = NULL;
+```
+
+*--- Copilot (2025-07-21 05:53:24+00:00)
+Incorrect initialization syntax for pointer. Should be `struct net_route_entry *route_added = NULL;`.
+```suggestion
+	struct net_route_entry *route_added = NULL;
+```
+
+*--- Copilot (2025-07-21 05:53:24+00:00)
+Incorrect initialization syntax for pointer. Should be `struct net_if_addr *ifaddr = NULL;`.
+```suggestion
+	struct net_if_addr *ifaddr = NULL;
+```
+
+*--- Copilot (2025-07-21 05:53:24+00:00)
+TODO comment indicates incomplete implementation. The comment mentions that message processing should be moved to OpenThread's context, which aligns with the known issues mentioned in the PR description.
+
+*--- rlubos (2025-07-23 09:32:34+00:00)
+Need to release `pkt` here, otherwise it leaks.
+
+*--- pdgendt (2025-07-23 09:40:10+00:00)
+`error` does not appear to be used?
+
+*--- pdgendt (2025-07-23 09:41:27+00:00)
+Prefer early (error) returns, also bring `is_border_router_started` checks/assignments within the locked context to prevent races.
+
+*--- pdgendt (2025-07-23 09:42:08+00:00)
+```suggestion
+	while (buf != NULL) {
+```
+
+*--- pdgendt (2025-07-23 09:42:55+00:00)
+You should check if the `payload` buffer isn't overflowing here.
+
+*--- pdgendt (2025-07-23 09:44:02+00:00)
+Try to avoid using constant values, define a value, or use an existing defined value (some header size?).
+
+*--- pdgendt (2025-07-23 09:44:31+00:00)
+Nit: use switch/case?
+
+*--- pdgendt (2025-07-23 09:46:36+00:00)
+Why cast away the `const` and add it back when returning? Simply return from the loop
+
+```c
+	const otNetifAddress *unicast_addrs = otIp6GetUnicastAddresses(instance);
+	otIp6Prefix omr_prefix_local = {0};
+	otIp6Prefix addr_prefix = {0};
+
+	if (otBorderRoutingGetOmrPrefix(instance, &omr_prefix_local) == OT_ERROR_NONE) {
+		for (const otNetifAddress *addr = unicast_addrs; addr; addr = addr->mNext) {
+			otIp6GetPrefix(&addr->mAddress, 64, &addr_prefix);
+			if (otIp6ArePrefixesEqual(&omr_prefix_local, &addr_prefix)) {
+				return &addr->mAddress;
+			}
+		}
+	}
+	return NULL;
+```
+
+*--- pdgendt (2025-07-23 10:00:56+00:00)
+Even better: use `net_buf_linearize`
+
+*--- Cristib05 (2025-07-23 11:09:43+00:00)
+I thought it will be released in `handle_ra_input` from `ipv6_nbr.c`, I will check again.
+
+*--- Cristib05 (2025-07-23 11:10:24+00:00)
+No, I am currently trying to either add `VerifyOrExit` from OT, or to define something similar and make use of error.
+
+*--- rlubos (2025-07-23 11:14:08+00:00)
+Normally it would be released in `net_send_data()`, if you don't reach that function after allocating it'll leak (pkt pointer is lost). That also reminded me - you need to check the result of `net_send_data()` - if it fails, the packet needs to be released as well.
+
+*--- Cristib05 (2025-07-23 11:44:39+00:00)
+sorry, I thought you were referring to release the packet when OT is handling it, my answer was on that case. :(
+
+*--- pdgendt (2025-07-24 08:25:06+00:00)
+`p` is already set to point to `payload` 4 lines above. Not sure why you even need it. You could use `&payload[sizeof(struct net_ipv6_hdr)]` directly.
+
+*--- pdgendt (2025-07-24 08:29:19+00:00)
+Shouldn't you check for `length` instead of `pkt->buffer->len`?
+
+*--- Cristib05 (2025-07-24 09:42:14+00:00)
+updated the check and the len argument

@@ -1,0 +1,98 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/100679
+TITLE: Bluetooth: ISO: Log all values from established events
+
+*--- opening post by Thalley (2025-12-08 13:33:31+00:00)
+When an ISO channel is established, we now log all the information we receive from the controller for that specific channel.
+
+This can be useful in debugging and determining certain behaviors.
+
+*--- Copilot (2025-12-08 13:35:46+00:00)
+The condition on line 1197 checks `central->sdu_interval` but should check `peripheral->sdu_interval` since this log message is for "P to C" (Peripheral to Central) data. This is a copy-paste error from the previous log statement.
+```suggestion
+		peripheral->sdu_interval == BT_ISO_SDU_INTERVAL_UNKNOWN ? " (unknown)" : "");
+```
+
+*--- Copilot (2025-12-08 13:35:47+00:00)
+The log message says "tx %p" but logs the `rx` pointer. For a sync receiver (which only receives), this should say "rx %p" to match the actual variable being logged.
+```suggestion
+	LOG_DBG("iso_chan %p established: rx %p, big_handle 0x%02X, bis_number 0x%02X, "
+```
+
+*--- Copilot (2025-12-08 13:39:35+00:00)
+Potential null pointer dereference: `chan->qos->tx` and `chan->qos->rx` can be NULL. The existing `store_cis_info` function checks for NULL before accessing these pointers (see lines 1223, 1228, 1236, 1244, 1255, 1265). These variables should be checked for NULL before dereferencing, or handled gracefully in the logging.
+
+*--- Copilot (2025-12-08 13:39:35+00:00)
+Inconsistent delimiter in format string: Missing comma after `iso_interval 0x%04X`. All other field separators in this log message use commas, but this one is separated only by a space. For consistency, it should be `iso_interval 0x%04X,`.
+```suggestion
+	LOG_DBG("iso_chan %p established: tx %p, rx %p, iso_interval 0x%04X, max_subevent 0x%02X, "
+```
+
+*--- Copilot (2025-12-08 13:39:36+00:00)
+Inconsistent delimiter in format string: Missing comma after `cig_sync_delay 0x%06X`. All other field separators in this log message use commas, but this one is separated only by a space. For consistency, it should be `cig_sync_delay 0x%06X,`.
+```suggestion
+		"cig_id 0x%02X, cis_id 0x%02X, cig_sync_delay 0x%06X, cis_sync_delay 0x%06X, "
+```
+
+*--- Copilot (2025-12-08 13:50:32+00:00)
+Potential null pointer dereference. The code accesses `chan->qos` without checking if `chan` or `chan->qos` could be NULL. While `store_cis_info` (which runs before this function) also accesses these pointers without checks, it would be safer to add null checks here to prevent crashes if the function is called in unexpected states or if the calling order changes in the future.
+
+Consider adding null checks:
+```c
+if (chan == NULL || chan->qos == NULL) {
+    LOG_WRN("Cannot log CIS info: chan or qos is NULL");
+    return;
+}
+```
+```suggestion
+	const struct bt_iso_chan *chan = iso_conn->chan;
+	if (chan == NULL || chan->qos == NULL) {
+		LOG_WRN("Cannot log CIS info: chan or qos is NULL");
+		return;
+	}
+	const struct bt_iso_info *info = &iso_conn->info;
+	const struct bt_iso_unicast_info *unicast_info = &info->unicast;
+	const struct bt_iso_unicast_tx_info *peripheral = &unicast_info->peripheral;
+	const struct bt_iso_unicast_tx_info *central = &unicast_info->central;
+```
+
+*--- Copilot (2025-12-08 13:50:33+00:00)
+Potential null pointer dereference. The code accesses `chan->qos` without checking if `chan` or `chan->qos` could be NULL. Consider adding null checks before dereferencing to prevent crashes:
+
+```c
+if (chan == NULL || chan->qos == NULL) {
+    LOG_WRN("Cannot log BIS broadcaster info: chan or qos is NULL");
+    return;
+}
+```
+```suggestion
+	const struct bt_iso_chan *chan = iso_conn->chan;
+
+	if (chan == NULL || chan->qos == NULL) {
+		LOG_WRN("Cannot log BIS broadcaster info: chan or qos is NULL");
+		return;
+	}
+```
+
+*--- Copilot (2025-12-08 13:50:33+00:00)
+Potential null pointer dereference. The code accesses `chan->qos` without checking if `chan` or `chan->qos` could be NULL. Consider adding null checks before dereferencing to prevent crashes:
+
+```c
+if (chan == NULL || chan->qos == NULL) {
+    LOG_WRN("Cannot log BIS sync receiver info: chan or qos is NULL");
+    return;
+}
+```
+```suggestion
+	const struct bt_iso_chan *chan = iso_conn->chan;
+
+	if (chan == NULL || chan->qos == NULL) {
+		LOG_WRN("Cannot log BIS sync receiver info: chan or qos is NULL");
+		return;
+	}
+```
+
+*--- Thalley (2026-02-03 10:29:11+00:00)
+@jhedberg @rugeGerritsen Please review :)
+
+*--- Copilot (2026-02-11 14:29:38+00:00)
+The newly added CIS established logs print `central->latency` / `peripheral->latency`, but those fields are currently populated from `evt->c_latency` / `evt->p_latency` using `sys_get_le16()` even though the HCI event fields are 24-bit (`uint8_t [3]` in `bt_hci_evt_le_cis_established`). This will truncate the latency and makes the new debug output misleading. Consider switching the latency extraction in `store_cis_info()` (and thus v2 as well) to `sys_get_le24()` so the logged and stored transport latencies match the controller values.

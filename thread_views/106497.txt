@@ -1,0 +1,31 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/106497
+TITLE: boards: renesas: fbp_ra8e1: Add arduino connector definitions.
+
+*--- opening post by soburi (2026-03-29 07:59:24+00:00)
+Add arduino_header, arduino_serial, arduino_i2c and arduino_spi.
+
+*--- Copilot (2026-05-06 23:52:38+00:00)
+`arduino,uno-adc` nexus expects parent channel indices 0..5 for A0..A5, but this uses `ARDUINO_HEADER_R3_A*` IDs. This will break `io-channel-map` lookups for Arduino ADC overlays. Also, the map references `&adc1`, but this board DTS does not enable/configure `adc1` (RA SoC DTS defaults ADC instances to `status = "disabled"`).
+
+*--- Copilot (2026-05-06 23:52:38+00:00)
+`arduino_pwm` maps multiple Arduino pins to `&pwm0`/`&pwm2`/`&pwm3`/`&pwm4`/`&pwm5`, but this board DTS only configures `&pwm1` and provides pinctrl only for `pwm1`. On RA8, these PWM instances are `status = "disabled"` by default, so the Arduino PWM connector mapping will point at disabled/unconfigured devices.
+
+*--- Copilot (2026-05-06 23:52:38+00:00)
+`arduino_i2c` is aliased to `&iic1`, but `&iic1` is not set to `status = "okay"` in this board DTS. Since the RA SoC DTS defines IIC controllers as `status = "disabled"` by default, this alias will expose a disabled bus and Arduino I2C overlays/samples will not work until `&iic1` is enabled (and configured as needed).
+
+*--- soburi (2026-05-07 00:02:02+00:00)
+Here, we will only provide the definition.
+
+*--- soburi (2026-05-07 00:06:09+00:00)
+Here, we will only provide the definition.
+
+*--- soburi (2026-05-07 00:10:18+00:00)
+A0..A5 defined as 0..5, and provide only definitions. This is not a problem.
+
+*--- soburi (2026-05-22 20:42:06+00:00)
+@KhiemNguyenT 
+Could you take a look, please?
+
+*--- soburi (2026-05-29 05:50:38+00:00)
+@KhiemNguyenT 
+ping

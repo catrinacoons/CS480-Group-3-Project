@@ -1,0 +1,53 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118045
+TITLE: Add support for Ezurio NX611 Wi-Fi/Bluetooth combo module
+
+*--- opening post by rerickson1 (2026-09-01 20:56:18+00:00)
+Add support for the NX611 Wi-Fi/Bluetooth combo module.
+This module uses the NXP IW611 chipset.
+
+Depends on: https://github.com/zephyrproject-rtos/hal_nxp/pull/805
+
+*--- Copilot (2026-09-01 20:59:55+00:00)
+The new help text uses non-ASCII registered-sign characters, which are not permitted in code by the project coding guidelines. Use plain ASCII product names and add the missing space in `2Mbps`.
+
+This issue also appears in the following locations of the same file:
+- line 185
+- line 185
+
+*--- Copilot (2026-09-01 20:59:56+00:00)
+The new help text uses non-ASCII registered-sign characters, which are not permitted in code by the project coding guidelines. Use plain ASCII product names; this also corrects `Wi-fi` and the missing space in `2Mbps`.
+
+This issue also appears on line 349 of the same file.
+
+*--- jhedberg (2026-09-02 06:48:29+00:00)
+As this kind of condition lists keep growing, I think you'll find a cleaner solution to have all those variants select the same virtual option (representing whatever capability/property this Kconfig option depends on) and then this only depends on that one option rather than the ever growing list of options.
+
+*--- rerickson1 (2026-09-03 18:39:11+00:00)
+Gave this a shot. What do you think?
+
+*--- Copilot (2026-09-03 18:43:16+00:00)
+This adds AU to the shared IW61X region choice, so it is also selectable for the existing Murata 2EL/2DL modules. The dependent HAL change only maps `CONFIG_NXP_IW61X_REGION_AU` inside the Ezurio branch; for every other module, selecting AU leaves `WIFI_BT_TX_PWR_LIMITS` unset and does not apply an AU-qualified table. Gate this choice to the NX611 module.
+
+*--- Copilot (2026-09-03 18:43:17+00:00)
+The dependent HAL PR explicitly marks its JP table as pre-release and says it has not gone through Ezurio's regulatory release process, so JP is not currently an Ezurio-qualified domain as claimed here. Since the shared region choice still permits NX611+JP and the HAL selects that table, remove JP from the supported configuration until qualified data is available (and update this help text accordingly).
+
+*--- jhedberg (2026-09-09 11:56:27+00:00)
+You still have this potentially growing list here. What I was thinking was that those options would select this new BSP_CAPABLE option instead, i.e. this all becomes decentralized and (hopefully) easier to manage.
+
+*--- rerickson1 (2026-09-16 18:25:50+00:00)
+Fixed!
+
+*--- rerickson1 (2026-09-16 18:31:28+00:00)
+dropped the AU region. For now, this module will support WW mode.
+
+*--- Copilot (2026-09-16 18:35:24+00:00)
+Selecting NX611 only makes the compression options available; users can still set either one to `n`. The linked HAL header then raises `#error` because this module has no uncompressed TX table (and, with 802.11ax enabled by default, no uncompressed RU table). Force these required formats when this module is selected so an otherwise valid Kconfig selection cannot fail at compile time.
+
+*--- Copilot (2026-09-16 18:35:25+00:00)
+The linked HAL PR states that only WW mode is supported, and its NX611 header duplicates the WW data into every regional array. The shared region choice still exposes CA/JP/EU/US for NX611, while this help claims those are qualified regulatory-domain tables. Hide the choice for NX611 and retain its WW default so unsupported region selections cannot be advertised or configured.
+
+*--- rerickson1 (2026-09-16 20:23:36+00:00)
+Not worried about the user forcing these to off.
+
+*--- rerickson1 (2026-09-16 20:24:31+00:00)
+fixed

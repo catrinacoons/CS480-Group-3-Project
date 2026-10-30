@@ -1,0 +1,30 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/101500
+TITLE: Bluetooth: Classic: HFP: CLCC report NULL when finish
+
+*--- opening post by expliyh (2025-12-24 13:09:39+00:00)
+The CLCC API does not report when it finishes, so the app cannot
+determine whether the CLCC procedure has ended. This commit modifies the
+behavior of the CLCC API to call the callback with a NULL Call pointer to
+indicate that the CLCC procedure has completed.
+
+*--- Copilot (2025-12-26 04:03:17+00:00)
+The documentation states "the callback will be called with a NULL *call", but the parameter name is "call" not "*call". The asterisk notation is incorrect in the documentation comment. It should read "the callback will be called with a NULL call" or "the callback will be called with call set to NULL".
+```suggestion
+	 *  If the request is finished (success or fail), the callback will be called with call set to NULL.
+```
+
+*--- lylezhu2012 (2025-12-30 02:30:23+00:00)
+Regardless of whether there is a `+CLCC` response, there will always be a `query_call(hf, NULL)` callback in the end. This is a bit strange.
+Have you ever thought about adding a timeout mechanism directly at the application layer?
+
+*--- lylezhu2012 (2026-01-05 07:34:00+00:00)
+> A timeout is not really reasonable. A worst case (typically during sniff) can cost several seconds. Let's say a 3 seconds timeout (not even enough). 
+
+Indefinite waiting is unreasonable. Just like you said, 3 seconds might not be enough. That would be reasonable if there were a worst-case waiting time. 
+So, I think the timeout is necessary for application. It is used to ensure the action can be done in limited time from application's perspective. 
+
+> This means that an application can not do any other action (because the previous AT transaction is not completed) during this 3 seconds.
+
+From the perspective of the HFP HF API, there is no restriction that the next API can only be called after the previous API has been executed. All AT commands are queued and all of them will be executed one by one internally.
+
+So, unless the next AT command depends on the return value of AT+CLCC, the app can call any interfaces.

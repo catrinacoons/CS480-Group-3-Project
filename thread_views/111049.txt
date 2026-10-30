@@ -1,0 +1,66 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111049
+TITLE: drivers: wifi: siwx91x: code relocation of critical data path functions
+
+*--- opening post by silabs-SwamidasN (2026-06-11 10:36:48+00:00)
+code relocation of critical data path functions for high performance
+
+*--- jhedberg (2026-06-11 11:00:35+00:00)
+@silabs-SwamidasN please always give your PR titles meaningful prefixes so the context is always understood by anyone working on any part of Zephyr. I fixed this now myself.
+
+*--- jhedberg (2026-06-11 11:02:22+00:00)
+Remove this line (`n` is the "default default")
+
+*--- jhedberg (2026-06-11 11:04:56+00:00)
+Please also provide a proper commit message, explaining what the problem was, why the specific fix is needed for this platform, etc. There's more info here: https://docs.zephyrproject.org/latest/contribute/guidelines.html#commit-message-guidelines
+
+*--- Copilot (2026-06-11 11:07:14+00:00)
+CMake style guidelines recommend quoting variables/paths in set() calls to avoid issues with spaces and to keep behavior predictable. These three path variables should be quoted.
+
+*--- Copilot (2026-06-11 11:07:14+00:00)
+`LOCATION RAM_RODATA` relocates only rodata sections (not text). If the intent is to relocate code for performance, include `_TEXT` in the location specifier (e.g., `RAM_TEXT_RODATA`) or switch to `RAM_TEXT`.
+
+*--- Copilot (2026-06-11 11:07:14+00:00)
+`WC_EVENT_HANDLER_C` is set but never used, which is dead code and can confuse future maintenance. Remove it (or use it in the relocate call instead).
+
+*--- Copilot (2026-06-11 11:07:14+00:00)
+This `zephyr_code_relocate(...)` line exceeds the 100-character guideline for CMake files; wrapping arguments onto multiple lines improves readability and avoids style check failures. Apply similar wrapping to the other relocate calls in this block.
+
+*--- Martinhoff-maker (2026-06-12 07:31:26+00:00)
+I would add the number of KB added in RAM
+
+*--- Martinhoff-maker (2026-06-12 07:35:20+00:00)
+Are you sure that everything is in RAM ? about that function I was having a really strange behavior. (see my open issue https://github.com/zephyrproject-rtos/zephyr/issues/98570). 
+You need to make sure that the caller is in RAM also.
+
+*--- silabs-SwamidasN (2026-06-12 08:19:13+00:00)
+I have made sure that all the functions that is added here are moved to RAM, i also get it reviewed by cursor.
+
+*--- jerome-pouiller (2026-06-15 15:09:05+00:00)
+I suggest to find a less generic title.
+
+*--- jerome-pouiller (2026-06-15 15:12:36+00:00)
+You may also mention the approximated throughput gain.
+
+It would also worth to mention if this option has an impact on TLS throughtput.
+
+*--- jerome-pouiller (2026-06-15 15:18:01+00:00)
+A such detailed level of relocations seems difficult to maintain up to date. You probably get interesting results on your setup, but I don't believe it will survive to any modification of the code. How do you expect to deal with that?
+
+*--- jerome-pouiller (2026-06-15 15:25:22+00:00)
+Don't you believe this line mostly relocate strings for log statements?
+
+*--- silabs-SwamidasN (2026-06-16 08:49:37+00:00)
+Measured on SiWx91x: The ROdata adds ~1 KB RAM (NOKEEP), and throughput drops if I remove it. So despite the concern about log strings, the linked .rodata relocated here is small and appears useful for the hot path.
+
+*--- silabs-SwamidasN (2026-06-16 09:03:56+00:00)
+This list is profiling-driven for the data path. Most entries target standard Zephyr code (TCP/IP stack, kernel, sockets), where we assumed symbol names are relatively stable across releases. When you mention maintainability, are you mainly concerned about symbol renames/refactors in upstream Zephyr, or about broader functional/API changes in the data path?
+
+Out of curiosity: in your experience, how often do these function symbols actually get renamed, split, or inlined across Zephyr releases?
+
+*--- M1cha (2026-06-18 18:35:53+00:00)
+Couldn't this be generated automatically (for a specific firmware) using gcov/gprof data?
+
+*--- jerome-pouiller (2026-06-18 18:50:37+00:00)
+> Couldn't this be generated automatically (for a specific firmware) using gcov/gprof data?
+
+hmm... I have to admit the idea is interesting. I have never tested semihost but  `CONFIG_COVERAGE_SEMIHOST` seems promising.

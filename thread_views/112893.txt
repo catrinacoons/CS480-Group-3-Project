@@ -1,0 +1,82 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112893
+TITLE: drivers: display: ssd16xx: add support for SSD1683
+
+*--- opening post by mvoss96 (2026-07-07 11:13:16+00:00)
+The Solomon Systech **SSD1683** is a Gen2 SSD16xx EPD controller (functionally
+equivalent to the SSD1619A, **400 sources × 300 gates**). It uses the same
+command set as the already-supported SSD1680/SSD1681 and loads its refresh
+waveforms from OTP, so support is just a new devicetree binding plus a
+`ssd16xx_quirks` entry with the correct maximum resolution — no custom LUT.
+
+Used by e.g. the **WeAct Studio 4.2" 400×300** module and the GoodDisplay
+**GDEY042T81** 4.2" 400×300 mono panel.
+
+Per the driver's own convention (`struct ssd16xx_quirks`: `max_width` = gate
+lines, `max_height` = source outputs; cross-checked against SSD1680 =
+176 sources × 296 gates → `max_width=296, max_height=176`), SSD1683
+(300 gates, 400 sources) → `max_width=300, max_height=400`.
+
+## Changes
+- `drivers/display/ssd16xx.c`: add `quirks_solomon_ssd1683` + registration.
+- `dts/bindings/display/solomon,ssd1683.yaml`: new binding (includes
+  `solomon,ssd16xx-common.yaml`, mirrors the existing `solomon,ssd1680.yaml`).
+
+## Test overlay used
+```dts
+&spi0 {
+    status = "okay";
+    cs-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
+
+    epd: ssd1683@0 {
+        compatible = "solomon,ssd1683";
+        reg = <0>;
+        mipi-max-frequency = <4000000>;
+        width  = <296>;   /* gates; see note below on the /8 constraint */
+        height = <400>;   /* sources, multiple of 8 */
+        busy-gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>;
+        full { };         /* empty -> OTP waveform */
+    };
+};
+```
+
+## Tested on hardware
+Verified on a **Nordic nRF52840 (pro micro dev board)** driving a **WeAct Studio 4.2" 400×300**
+e-paper module (SSD1683 controller) over SPI, via LVGL. Both **full and partial
+refresh** render correctly in both orientations:
+- **Landscape** — native geometry (the byte-packed axis is the 400-source side,
+  which is a multiple of 8).
+- **Portrait** — with `width = 296` (a /8-safe value ≤ 300 gates), matching the
+  workaround for the LVGL-glue limitation described below.
+
+## Known limitation
+A GDEY042T81 has 300 gates, and 300 is **not a multiple of 8**. Zephyr's LVGL
+mono glue (`modules/lvgl/lvgl_display_mono.c`) mis-strides 1-bit buffers whose
+width is not a multiple of 8. That is an **LVGL-glue issue, not an ssd16xx
+issue**, so this PR is deliberately limited to enabling the controller. Use
+`width = 296` (a /8 value ≤ 300 gates) or landscape orientation (the 400-source
+axis is /8). A proper stride fix belongs in a separate LVGL-glue PR.
+
+## Checks run locally
+- `checkpatch.pl`: 0 errors, 0 warnings
+- `yamllint` (Zephyr config): clean
+- devicetree binding schema (edtlib): parses, compatible matches filename,
+  include resolves (46 inherited props), no underscore/`required:false` issues
+- `gitlint` (Zephyr config): clean
+- DCO: author == Signed-off-by (`Marcus Voß <meav33@gmail.com>`)
+
+Signed-off-by: Marcus Voß <meav33@gmail.com>
+
+*--- JarmouniA (2026-07-16 08:16:51+00:00)
+please remove this entry.
+
+*--- JarmouniA (2026-07-16 11:51:26+00:00)
+in a separate commit.
+
+*--- mvoss96 (2026-07-16 12:27:31+00:00)
+<img width="2445" height="2256" alt="IMG_5060" src="https://github.com/user-attachments/assets/c1501c57-8640-4318-8503-af3ee90f3b2c" />
+
+*--- Copilot (2026-07-31 12:58:14+00:00)
+The binding description lists the controller as "400x300", but the SSD16xx bindings (e.g. solomon,ssd1680.yaml) use the driver’s width×height convention, which for SSD1683 is 300×400 (max_width=300 gates, max_height=400 sources). Using 400x300 here is likely to confuse DT users about what to set for width/height.
+
+*--- kartben (2026-07-31 13:00:56+00:00)
+fair but probably non-blocking :)

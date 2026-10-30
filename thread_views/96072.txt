@@ -1,0 +1,414 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/96072
+TITLE: video: improve the capture sample
+
+*--- opening post by josuah (2025-09-16 10:25:05+00:00)
+I am proposing a lot of changes, with the goal to let reviewers decide which ones are relevant, essential, and which one are un-necessary or unwanted, and then I can apply the decisions.
+
+For now, only tested with `zephyr,video-sw-generator` on `native_sim`:
+
+```
+west build -b native_sim/native/64 -S video-sw-generator samples/drivers/video/capture/
+west build -b native_sim/native/64 -S video-sw-generator tests/drivers/video/test_pattern/
+```
+
+Then `west flash` to see the results.
+
+*--- josuah (2025-09-16 10:28:08+00:00)
+Final result: https://github.com/josuah/zephyr/blob/f965294b9f5f58be8665b3c8f17f1b970ed8d619/samples/drivers/video/capture/src/main.c#L334-L426
+
+Once this is reviewed, it should become easy to convert every other sample to the same layout.
+
+Maybe further making some sort of common code used by the samples, which is configuring the video drivers out of Kconfig values using the video API, just for the sake of samples.
+
+*--- Copilot (2025-09-16 10:33:27+00:00)
+Commented-out code should be removed rather than left in the source. If this functionality is needed later, consider using a feature flag or configuration option.
+```suggestion
+
+```
+
+*--- Copilot (2025-09-16 10:33:28+00:00)
+The loop should use `caps.min_vbuf_count` instead of `CONFIG_VIDEO_BUFFER_POOL_NUM_MAX` to allocate the minimum required number of buffers. Using the maximum may allocate unnecessary buffers.
+```suggestion
+	for (int i = 0; i < caps.min_vbuf_count; i++) {
+```
+
+*--- Copilot (2025-09-16 10:33:28+00:00)
+The error message says 'setting' but the operation is getting the frame interval. Should be 'getting the frame interval'.
+```suggestion
+		LOG_ERR("Error while getting the frame interval");
+```
+
+*--- josuah (2025-09-16 10:46:50+00:00)
+This just got fixed by adding a dummy "test pattern" control to the video software generator.
+
+*--- josuah (2025-09-16 10:51:52+00:00)
+More buffers than minimum gives elasticity to the pipeline which might in some cases be needed for things to work.
+
+When multiple devices get involved, using `min_vbuf_count` can be needed, but might be more interesting to handle this in a different PR.
+
+*--- josuah (2025-09-16 10:52:59+00:00)
+Done
+
+*--- Copilot (2025-09-16 10:54:23+00:00)
+Compound literal initialization with empty braces is unclear and relies on zero-initialization. Use explicit initialization with `{0}` for better clarity.
+```suggestion
+	struct video_buffer *vbuf = &(struct video_buffer){0};
+```
+
+*--- Copilot (2025-09-16 10:54:24+00:00)
+Using a pointer to a compound literal is unnecessary here. Declare a proper variable: `struct video_buffer vbuf = {.type = VIDEO_BUF_TYPE_OUTPUT};` and use `&vbuf` when needed.
+
+*--- Copilot (2025-09-16 10:54:24+00:00)
+Compound literal initialization with empty braces is unclear and relies on zero-initialization. Use explicit initialization with `{0}` for better clarity.
+```suggestion
+	struct video_buffer *vbuf = &(struct video_buffer){0};
+```
+
+*--- Copilot (2025-09-16 10:54:24+00:00)
+Function returns 0 (success) when an error occurs getting frame interval. Should return the error code `ret` instead.
+```suggestion
+		return ret;
+```
+
+*--- josuah (2025-09-16 10:56:02+00:00)
+We need `&&vbuf`.
+
+*--- josuah (2025-09-16 10:56:17+00:00)
+main returns 0 AFAIU from previous reviews
+
+*--- josuah (2025-09-16 11:16:32+00:00)
+Here is the video test that ran and passed on CI:
+<https://github.com/zephyrproject-rtos/zephyr/actions/runs/17763404492/job/50481543225?pr=96072#step:13:791>
+
+```python
+#INFO    - 711/896 native_sim/native/64      drivers.dma.chan_blen_transfer                     FILTERED (runtime filter)
+#INFO    - 712/896 native_sim/native/64      drivers.stepper.stepper_api.adi_tmc2209_work_q     PASSED (native 0.011s <host>)
+ INFO    - 713/896 native_sim/native/64      drivers.video.test_pattern                         PASSED (native 0.007s <host>)
+#INFO    - 714/896 native_sim/native/64      drivers.stepper.stepper_api.adi_tmc2209            PASSED (native 0.012s <host>)
+#INFO    - 715/896 native_sim/native/64      drivers.gpio.hogs                                  PASSED (native 0.006s <host>)
+```
+
+*--- josuah (2025-09-17 08:57:48+00:00)
+I forgot to remove the `i++;` a few lines below...
+
+*--- josuah (2025-09-17 09:09:40+00:00)
+Done
+
+*--- avolmat-st (2025-09-17 11:52:31+00:00)
+Seems this sel is shadowing another struct video_selection sel at the beginning of the main function, which is making it a bit confusing
+
+*--- avolmat-st (2025-09-17 11:55:14+00:00)
+Behavior would change I think like that since fmt.width / fmt.height used at line 183 should be normally updated with request given by CONFIG_VIDEO_FRAME_WIDTH / HEIGHT.
+
+*--- avolmat-st (2025-09-17 12:02:46+00:00)
+In all error cases like this, should we make it clear that the sample run has been aborted following this error ?
+It might not be that obvious that nothing else is ongoing after getting those error messages.
+In case of display sample for example, it is clearly mentioned "Aborting sample."
+
+*--- avolmat-st (2025-09-17 12:09:54+00:00)
+Moreover it imposes to set a CROP_WIDTH / CROP_HEIGHT in order to do compose, which is not the case before and not expected.
+
+*--- avolmat-st (2025-09-17 12:18:55+00:00)
+Thanks @josuah for this work. I haven't commented on the last commit since previous comments regarding crop/compose would make the commit change again, however I think the approach is very good.
+I am actually a bit puzzled by the move of the test into a dedicated test appli, since this tends to create duplication of the code between the sample and the test itself, while (currently) losing some parts, such as for example compose.
+However maybe creating helper functions for selection / format / display etc as you did could help to have smaller sample and test appli, avoid too much about code duplication.
+
+I was also wondering if you could have a tester such as a transform element. Just an idea but basically, inserting an element between the receiver and the app, and this element would perform the test, avoiding to have test implemented into the test app.
+Maybe this puts too much effort for just a test.
+
+Something like:
+
+```
+ <sensor> -> <receiver> -> appli
+```
+ would become
+ ```
+ <sensor> -> <receiver> -> <test transform> -> appli
+ ```
+ 
+Test test transform would be checking the buffers given by the receiver, checking them or performing some hash or so on it for example before given them to the appli, which doesn't potentially even have any idea that there is something checking in the middle. Since we will probably tend to have more and more stuff like that, starting to get some encoder for example, why not having some debug / test purpose elements as well.
+
+*--- CkovMk (2025-09-18 09:04:24+00:00)
+Great thanks for @josuah to clean-up this sample. I used this sample for testing recently, and would like to share my experience.
+
+This sample uses a simple `<sensor> -> <receiver>` video pipeline, which is fine for simple devices. In our case, the pipeline is like `<sensor> -> <external ISP> -> <receiver>`. The input format (being passed to its upstream device) and output format of both the reciever and external ISP can be set differently. As a result, we modified the code to add 2 more format configs.
+
+As the zephyr video subsystem evolves, we may build more and more complicated pipelines. Do you think it's possible to make this sample more flexible?
+
+*--- josuah (2025-10-15 17:58:49+00:00)
+Sorry @CkovMk I also missed your message.
+
+> As the zephyr video subsystem evolves, we may build more and more complicated pipelines. Do you think it's possible to make this sample more flexible?
+
+Yes absolutely, not only the sample, page 27 of this slide, libMP is introduced:
+https://static.sched.com/hosted_files/osseu2025/7d/Video4Zephyr_EOSS_2025_Final.pdf#page=27
+
+And here is a video about it:
+https://www.youtube.com/watch?v=bjqUerc5jJw
+
+But in the meantime, there is also more complex hardware coming with video encoder and internal ISP.
+
+But for an external ISP, I suspect this would be only devicetree-level interconnection of devices? With a single input stream, arriving onto the video capture chip, the application would not be having more devices involved.
+
+With the current APIs, it is possible to have the application configure the format of the ISP, and the ISP configure the format of the sensor.
+
+Though, if it is arbitrary application/user choice for both, agreed, this needs to have both devices configured from `main.c` or similar.
+
+*--- josuah (2025-10-15 17:58:54+00:00)
+I will try updating this shortly!
+
+*--- josuah (2025-10-21 21:17:25+00:00)
+I've added a `goto err;` along with a `LOG_ERR()`.
+Glad to receive other suggestions!
+
+*--- josuah (2025-10-21 21:21:55+00:00)
+Here https://github.com/zephyrproject-rtos/zephyr/pull/97425#discussion_r2428784181 is one possible way to handle such kind of workflows
+
+```
+                          |   optional   |
+                          |              |
+<sensor> -> <receiver> -> <test transform> -> appli
+                          |              |
+```
+
+```c
+video_dst = video_dev;
+prev = &video_dst;
+
+#if DT_HAS_CHOSEN(zephyr_videoisp)
+videoisp_src = *prev;
+*prev = videoisp_dev;
+prev = &videoisp_dst;
+#endif
+
+#if DT_HAS_CHOSEN(zephyr_videoscaler)
+videoscaler_src = *prev;
+*prev = videoscaler_dev;
+prev = &videoscaler_dst;
+#endif
+
+#if DT_HAS_CHOSEN(zephyr_videoenc)
+videoenc_src = *prev;
+*prev = videoenc_dev;
+prev = &videoenc_dst;
+#endif
+
+videousb_src = *prev;
+*prev = videousb_dev;
+```
+
+But there is only 2 devices in the current PR so not adding it yet if that makes sense.
+
+*--- ngphibang (2025-10-21 21:51:24+00:00)
+`VIDEO_CID_TEST_PATTERN` is a menu-type control:
+
+```
+	case VIDEO_CID_TEST_PATTERN:
+	case VIDEO_CID_CAMERA_ORIENTATION:
+		*type = VIDEO_CTRL_TYPE_MENU;
+		break;
+```
+
+We need to pass a menu as a valid parameter I think. And that menu should expose several items for users to choose. Currently, there is only a color bar supported so the menu could be "color bar" and "disabled", but if user chooses "disabled" that mean sw_generator cannot be used anymore.
+
+*--- ngphibang (2025-10-21 22:11:09+00:00)
+Could we add mimxrt1170-EVK board ? This test is mainly made on this board where I collected the threshold values.
+
+*--- ngphibang (2025-10-21 22:11:48+00:00)
+It seems it is recommended use only platform_allow and not integration_platforms ?
+
+*--- josuah (2025-10-21 22:14:30+00:00)
+Oh absolutely a menu type, I must have forgotten to set it...
+
+How about cheating and filling the buffers with 0x00 when the user selects "disabled"?
+
+*--- ngphibang (2025-10-21 22:19:34+00:00)
+We could but I wonder if it's worth it because the test pattern harness test is essentially to detect regression on real boards. The video sw generator normally will output correct patterns ?
+
+EDIT: Ah,  maybe there are some changes in the driver that make it not work correctly anymore (it can run but output wrong patterns ?), so also worth to test ?
+
+*--- josuah (2025-10-22 11:21:24+00:00)
+I think the build failures are unrelated to the introduction of `VIDEO_CID_TEST_PATTERN`, I'll go fix them now...
+
+*--- josuah (2025-10-22 12:30:28+00:00)
+There seems to be very few docs about it in particular but:
+> https://docs.zephyrproject.org/latest/develop/modules.html#testing-requirements
+
+It is for modules, though might also apply to Zephyr's own areas.
+
+ `integration_platforms:` is what will be selected by `west twister --integration`
+
+=> "I want to run a test with at least one platform per area"
+
+*--- josuah (2025-10-22 12:36:42+00:00)
+I just added it with the same parameters as the `capture` sample.
+
+I hope this is something as convenient/comfortable to work with as the capture sample!
+
+Would it need some customizable number of frames to be grabbed so it can be set to capture 999999999 frames?
+
+*--- josuah (2025-10-22 12:49:17+00:00)
+I removed the `integration_platforms` to let us decide what to do of it later.
+
+*--- josuah (2025-10-22 13:13:51+00:00)
+For now I just initialized it to `video_init_menu_ctrl()`, and taking no effect when `VIDEO_CID_TEST_PATTERN` is set to "Disabled".
+
+The purpose was just to allow the test to call the `VIDEO_CID_TEST_PATTERN` of the video source, so that it is possible to test video-sw-generator the same way as the sensors...
+
+Instead, should I not expose `VIDEO_CID_TEST_PATTERN` at all, and make the test ignore the failure when trying to test the test pattern?
+
+*--- josuah (2025-10-22 13:20:14+00:00)
+Good catch about `struct video_selection sel`, removed the unused `sel` in the parent scope.
+
+*--- josuah (2025-10-22 13:32:34+00:00)
+I updated it to let a compose happen when there is no crop.
+And also tried to make it a bit more symmetric/readable as opposed to my previos attempt.
+
+Thanks!
+
+*--- josuah (2025-10-22 13:47:03+00:00)
+You probably meant this (185 now)?
+
+https://github.com/zephyrproject-rtos/zephyr/blob/3462a489f06dc247a422f8e1663a9ab4e665004e/samples/drivers/video/capture/src/main.c#L185
+
+Yes I see they need to be updated before this `if()` happen.
+
+*--- josuah (2025-10-22 13:55:20+00:00)
+I moved these lines to `app_get_video_info()` to preserve the order.
+```c
+        if (CONFIG_VIDEO_FRAME_HEIGHT > 0) {
+                fmt->height = CONFIG_VIDEO_FRAME_HEIGHT;
+        }
+        if (CONFIG_VIDEO_FRAME_WIDTH > 0) {
+                fmt->width = CONFIG_VIDEO_FRAME_WIDTH;
+        }
+        if (strcmp(CONFIG_VIDEO_PIXEL_FORMAT, "") != 0) {
+                fmt->pixelformat = VIDEO_FOURCC_FROM_STR(CONFIG_VIDEO_PIXEL_FORMAT);
+        }                        
+```
+
+*--- josuah (2025-10-22 13:56:54+00:00)
+Thanks @avolmat-st and @ngphibang.
+
+Not sure if that was a priority for you, on my side I'm actually waiting feature freeze for all the refactorings, but maybe this PR *content* was useful for https://github.com/zephyrproject-rtos/zephyr/pull/97425#discussion_r2449548733 (maybe not).
+
+Only reason why I did this now.
+
+*--- josuah (2025-10-23 22:23:38+00:00)
+Thanks @JarmouniA for explaining on the chat:
+> That's what integration platforms are for actually, a quick vibe check of the code...but unfortunately many tests do not have them, or the coverage is poor/redundant across IPs, drivers...
+
+Let's add that back! :)
+
+For instance, `west twister -GT tests/drivers/video` (`-G` short for `--integration`).
+Or for MIMXRT1170 EVK in particular: `west twister -s drivers.video.test_pattern.mimxrt1170_evk`.
+
+*--- JarmouniA (2025-10-23 22:27:18+00:00)
+https://docs.zephyrproject.org/latest/develop/test/twister.html#tests
+
+"integration_platforms:
+This option limits the scope to the listed platforms when twister is invoked with the --integration option. Use this instead of platform_allow if the goal is to limit scope due to timing or resource constraints."
+
+*--- ngphibang (2025-10-24 07:35:21+00:00)
+In real tests, sometimes I see the very first frames does not have the color bar falling into the defined threshold, maybe due to the sensor instability. In the original harness test, it only requires having one frame passing the test. So, I think this should be relaxed. Should we increase the loop iteration and break when see one (or some) frames that is OK and consider that the test has passed ?
+
+*--- ngphibang (2025-10-24 07:42:33+00:00)
+I think we could expose the menu with only one item "Color bar" ? Exposing "Disabled" which has no effect will confuse the user.
+
+*--- avolmat-st (2025-10-24 11:07:25+00:00)
+I understand the purpose of doing this assignment here so that more drivers would work. But, in a sense isn't this "hidding" potential failure of drivers ? Maybe doing so is ok, to have this sample do all it can to make the sample work, but, we should also start thinking about adding a new test / compliance video app which check the behaviors of drivers we are in charge of in this subsystem. Some thing a bit like v4l2-compliance, which does variable calls on the API to see if the drivers respond as expected.
+
+*--- avolmat-st (2025-10-24 11:17:00+00:00)
+Is it on purpose to only check CONFIG_VIDEO_SOURCE_CROP_WIDTH > 0 ? and not HEIGHT as well ?
+
+*--- avolmat-st (2025-10-24 11:18:39+00:00)
+Hum, I still think that this bunch of code should be done before the set selection since this is the width / height we want to give to the set_selection (compose). Did I missed something, or maybe this is fixed in another commit later on ?
+
+*--- avolmat-st (2025-10-24 11:26:30+00:00)
+Shouldn't those formats update (based on Kconfig) be done in the main part rather than in this query format function ?
+The query function seems to be more like gathering the current status. If the fmt structure is updated within this function this make it think that the current format is like this, which is not correct since only the structure has been changed and this hasn't been set to the driver.
+
+*--- avolmat-st (2025-10-24 11:28:31+00:00)
+Should be return ret now that this is part of a function.
+
+*--- avolmat-st (2025-10-24 11:31:06+00:00)
+I think it is changed to K_NO_WAIT in recent code.
+
+*--- avolmat-st (2025-10-24 11:33:44+00:00)
+Optional, but in order to have as much code compiled as possible, it is possible to do as following such as I did for the videoenc in the UVC sample:
+
+static const struct device *const videoenc_dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_videoenc));
+
+and thus simply check for the videoenc_dev ptr to see if function must be called or not.
+
+*--- ngphibang (2025-10-24 11:51:19+00:00)
++1 for v4l2-compliance-like tests. I also thought about it.
+
+*--- josuah (2025-10-24 11:52:43+00:00)
+> about adding a new test / compliance video app
+
+I thought about having a "driver validator" test, and I remember `v4l2-compliance`. Very good idea!
+
+*--- josuah (2025-10-24 11:56:33+00:00)
+WRT `caps.type`, the assignment is already done in the current sample, here it just moves it to the static initializer:
+
+https://github.com/zephyrproject-rtos/zephyr/blob/0876b5a2ded100ccc50af797c24f09eae70e4556/samples/drivers/video/capture/src/main.c#L100
+
+https://github.com/zephyrproject-rtos/zephyr/blob/0876b5a2ded100ccc50af797c24f09eae70e4556/samples/drivers/video/capture/src/main.c#L130
+
+Maybe ok to only change the code layout on this PR?
+
+It is a good opportunity to review the semantics though.
+
+*--- josuah (2025-10-24 11:59:06+00:00)
+I wanted to avoid `CONFIG_VIDEO_SOURCE_CROP_WIDTH=1234` but `CONFIG_VIDEO_SOURCE_CROP_HEIGHT=0` be silently ignored by `if (CONFIG_VIDEO_SOURCE_CROP_WIDTH > 0 && CONFIG_VIDEO_SOURCE_CROP_HEIGHT > 0)`
+
+The better behavior is probably to use `||` to avoid confusing silent error?
+
+```
+if (CONFIG_VIDEO_SOURCE_CROP_WIDTH > 0 || CONFIG_VIDEO_SOURCE_CROP_HEIGHT > 0)
+```
+
+*--- josuah (2025-10-24 12:00:08+00:00)
+`DEVICE_DT_GET_OR_NULL()` seems very convenient... TIL!
+
+*--- avolmat-st (2025-10-24 12:23:09+00:00)
+Sure !! No need to modify this part.
+
+*--- avolmat-st (2025-10-24 12:23:58+00:00)
+This is optional here, could well be for another PR later on.
+
+*--- avolmat-st (2025-10-24 12:34:37+00:00)
+It is actually fixed in the last commit hence I mark this as Resolved.
+
+*--- josuah (2025-10-24 12:41:19+00:00)
+Applied!
+
+*--- josuah (2025-10-24 12:51:11+00:00)
+done, good point!
+
+*--- josuah (2025-10-24 12:51:25+00:00)
+adjusted as part of rebase, thanks
+
+*--- josuah (2025-10-24 13:33:37+00:00)
+Good point, I set only "Color bar" as a menu option, and I realize we need to be able to tell the test which menu entry to use, it might not always be `1` (for instance, now it's 0 for `video-sw-generator`), so added a Kconfig for that.
+
+*--- josuah (2025-10-24 13:34:38+00:00)
+I updated the sample to have a Kconfig for the number of frames to test in total an the number of frames that need to be valid for the test to pass (threshold).
+
+*--- josuah (2025-10-24 13:45:25+00:00)
+Another force-push for the compliance check (probably cocci rule unable to make sense out of he `if / else if / else`.
+
+*--- josuah (2025-10-24 13:57:58+00:00)
+@hakehuang 
+
+You might be interested in seeing the new `tests/drivers/video/test_pattern` which is now separated from `samples/drivers/video/capture`.
+
+I hope this suits you well.
+
+*--- ngphibang (2025-10-24 14:28:52+00:00)
+nit: typo `Some drivers support different types of test patterns and/or in a different order`
+
+*--- josuah (2025-10-24 14:41:43+00:00)
+Good catch >_<
+And agreed on better wording.

@@ -1,0 +1,50 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109903
+TITLE: soc: stm32: Deploy XSPIM driver on compatible series
+
+*--- opening post by erwango (2026-05-27 08:57:34+00:00)
+Extend the STM32 XSPIM support introduced previously to other compatible STM32 series
+
+*--- erwango (2026-05-27 09:02:26+00:00)
+I need to revert this.
+
+*--- mathieuchopstm (2026-05-28 15:23:21+00:00)
+Nit: since this now follows the common pattern again, the names could be dropped.
+
+*--- mathieuchopstm (2026-05-28 15:26:21+00:00)
+Nit: commit `soc: stm32: extend xspim manager for h7rs/h5` only touches SoC DTSI but the description mentions driver changes. The description and title should probably be changed (e.g., `dts: arm: st: h5/h7rs: move XSPIM to dedicated node`)
+
+*--- mathieuchopstm (2026-05-28 15:27:53+00:00)
+commit `samples: memc: stm32_mspi: Fix configuration` --> change title to `samples: drivers: memc: stm32_mspi: Fix configuration`?
+
+*--- erwango (2026-05-29 11:55:53+00:00)
+Not supported at driver level yet, I'll skip this.
+
+*--- erwango (2026-05-29 11:59:04+00:00)
+Sure, done.
+
+*--- erwango (2026-06-02 07:24:24+00:00)
+Rebased in the hope to fix CI
+
+*--- erwango (2026-06-18 07:23:40+00:00)
+> LGTM but these changes should probably be added in the migration guide, don't you think?
+
+Good point indeed, I'll do it.
+
+*--- mathieuchopstm (2026-06-18 16:28:55+00:00)
+Nits:
+1. I think this rather belongs in the `STM32` subsection of `Device Drivers and Devicetree` section
+2. Tiny reword
+```suggestion
+* STM32H5-based and STM32H7RS-based boards making use of XSPI controllers should now
+  enable the new dedicated XSPI manager node (:github:`109903`).
+```
+
+But if moved to other section, I would suggest:
+```
+* :dtcompatible:`st,stm32-xspim` is now also used on STM32H5 and STM32H7RS series
+  by adding dedicated node ``&xspim`` for the XSPI Manager. Boards must now enable
+  this node in addition to the desired XSPI controller to use XSPI. (:github:`109903`)
+```
+
+*--- erwango (2026-06-19 06:43:54+00:00)
+Done with slight rewording.

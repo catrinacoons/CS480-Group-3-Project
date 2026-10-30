@@ -1,0 +1,255 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/100030
+TITLE: twister: Support multiple ports in pytest-twister-harness
+
+*--- opening post by gchwier (2025-11-25 13:37:33+00:00)
+This PR adds support for multiple UART connections in `pytest-twister-harness`, enabling testing of multi-core applications where different cores communicate through separate UART interfaces.
+
+Major Refactoring:
+* Extracted connection logic from `DeviceAdapter` to new `DeviceConnection` class hierarchy
+* Created specialized connection implementations:
+  * `SerialConnection` for hardware UART ports
+  * `ProcessConnection` for native simulation pipes
+  * `FifoConnection` for QEMU FIFO communication
+
+Each connection maintains separate log files (`handler.log` - for backward compatibility, `handler_1.log`, etc.) and can be accessed via `connection_index` parameter in device methods like `readlines_until()` and `write()`.
+This enables testing multi-core applications where different cores communicate through separate UART interfaces.
+
+Additional changes:
+- Updated unit tests.
+- Updated pytest-harness documentation, and docstring in API methods (like `readlines_until()`)
+- Updated existing tests that used the `readline_until` method without an explicit `regex` parameter. Since `connection_index` has been added, the `regex` parameter must now be specified explicitly.
+
+-  Updated `sysbuild/hello_world` sample - simplified dual UART testing
+- Converted IPC ICMCG  sample from console harness to pytest harness. Added verification of both application and network core output
+
+---
+To run samples use:
+```
+$ZEPHYR_BASE/scripts/twister --no-clean -vv -ll debug \
+--west-flash=--erase --device-testing --hardware-map ~/tmp/hardware_map.yml \
+-T $ZEPHYR_BASE/samples/subsys/testsuite/pytest/shell \
+-s sample.pytest.shell \
+-s sample.harness.shell \
+-T $ZEPHYR_BASE/samples/sysbuild/hello_world \
+-s sample.sysbuild.hello_world.nrf54l15_cpuflpr \
+-T $ZEPHYR_BASE/samples/subsys/ipc/ipc_service/icmsg \
+-s sample.ipc.icmsg.nrf54l15 \
+-s sample.ipc.icmsg.nrf54l15_no_multithreading \
+-s sample.ipc.icmsg.nrf54l15_remote_no_multithreading \
+-s sample.ipc.icbmsg.nrf54l15 \
+-s sample.ipc.icbmsg.nrf54l15_remote_no_multithreading
+```
+I used nrf54L15DK (instead of hardware map, you can use `-p nrf54l15dk/nrf54l15/cpuapp --device-serial /dev/ttyACM1 --device-serial /dev/ttyACM0` ).
+It can also be tested on nrf54H20 or nrf5340dk.
+Afer execution, you'll find:
+- logs from second core in the console
+- a `handler_1.log` file in test output directory
+
+To verify backward compatibility on native / QEMU:
+```
+$ZEPHYR_BASE/scripts/twister --no-clean  -vv -ll debug \
+-p native_sim -p qemu_cortex_m3  \
+-T $ZEPHYR_BASE/samples/subsys/testsuite/pytest/shell -s sample.pytest.shell
+```
+
+*--- hakehuang (2025-11-26 04:19:01+00:00)
+can we have a full example here, adding hwmap example on how to add multiply serial port?
+
+*--- gchwier (2025-11-26 13:09:42+00:00)
+Thanks! I moved it to twister.rst and added hardware map example. If serial ports are configured (available) for other cores, then the entry is automatically generated with `/scripts/twister --generate-hardware-map map.yml`
+
+*--- fundakol (2025-11-28 16:06:07+00:00)
+No need `bool(...)` here.
+
+*--- fundakol (2025-11-28 16:06:56+00:00)
+No need `bool(...)` here.
+
+*--- fundakol (2025-11-28 16:09:47+00:00)
+No need `bool(...)` here.
+
+*--- fundakol (2025-11-28 16:17:54+00:00)
+You can enumerate from `1` and skip if in the next line.
+```python
+for index, _ in enumerate(connections, 1):
+```
+or 
+```python
+for index in range(1, len(connections) + 1):
+```
+
+*--- fundakol (2025-11-28 16:24:20+00:00)
+You can also remove those files from `.ruff-excludes.toml`.
+
+*--- fundakol (2025-11-28 16:33:51+00:00)
+This won't work. There is no guarantee that `__del__` method will be called by garbage collector.
+
+*--- gchwier (2025-11-28 17:01:22+00:00)
+changed to `for index, _ in enumerate(connections[1:], start=1)`
+
+*--- gchwier (2025-11-28 17:12:13+00:00)
+You are right, however I added this as a fallback cleanup mechanism. `cleanup` is called in `_clear_internal_resources`, that is called after closing connection. During manual testing of QEMU, when something went wrong without proper disconnection / program terminated unexpectedly, I found that files were not deleted .. so I've added it as an additional safety net
+
+*--- gchwier (2025-12-01 11:24:09+00:00)
+Removed `__del__` to avoid confusion.
+
+*--- gchwier (2025-12-08 09:05:50+00:00)
+@nashif please take a look and share your thoughts.
+With these changes, we can now handle output from an additional core (second UART). This output can be processed in pytest tests and is automatically saved in the `handle_1.log` file.
+Changes mostly in `pytest-twister-harness` (plus updates of some tests).
+Changes in Twister core for passing the second serial interface to pytest were implemented in #98179
+
+*--- gchwier (2025-12-09 13:00:18+00:00)
+Rebased only
+
+*--- fundakol (2025-12-09 14:19:33+00:00)
+First, you are accessing a "private" variable from a `DeviceConnection` instance. Second, the `DeviceAdapter` should not be aware of the implementation details of the `DeviceConnection` class. With the current approach, any change in the `DeviceConnection` class will require an update to the `DeviceAdapter` as well (for example, if the name of the variable `_process` changes).
+
+I would change this implementation to something like this:
+```python
+for conn in self.connections:
+    conn.update(process=self._process)
+```
+
+And in the DeviceConnection class add `update` (or `init`) method with kwargs argument which can be a process instance for above case. 
+```python
+class DeviceConnection(ABC):
+    ...
+    def update(self, **kwargs):
+         pass
+````
+
+*--- gchwier (2025-12-09 16:16:30+00:00)
+Thank you for the review! I've updated the code as you suggested.
+
+*--- gchwier (2025-12-12 11:24:26+00:00)
+@nashif thank you for review. Could you take a look once again? I've only updated with the change requested by Łukasz
+
+*--- gchwier (2025-12-15 16:45:39+00:00)
+Friendly reminder, please review
+
+*--- gchwier (2025-12-19 14:29:32+00:00)
+Rebased only
+
+*--- Copilot (2025-12-20 08:27:12+00:00)
+The regex pattern for splitting serial_pty has changed from `',| '` (comma OR space) to `'[, ]'` (single character that is either comma OR space). This changes the behavior:
+
+- Original: splits on comma or space, so `"cmd arg1,arg2"` becomes `["cmd", "arg1", "arg2"]`
+- New: splits on each comma or space character individually, so `"cmd arg1,arg2"` becomes `["cmd", "", "arg1", "", "arg2"]` (with empty strings)
+
+The new pattern will create empty strings in the result when consecutive delimiters are present. The original pattern was more robust.
+```suggestion
+                re.split(',| ', self.serial_config.serial_pty),
+```
+
+*--- Copilot (2025-12-20 08:27:12+00:00)
+Missing `continue` statement after `time.sleep(0.05)`. In the original code flow, when `in_waiting == 0`, the loop should continue waiting. Without the `continue`, the code will fall through to the `else` block, which is incorrect logic. This could cause the thread to busy-loop or behave unexpectedly when no data is available.
+```suggestion
+                time.sleep(0.05)
+                continue
+```
+
+*--- Copilot (2025-12-20 08:27:13+00:00)
+The `is_device_connected()` method returns a truthy value but not necessarily a boolean. When `_serial_connection` is not None, it returns the result of `_serial_connection.is_open`, which is correct. However, when `_serial_connection` is None, this returns None (falsy) instead of False (boolean). While functionally equivalent in boolean context, this is inconsistent with the method's return type hint which specifies `bool`. Consider using `return bool(self._serial_connection and self._serial_connection.is_open)` for clarity and type safety.
+```suggestion
+        return bool(self._serial_connection and self._serial_connection.is_open)
+```
+
+*--- Copilot (2025-12-20 08:27:13+00:00)
+The `readlines_until` method in DeviceAdapter doesn't ensure a default timeout is set when not provided in kwargs. Unlike the `readline` method (lines 105-106) which explicitly sets a default timeout, `readlines_until` directly passes kwargs to the connection's method. While the underlying DeviceConnection.readlines_until does handle None timeout (line 125), it's inconsistent with the pattern used in `readline` and may not match the documented behavior that states it "uses base_timeout if not provided".
+```suggestion
+        self.check_connection(connection_index)
+        if kwargs.get('timeout') is None:
+            kwargs['timeout'] = self.base_timeout
+```
+
+*--- Copilot (2025-12-20 08:27:13+00:00)
+The first hardware map entry in the example is missing the `platform` field. While the second entry has platform information, the first entry should also specify which platform it represents for clarity and consistency. Without this, it's unclear which core or variant the first serial port corresponds to.
+```suggestion
+      id: 001234567890
+      platform:
+      - nrf54l15dk/nrf54l15/cpuapp
+```
+
+*--- Copilot (2025-12-20 08:27:13+00:00)
+The test is accessing private implementation details (`device.connections[0]._fifo_connection._fifo_out_path` and `_fifo_in_path`) which violates encapsulation. While this might be acceptable in unit tests, it creates tight coupling between the test and implementation. Consider adding public methods or properties to check if FIFO files exist, or alternatively document that these implementation details are intentionally exposed for testing purposes.
+```suggestion
+    # Ensure that no FIFO files were created in the build directory
+    assert not any(device.device_config.build_dir.glob('qemu-fifo*'))
+```
+
+*--- Copilot (2025-12-20 08:27:14+00:00)
+This assignment to 'lines' is unnecessary as it is [redefined](1) before this value is used.
+```suggestion
+    shell.exec_command("bt init")
+```
+
+*--- Copilot (2025-12-20 08:27:14+00:00)
+This assignment to 'lines' is unnecessary as it is [redefined](1) before this value is used.
+```suggestion
+    shell.exec_command("bt init")
+```
+
+*--- Copilot (2025-12-20 08:27:14+00:00)
+This assignment to 'lines' is unnecessary as it is [redefined](1) before this value is used.
+
+*--- Copilot (2025-12-20 08:27:15+00:00)
+This assignment to 'lines' is unnecessary as it is [redefined](1) before this value is used.
+```suggestion
+    shell.exec_command("bt init")
+```
+
+*--- Copilot (2025-12-20 08:27:15+00:00)
+This assignment to 'lines' is unnecessary as it is [redefined](1) before this value is used.
+```suggestion
+    shell.exec_command("bt init")
+```
+
+*--- Copilot (2025-12-20 08:27:15+00:00)
+This assignment to 'lines' is unnecessary as it is [redefined](1) before this value is used.
+```suggestion
+    shell.exec_command("bt init")
+```
+
+*--- gchwier (2025-12-22 18:02:08+00:00)
+platform can be added but it is not required as it is second port, only checked if id is the same
+
+*--- gchwier (2025-12-22 18:33:05+00:00)
+really?
+```
+>>> re.split('[, ]', "cmd arg1,arg2")
+['cmd', 'arg1', 'arg2']
+>>> re.split(',| ', "cmd arg1,arg2")
+['cmd', 'arg1', 'arg2']
+```
+changed as in:
+https://github.com/zephyrproject-rtos/zephyr/blob/main/scripts/pylib/twister/twisterlib/handlers.py#L728
+
+*--- gchwier (2025-12-22 18:36:53+00:00)
+`continue` is redundant, because from `elif` block we are not going to `else` block
+
+*--- gchwier (2025-12-22 18:38:22+00:00)
+"might be acceptable in unit tests"
+
+*--- gchwier (2025-12-22 18:44:32+00:00)
+I don't maintain those tests, only updated the API to `readlines_until` method and this assignment does not cause any functional issues.
+
+*--- gchwier (2025-12-22 18:49:50+00:00)
+This was changed from an explicit boolean return due to a previous review comment requesting simpler logic. Since the return value is used in boolean contexts where None and False are functionally equivalent, the current implementation is acceptable.
+
+*--- gchwier (2025-12-22 19:01:08+00:00)
+Agreed, this inconsistency existed before refactoring. No functional change here - when timeout isn't provided, base_timeout is still used by the underlying connection. The timeout logic can be addressed in a separate PR.
+
+*--- JingsaiLu (2026-01-07 10:48:27+00:00)
+hi @gchwier , 
+multiple ports seems to be only configured in the command line for pytest, 
+how to test multiple boards/platforms, which configured in map yaml,
+do we need to update the relavant scripts for map yaml to include multiple ports configurations ?
+
+*--- gchwier (2026-01-07 11:05:07+00:00)
+> hi @gchwier , multiple ports seems to be only configured in the command line for pytest, how to test multiple boards/platforms, which configured in map yaml, do we need to update the relavant scripts for map yaml to include multiple ports configurations ?
+
+Not only from the command line, you can add second port (with the same `id`) in the hardware map: https://docs.zephyrproject.org/latest/develop/test/twister.html#multi-core-testing-support
+
+When running `./scripts/twister --generate-hardware-map map.yml` with nrf board connected, then second board is found and added automatically to the file (only in the app core `platform` and `runner` fields must be updated).
+
+And yes, it is added only for pytest harness. Other harnesses uses logic from twister core to access serial.

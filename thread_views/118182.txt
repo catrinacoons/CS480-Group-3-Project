@@ -1,0 +1,47 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118182
+TITLE: sysbuild: forward Python variables to variant images
+
+*--- opening post by egnor (2026-09-03 01:52:21+00:00)
+This extends #101921 to the sibling function it missed.
+
+That PR added `WEST_PYTHON` and `Python3_EXECUTABLE` to the shared variable list in `ExternalZephyrProject_Add()`, so that "the parent CMake and the sub-processes" do not "use different Python environment". `ExternalZephyrVariantProject_Add()` has the same list and did not get the same two entries, so a variant image still runs `find_package(Python3)` in its own configure step and uses whatever it finds on `PATH`.
+
+The two normally agree, which is why this is easy to miss. They diverge when the interpreter running west is not the first Python on `PATH` — for example when west lives in a virtual environment alongside an SDK-provided interpreter. The build then configures its variant image with a different Python than every other image in the same build.
+
+I ran into this through NCS's `mcuboot_s1_variant`, which is added with `ExternalZephyrVariantProject_Add()`. Before the change it was the only image in the build whose cache resolved its own interpreter:
+
+```
+app                  _Python3_EXECUTABLE:INTERNAL=.../usr/local/bin/python3.12
+b0                   _Python3_EXECUTABLE:INTERNAL=.../usr/local/bin/python3.12
+mcuboot              _Python3_EXECUTABLE:INTERNAL=.../usr/local/bin/python3.12
+mcuboot_s1_variant    Python3_EXECUTABLE:FILEPATH=.../usr/local/bin/python     <-- own search
+```
+
+After it, all four agree on `python3.12`.
+
+To pre-empt the question raised on #101921: these variables do reach variant images through the sysbuild image cache, but not early enough. `python.cmake` runs before that cache is read, so `find_program()` has already resolved an interpreter by the time the cached value appears. That is the same timing problem #101921 addressed for regular images.
+
+A variant image is the source application rebuilt with an extra devicetree overlay — the variant CMake module path contains only `dts.cmake`. Board, source directory, and build type all come from the source application. Resolving a different Python there is not a deliberate difference; for the MCUboot S0/S1 pair in particular the two images should differ only in their partition.
+
+In my own environment both code paths happen to reach the same interpreter, so nothing breaks here. The report that led me to this came from a VS Code extension that provisions a venv, where "if there's multiple pythons on the `PATH` things break real fast" — the case where they do not agree.
+
+Two things I left alone, happy to fold in either way:
+
+- The comments are copied verbatim from `ExternalZephyrProject_Add()` so both lists surface together whenever the temporary exports are revisited. #87083 has since merged (2026-08-26), so the "waiting for" is now only about the `extensions.cmake` cleanup, but I did not want to rewrite that text here.
+- That list has also gained `ZEPHYR_BASE`, which the variant list still lacks. I have no evidence about it so I did not touch it, but it may be the same oversight.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+https://claude.ai/code/session_01AmuCL1YNre6jonsYu9sRjY
+
+*--- tejlmand (2026-09-03 13:46:30+00:00)
+changes looks ok, but is a 20 line commit message really needed for this small change ?
+
+If every commit message starts to span 20+ lines, then it becomes much harder to use `git log` to identify the really important changes in the Zephyr tree.
+
+*--- egnor (2026-09-03 17:21:50+00:00)
+> changes looks ok, but is a 20 line commit message really needed for this small change ?
+> 
+> If every commit message starts to span 20+ lines, then it becomes much harder to use `git log` to identify the really important changes in the Zephyr tree.
+
+Distilled the commit message.

@@ -1,0 +1,52 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115952
+TITLE: ethernet: nxp_enet_qos: align devicetree with other snps,dwmac controllers
+
+*--- opening post by tpambor (2026-08-11 20:34:04+00:00)
+The `nxp,enet-qos` ethernet controller used a two-node hierarchy (parent `nxp,enet-qos` for clocks + child `nxp,enet-qos-mac` for interrupts/MAC), which is inconsistent with other `snps,dwmac` controllers like MCX E series (https://github.com/zephyrproject-rtos/zephyr/pull/115755), [ESP32 ](https://github.com/zephyrproject-rtos/zephyr/blob/bbb2da98a3a83a40e42f713c46c653d4a57e0c28/dts/riscv/espressif/esp32p4/esp32p4_common.dtsi#L677-L697) or [STM32](https://github.com/zephyrproject-rtos/zephyr/blob/bbb2da98a3a83a40e42f713c46c653d4a57e0c28/dts/arm/st/h7/stm32h7.dtsi#L1231-L1252). This PR collapses it into a single `nxp,enet-qos` node.
+
+Tested with `sample.net.ptp` on `frdm_mcxn947/mcxn947/cpu0`
+
+*--- maass-hamburg (2026-08-11 22:17:29+00:00)
+use title here as snps,dwmac.yaml also uses the title
+
+*--- kartben (2026-08-11 22:26:20+00:00)
+You can't have a title without a description though, as the latter is a mandatory property. It should probably be the other way around (title required, description optional) but that's a different story
+
+*--- tpambor (2026-08-12 11:45:19+00:00)
+> you need to combine the commits, so it is bi-selectable. If i would jump between the dts and the driver commits, the drivers would not work.
+
+Sure, I split it to ease review as otherwise it would unfortunately be a single large commit. I will squash it.
+
+*--- butok (2026-08-12 13:28:06+00:00)
+@Martin-Pitonak-NXP
+Please review PR.
+
+*--- iuliana-prodan (2026-08-17 01:38:31+00:00)
+@MaochenWang1 could you please take a look at this?
+Thanks!
+
+*--- hakehuang (2026-08-18 06:16:38+00:00)
+why the dts node name and file name are not matched?
+
+*--- tpambor (2026-08-18 06:41:51+00:00)
+Smaller diff, but sure I can rename the file to `eth_nxp_enet_qos.c`
+
+*--- maass-hamburg (2026-08-18 06:52:29+00:00)
+Probably a good idea to put the renaming in a separate commit so git recognized it is a rename and the git history is preserved
+
+*--- tpambor (2026-08-18 07:03:49+00:00)
+Sure, I have an additional commit for it now
+
+*--- maass-hamburg (2026-08-18 15:05:40+00:00)
+@butok @iuliana-prodan @zejiang0jason your approval as assignees is also needed
+
+*--- fabiobaltieri (2026-08-18 18:17:09+00:00)
+hey, needs a rebase
+
+*--- tpambor (2026-08-18 18:26:48+00:00)
+> hey, needs a rebase
+
+Thanks, done. Conflicts due to https://github.com/zephyrproject-rtos/zephyr/commit/a4ad0f546f3c53e6c1ca64ea0202541a41bfd911, clean rebase, no conflicts to resolve.
+
+*--- tpambor (2026-08-19 06:16:53+00:00)
+@butok @iuliana-prodan @zejiang0jason please take a look

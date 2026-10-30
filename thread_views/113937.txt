@@ -1,0 +1,5 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113937
+TITLE: drivers: serial: uart_rzt2m: Fix baud table bounds check
+
+*--- opening post by kartben (2026-07-19 11:43:55+00:00)
+The enum index guard used '>' against ARRAY_SIZE, allowing a read one element past the end of baud_settings[]. Use '>='.

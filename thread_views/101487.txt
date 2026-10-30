@@ -1,0 +1,339 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/101487
+TITLE: Add support XSPI for S32K5
+
+*--- opening post by haduongquang (2025-12-24 07:03:11+00:00)
+Add support for NXP S32 XSPI controller.
+
+Add a shim driver for xspi hyperRAM memory devices on a NXP S32 XSPI bus. 
+
+Enable samples and tests for the S32K5XXCVB on-board IS66WVH8M8DALL memory.
+
+*--- JarmouniA (2025-12-24 10:49:37+00:00)
+the `zephyr,flash-controller` chosen device is the controller of `zephyr,flash`.
+https://docs.zephyrproject.org/latest/build/dts/api/api.html#zephyr-specific-chosen-nodes
+
+*--- JarmouniA (2025-12-24 11:12:13+00:00)
+About nodes naming: https://devicetree-specification.readthedocs.io/en/latest/chapter2-devicetree-basics.html#generic-names-recommendation
+
+*--- JarmouniA (2025-12-24 11:19:49+00:00)
+this is the same as `erase-block-size`, no?
+As defined here for ex. https://github.com/zephyrproject-rtos/zephyr/blob/e93279e773f95010c495aced866b62baeb0fe1b8/dts/bindings/mtd/nxp%2Cc40-flash.yaml#L13
+or here https://github.com/zephyrproject-rtos/zephyr/blob/e93279e773f95010c495aced866b62baeb0fe1b8/dts/bindings/mtd/soc-nv-flash.yaml#L8
+
+*--- haduongquang (2025-12-26 06:34:37+00:00)
+> @haduongquang please address the twister build failures. Beware that your hal_nxp PR was mistakenly merged prematurely ([zephyrproject-rtos/hal_nxp#648 (comment)](https://github.com/zephyrproject-rtos/hal_nxp/pull/648#issuecomment-3689792534)) so I'm not so sure if the build failures happen because of the manifest may need updates to no longer point to that PR. Worst case, the hal_nxp PR should be reverted back and resume this review with a fresh hal_nxp PR.
+
+I've fixed it.
+
+*--- haduongquang (2025-12-26 11:14:42+00:00)
+No, it's different. This properties is the page size for writing (typically 256B-few KB), while erase-block-size is the sector size for erasing (typically much larger, like 8KB-64KB).
+
+*--- haduongquang (2025-12-26 11:14:56+00:00)
+I updated
+
+*--- haduongquang (2025-12-26 11:20:54+00:00)
+You're right, zephyr,flash-controller should match zephyr,flash. Since we're using &cmram (RAM) for zephyr,flash, no flash controller is needed. So I removed it.
+
+*--- manuargue (2025-12-26 14:35:26+00:00)
+>Allowed combinations:
+> - NXP_S32_XSPI_SECURE
+> - NXP_S32_XSPI_SECURE | NXP_S32_XSPI_PRIVILEGE
+> - NXP_S32_XSPI_NON_SECURE | NXP_S32_XSPI_PRIVILEGE
+> - NXP_S32_XSPI_NON_SECURE | NXP_S32_XSPI_SECURE | NXP_S32_XSPI_PRIVILEGE
+
+We should add a build-time assertion to prevent invalid combinations from being used.
+
+*--- manuargue (2025-12-26 14:38:06+00:00)
+```suggestion
+ * Copyright 2025 NXP
+```
+
+*--- manuargue (2025-12-26 14:39:30+00:00)
+This #include is in the header, but the header doesn’t seem to use it. Could it be moved to the .c file instead?
+
+*--- manuargue (2025-12-26 14:43:20+00:00)
+```suggestion
+    enum: [19, 22, 27, 34, 46, 67, 115]
+```
+Would it make more sense to expose the actual drive strength in ohms here, rather than the register encoding? DT bindings usually describe hardware characteristics, not register values, which would make this clearer and less error-prone.
+
+*--- manuargue (2025-12-26 14:51:01+00:00)
+```suggestion
+  refresh-interval-multiplier:
+    type: string
+    enum:
+      - "1"
+      - "1.5"
+      - "2"
+      - "4"
+    default: "1"
+    description: |
+      Automatic memory refresh interval multiplier. Controls how frequently memory is refreshed.
+      Defaults to reset value.
+```
+This property is a multiplier of the default. To allow fractional numbers it could be a string (as in [example](https://github.com/zephyrproject-rtos/zephyr/blob/23354f3cad32cf77ac7ca9fc82450b183601277e/dts/bindings/pinctrl/ambiq%2Capollo3-pinctrl.yaml#L79-L85)). Also, the default value isn’t specified, please clarify and justify it (e.g., reset value).
+
+*--- manuargue (2025-12-26 14:51:55+00:00)
+default should be added to `default` prop and justified (e.g. hw reset value)
+
+*--- manuargue (2025-12-26 14:54:54+00:00)
+> Selects the clock types:
+
+```suggestion
+  master-clock-type:
+```
+typo?
+
+*--- manuargue (2025-12-26 15:15:22+00:00)
+> @[manuargue](https://github.com/manuargue) manuargue requested review from [JarmouniA](https://github.com/JarmouniA) and removed request for [Dat-NguyenDuy](https://github.com/Dat-NguyenDuy), [MaochenWang1](https://github.com/MaochenWang1), [PetervdPerk-NXP](https://github.com/PetervdPerk-NXP), [ZhaoxiangJin](https://github.com/ZhaoxiangJin), [congnguyenhuu](https://github.com/congnguyenhuu) and [de-nordic](https://github.com/de-nordic) [14 minutes ago](https://github.com/zephyrproject-rtos/zephyr/pull/101487#event-21759895279)
+
+Sorry @de-nordic and @Dat-NguyenDuy, I tried requesting a review using Copilot, but it didn’t work and ended up removing some reviewers. I’m unable to add you back manually.
+
+*--- JarmouniA (2025-12-26 17:21:18+00:00)
+```suggestion
+	hyperram: flash-controller@0 {
+```
+
+*--- JarmouniA (2025-12-26 17:23:25+00:00)
+What is the use of this header?
+
+*--- manuargue (2025-12-26 18:36:12+00:00)
+```suggestion
+	is66wvh8m8dall: flash-controller@0 {
+```
+I wouldn't remove the node label `is66wvh8m8dall`. @JarmouniA's previous comment was about the node name. And pls remove the comment in line above, the node label is explicit enough.
+
+*--- haduongquang (2025-12-30 11:27:35+00:00)
+I updated
+
+*--- haduongquang (2025-12-30 11:27:44+00:00)
+I updated
+
+*--- haduongquang (2025-12-30 11:28:06+00:00)
+I moved to the .c file
+
+*--- haduongquang (2025-12-30 11:28:23+00:00)
+I updated
+
+*--- haduongquang (2025-12-30 11:30:25+00:00)
+I updated
+
+*--- haduongquang (2025-12-30 11:30:38+00:00)
+I updated
+
+*--- haduongquang (2025-12-30 11:31:05+00:00)
+right, I updated
+
+*--- haduongquang (2025-12-30 11:31:26+00:00)
+I updated
+
+*--- haduongquang (2025-12-30 11:35:57+00:00)
+the `flash_nxp_s32_xspi_hyperram.c` will include it to use the `memc_nxp_s32_xspi_get_instance` function
+
+*--- haduongquang (2025-12-30 11:37:12+00:00)
+Updated:
+- rebased main
+- addressed all comments
+
+*--- JarmouniA (2025-12-30 14:34:21+00:00)
+Why does the flash driver need to call that function?
+Because that means it cannot work without the memc driver being enabled.
+
+*--- manuargue (2025-12-31 09:05:57+00:00)
+This is a common pattern with NXP external memory controllers because the hardware IP exposes multiple ports. In Zephyr, we map the main controller as a memc driver and treat each port as a flash controller driver. You’ll see the same approach in other NXP memory controller implementations.
+
+*--- Dat-NguyenDuy (2026-01-02 09:01:24+00:00)
+fixed conflict
+
+*--- JarmouniA (2026-01-04 12:17:01+00:00)
+```suggestion
+  up to eight bidirectional data lines, depending on the platform.
+```
+
+*--- JarmouniA (2026-01-04 12:18:18+00:00)
+```suggestion
+      Align incoming data with 2x serial flash half clock, when in DDR
+```
+
+*--- JarmouniA (2026-01-04 12:18:30+00:00)
+```suggestion
+      Use half-cycle early DQS delay when sampling received data.
+```
+
+*--- JarmouniA (2026-01-04 12:18:43+00:00)
+```suggestion
+      Sample received data at inverted clock.
+```
+
+*--- JarmouniA (2026-01-04 12:19:39+00:00)
+```suggestion
+      This value must be >= 2.
+```
+
+*--- JarmouniA (2026-01-04 12:20:01+00:00)
+```suggestion
+      This value must be >= 2.
+```
+
+*--- JarmouniA (2026-01-04 12:21:07+00:00)
+```suggestion
+      True if serial flash controller is word (2 bytes) addressable.
+```
+
+*--- JarmouniA (2026-01-04 12:21:33+00:00)
+```suggestion
+      True if serial flash controller is word (4 bytes) addressable.
+```
+
+*--- JarmouniA (2026-01-04 12:23:38+00:00)
+```suggestion
+      Master IDs for the AHB receive buffers. The master ID of every incoming
+```
+
+*--- JarmouniA (2026-01-04 12:25:39+00:00)
+```suggestion
+      DLL mode. The supported modes depend on the SoC.
+```
+
+*--- JarmouniA (2026-01-04 12:26:12+00:00)
+```suggestion
+      Select delay-chain for high frequency of operation.
+```
+
+*--- JarmouniA (2026-01-04 12:30:36+00:00)
+```suggestion
+      Enable fixed priority for target group 1 (TG1). When disabled,
+```
+
+*--- JarmouniA (2026-01-04 12:31:13+00:00)
+```suggestion
+      Lock configuration registers after initialization until next reset.
+```
+
+*--- JarmouniA (2026-01-04 12:36:41+00:00)
+A child node that's attached to a child-binding is not supposed to have a compatible, please see https://github.com/zephyrproject-rtos/zephyr/pull/101383#issuecomment-3706480102
+So unless the properties included here can be used alone in a child-node & without compatible, this child-binding should be removed.
+
+*--- haduongquang (2026-01-05 11:22:04+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:22:10+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:22:16+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:22:26+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:22:32+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:22:38+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:22:46+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:22:54+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:23:00+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:23:06+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:23:12+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:23:19+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:23:24+00:00)
+I updated
+
+*--- haduongquang (2026-01-05 11:23:35+00:00)
+I deleted
+
+*--- JarmouniA (2026-01-05 14:12:35+00:00)
+```suggestion
+      Enable differential clock output on CKN pad for side A of the
+```
+
+*--- JarmouniA (2026-01-05 14:12:53+00:00)
+```suggestion
+  a-diff-clk:
+```
+
+*--- JarmouniA (2026-01-05 14:13:34+00:00)
+```suggestion
+  a-rx-clk-src:
+```
+
+*--- manuargue (2026-01-05 17:02:04+00:00)
+Let’s leave them as they are to align with the qspi s32 binding for consistency. You are welcome to open a pr to address both bindings.
+
+*--- manuargue (2026-01-05 17:02:23+00:00)
+Same as above
+
+*--- manuargue (2026-01-06 14:56:22+00:00)
+@Dat-NguyenDuy pls rebase and fix the conflicts.
+
+Hey @de-nordic, could you take a look at this PR when you get a chance? Thanks!
+
+*--- Dat-NguyenDuy (2026-01-07 02:20:38+00:00)
+I've updated
+
+*--- Dat-NguyenDuy (2026-01-07 02:20:54+00:00)
+I've resolved conflicts
+
+*--- Dat-NguyenDuy (2026-01-08 09:43:42+00:00)
+Resolved conflicts.
+
+*--- JarmouniA (2026-01-08 13:29:47+00:00)
+@manuargue please do not resolve my comments.
+
+*--- Dat-NguyenDuy (2026-01-09 08:19:10+00:00)
+> @manuargue please do not resolve my comments.
+Hi @JarmouniA, i saw you liked Manuel's replies, so i understood that you agreed with him. I'm not sure if we are on the same page.
+
+*--- JarmouniA (2026-01-09 10:07:17+00:00)
+> Hi @JarmouniA, i saw you liked Manuel's replies, so i understood that you agreed with him. I'm not sure if we are on the same page.
+
+It means I acknowledged them, not agreed (I would resolve the comments if I agreed). But in any case, they are just suggestions, not change requests, so the author has the freedom to implement or ignore.
+And it's perfectly fine for a PR to be merged with unresolved comments.
+
+*--- Dat-NguyenDuy (2026-01-16 02:50:33+00:00)
+Resolved conflicts in the manifest file
+
+*--- Dat-NguyenDuy (2026-01-20 10:52:50+00:00)
+Resolved conflicts
+
+*--- Dat-NguyenDuy (2026-01-21 05:58:03+00:00)
+Rebased to resolve conflicts
+
+*--- manuargue (2026-01-22 20:45:48+00:00)
+@Dat-NguyenDuy pls support with one more rebase 💪 
+@mmahadevan108 the hal_nxp PR could be merged already, so we can move forward with this PR. Thanks
+
+*--- Dat-NguyenDuy (2026-01-23 03:15:09+00:00)
+> @Dat-NguyenDuy pls support with one more rebase 💪 @mmahadevan108 the hal_nxp PR could be merged already, so we can move forward with this PR. Thanks
+I've rebased
+
+*--- mmahadevan108 (2026-01-23 17:53:03+00:00)
+@Dat-NguyenDuy , need to rebase
+
+*--- Dat-NguyenDuy (2026-01-26 02:35:58+00:00)
+> @Dat-NguyenDuy , need to rebase
+
+I've rebased
+
+*--- Dat-NguyenDuy (2026-01-28 04:11:19+00:00)
+Rebased to resolve conflict
+
+*--- de-nordic (2026-01-29 12:43:55+00:00)
+size == 0 is not reason for failure, with size == 0 you are not going to do any work.
+
+*--- Dat-NguyenDuy (2026-01-30 04:04:04+00:00)
+I've updated

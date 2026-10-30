@@ -1,0 +1,11 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114006
+TITLE: drivers: flash: si32: Fix alignment check return values
+
+*--- opening post by kartben (2026-07-19 20:27:58+00:00)
+flash_si32_valid_range() returns bool, but the write alignment checks returned -EINVAL, which converts to true and marks
+misaligned writes as valid. An odd size then made the write loop read one byte past the source buffer. Return false as the other checks do.
+
+*--- kartben (2026-07-21 06:16:19+00:00)
+> Nice catch. How did you find this?
+
+A pass on the codebase with Claude Code Fable :)

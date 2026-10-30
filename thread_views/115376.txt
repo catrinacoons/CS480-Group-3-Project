@@ -1,0 +1,13 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115376
+TITLE: drivers: i2c: document speed accessors, hide the field layout
+
+*--- opening post by kartben (2026-08-05 06:27:51+00:00)
+`I2C_SPEED_SET()` and `I2C_SPEED_GET()` are the public way to encode and
+decode the speed field of the configuration word, so document those.
+
+The shift and mask they are built from describe the bit layout behind
+those accessors and are only referenced from within the I2C drivers, so
+exclude them from the generated documentation. They move next to each
+other so a single cond block covers both.
+
+Documentation only, no functional change.

@@ -1,0 +1,23 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116201
+TITLE: Bluetooth: Classic: AVDTP: Clear conn marker on connect failure
+
+*--- opening post by jhedberg (2026-08-13 12:24:11+00:00)
+bt_avdtp_connect() sets session->br_chan.chan.conn before calling bt_l2cap_chan_connect() in order to detect simultaneous local and remote AVDTP signaling connection attempts. If bt_l2cap_chan_connect() fails before the channel has been added to the connection, for example with -ENOTCONN when the ACL is no longer connected, or through one of the early argument and state checks in bt_l2cap_br_chan_connect(), no disconnected callback will ever run for the channel and the marker is never cleared. a2dp_get_connection() treats a non-NULL marker as a session in use, so every subsequent bt_a2dp_connect() for that connection index fails with -ENOMEM, including attempts on future ACL connections that reuse the same connection object.
+
+Clear the marker on the error path of bt_l2cap_chan_connect(), holding avdtp_sem_lock like the other accesses to the marker. It is only cleared if it still holds the value set above, since a failure that occurs after the channel was added to the connection has already cleared it in bt_l2cap_br_chan_del().
+
+The accept side sets the same marker in bt_avdtp_l2cap_accept(), but there the L2CAP server code owns the channel lifecycle after accept returns and deletes the channel with bt_l2cap_br_chan_del() on the failure paths, which clears the marker.
+
+*--- lylezhu2012 (2026-08-20 14:15:20+00:00)
+I think we need to consider remove the code line `session->br_chan.chan.conn = conn;` to fix the issue.
+
+*--- jhedberg (2026-08-20 17:26:41+00:00)
+@lylezhu2012 That clears the leak, but it also reopens the race the marker was added for in 6a6f2c2fca0. `bt_l2cap_chan_connect()` only sets `chan->conn` in `l2cap_br_chan_add()`, i.e. after `bt_avdtp_connect()` has dropped `avdtp_sem_lock`. An AVDTP connect request arriving in that window is handled in the RX thread, and `bt_avdtp_l2cap_accept()` sees `chan.conn == NULL`, so it takes the new-signaling-channel branch and hands the same `br_chan` to the L2CAP server while the local connect is still using it. `a2dp_accept()` -> `a2dp_get_connection()` also memsets the whole `struct bt_a2dp` on that path, on top of the session being initialized.
+
+Keeping the marker and clearing it only when the connect failed before the channel was added keeps that window closed. If you'd rather AVDTP didn't write L2CAP's `chan->conn` at all, the alternative is a separate flag like the original `signalling_l2cap_connected`, but that also touches the `a2dp_get_connection()` in-use check, so it's a bigger change than this fix.
+
+*--- jhedberg (2026-09-01 06:41:37+00:00)
+@lylezhu2012 could you take another look, please? I responded to your comment two weeks ago.
+
+*--- lylezhu2012 (2026-09-01 06:58:08+00:00)
+Agreed.

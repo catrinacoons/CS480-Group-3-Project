@@ -1,0 +1,50 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108754
+TITLE: drivers: misc: add ADG1736 dual SPDT analog switch driver
+
+*--- opening post by amiclaus (2026-05-08 14:15:00+00:00)
+Add a driver for the Analog Devices ADG736/ADG1736 family of dual
+SPDT (Single Pole, Double Throw) analog switches. Each device
+contains two independently controlled switches that route a signal to
+one of two paths (A or B) via GPIO control.
+
+The driver provides APIs for individual switch control (set/get path),
+enable/disable via the optional EN pin (ADG1736 only), and reset of
+both switches to the default state (path B).
+
+Supported variants:
+- ADG736:  dual SPDT, no enable pin
+- ADG1736: dual SPDT, optional enable pin
+
+*--- MaureenHelm (2026-05-08 15:34:41+00:00)
+Is there a reason you didn't define this property in `dts/bindings/misc/adi,adg1736.yaml`?
+
+*--- MaureenHelm (2026-05-15 16:31:49+00:00)
+Why is the board-specific overlay needed? The arduino header is defined in `boards/adi/sdp_k1/arduino_r3_connector.dtsi`
+
+*--- kartben (2026-05-26 15:14:48+00:00)
+our guidelines call for 100 columns - this is wrapped very aggressively, please consider fixing :)
+
+*--- kartben (2026-05-26 15:15:35+00:00)
+```suggestion
+  full_name: EVAL-ADG1736SDZ Dual SPDT Analog Switch Shield
+```
+
+*--- kartben (2026-05-26 15:16:25+00:00)
+```suggestion
+    - misc
+```
+
+*--- Copilot (2026-05-26 15:25:47+00:00)
+The sample claims to support both ADG736 and ADG1736 (and sample.yaml filters on either compatible), but the devicetree node selection is hard-coded to only `adi,adg1736`. Building this sample on a board with only an `adi,adg736` instance will fail at compile time.
+
+*--- Copilot (2026-05-26 15:25:48+00:00)
+Public Zephyr headers typically add a C++ linkage guard so the API can be consumed from C++ code. This header is missing the opening `extern "C"` block.
+
+*--- Copilot (2026-05-26 15:25:48+00:00)
+The C++ linkage guard needs a matching closing brace before the include guard `#endif`.
+
+*--- Copilot (2026-05-26 15:25:49+00:00)
+`adg1736_set_switch_state()` validates the switch index but not the requested `state`. Any out-of-range value currently falls through to "connect B" which can hide caller bugs and is inconsistent with the `-EINVAL` behavior for invalid `sw`.
+
+*--- nordicjm (2026-05-27 13:18:25+00:00)
+no space alignment for this in Kconfig

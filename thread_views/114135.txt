@@ -1,0 +1,47 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114135
+TITLE: posix: mutex: remove global lock from the acquisition fast path
+
+*--- opening post by kartben (2026-07-20 22:26:13+00:00)
+`acquire_mutex()` took a module-global semaphore on every lock, but that lock
+is only needed to serialize the one-time auto-init of a statically-initialized
+mutex. Pushed it into `to_posix_mutex()` (double-checked re-test) so an
+already-initialized handle acquires lock-free, reading owner/type/lock_count
+locklessly — exactly as `pthread_mutex_unlock()` already does.
+
+Removes an SMP scalability bottleneck and a single-core priority-inversion window.
+
+**Benchmark** (`qemu_cortex_a53`): 1M uncontended lock/unlock pairs drop from **817 to 508
+cycles/pair (~38% fewer)**.
+
+**Tests:** adds a `PTHREAD_MUTEX_INITIALIZER` regression test; `threads_base` passes.
+
+*--- kartben (2026-07-30 22:36:30+00:00)
+@ycsin can you help review please?
+
+*--- ljd42 (2026-08-03 18:25:14+00:00)
+@cfriedt  and @ycsin 
+
+I don't have enough experience with that particular subsystem to make a sound review. 
+
+But the proposed change looks  like a double checked locking pattern. On some architecture, wouldn't a memory barrier be required?
+
+*--- cfriedt (2026-08-04 09:45:55+00:00)
+pthread barriers are used for something slightly different, where explicitly known threads need to align on a checkpoint before proceeding. They are kind of handy for some things.
+
+Lazy init of mutex and condition variable resources is a bit of a side-effect to working around a number of things; differently sized mutexes across implementations, the fact that they can be (theoretically) either kernel or user objects (not strictly one or the other), and that mutexes are not futexes (which are limited to userspace and also nicely work on the stack too). Otherwise, we could use static initialization.
+
+Because lazy init does not support static initialization (it's intentionally the opposite) it can create a bit of a race condition when an unknown number of threads try to use the same uninitialized object.
+
+*--- cfriedt (2026-08-04 09:55:35+00:00)
+The structure here might be improved by only attempting to "get" an already initialized mutex outside of holding the semaphore.
+
+@ljd42 - is that the double lock you're referring to?
+
+*--- ljd42 (2026-08-04 18:18:55+00:00)
+Hi @cfriedt ,
+
+I'm not talking about pthread barriers, but memory barrier (aka membar, memfence or fence). That is (a set of) CPU instructions that enforces a constraint ordering on memory operations. 
+
+I suspect this proposed change could have an issue on multi-core systems. See [this article](https://preshing.com/20130930/double-checked-locking-is-fixed-in-cpp11/) for instance. The article discusses C++, but the same apply to C.
+
+Or am I off-the-mark ?

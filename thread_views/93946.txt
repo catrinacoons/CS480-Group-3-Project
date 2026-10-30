@@ -1,0 +1,212 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/93946
+TITLE: bt: host: gatt: Implement GATT GAP callbacks
+
+*--- opening post by rkel (2025-07-31 16:00:55+00:00)
+Implementation of the GAT callbacks that allows controlling from the application level the values written to Device Name and Appearance and provides the mechanism to notify the Application about accepted change.
+
+The peripheral sample was modified to present the new functionality.
+
+This is the implementation of the issue #93723.
+
+*--- cvinayak (2025-08-01 09:32:55+00:00)
+It is better to update the `peripheral_hr` sample, as it has bsim CI coverage alongwith `central_hr`. Updating these samples and covering the feature in bsim improves the quality metrics and catch regressions.
+
+*--- alwa-nordic (2025-08-01 11:09:24+00:00)
+```suggestion
+```
+
+`conn` is not always available. The name could be changed by public API `bt_set_name`.
+
+I suggest removing it from the on-change callback to avoid thinking about it. But am OK with documenting is as optionally available in general, and guaranteed available if the change was initiated by a ATT request from a remote device to the GAP GATT Service.
+
+We should clearly document that `name_verify` is a callback from the GATT GAP Service and only fires for that name change interface. Other ways of setting the name will not use this callback.
+
+Note that also `conn` in `name_verify` may be NULL because locally invoking `bt_gatt_attr::write(conn=NULL)` is allowed. We could potentially automatically reject it in the gatt.c:write_name, but that would be a potentially breaking change.
+
+*--- alwa-nordic (2025-08-01 11:12:56+00:00)
+What are the thread safety properties of this new API?
+
+*--- alwa-nordic (2025-08-01 11:17:28+00:00)
+I see this PR does not call `name_changed` when `bt_set_name` is called. I think developers would expect it to. (Yes, `bt_set_name` should have been named `bt_gap_set_name`).
+
+*--- alwa-nordic (2025-08-01 12:12:46+00:00)
+BTW, as I point out in https://github.com/zephyrproject-rtos/zephyr/discussions/93921, `bt_set_name` is unfortunately not thread-safe. We should think about how to make it or its replacement thread-safe when we define this observer APIs guarantees with regards to `bt_set_name`.
+
+Shall there be one invocation of `name_changed` for every call to `bt_set_name`? In that case, we have to make `bt_set_name` into a blocking function, as it must block on a lock while the previous name is broadcast.
+
+Maybe we should instead summarize `bt_set_name` so that multiple calls to it can coalesce to just broadcast the latest value? Should we then ensure the broadcast has distributed the value to all listeners so that all listeners see the name sequence? Or should we drop those and restart broadcast with the newest value as soon as possible?
+
+Which thread should invoke the callbacks? Should it be done on the stack of `bt_set_name`? Then we have to be mindful of recursive calls to `bt_set_name`. It also makes `bt_set_name` be a deadlock hazard for the thread calling it. We also would not be sure how much stack space we have.
+
+*--- rkel (2025-08-01 21:07:16+00:00)
+@alwa-nordic 
+> I see this PR does not call name_changed when bt_set_name is called. I think developers would expect it to.
+
+I cannot agree. If application calls bt_set_name it has already a way to know that the name is going to be changed. The only unknown "point of change" is when it is changed via client using GATT write to GAP service.
+
+> Note that also conn in name_verify may be NULL because locally invoking bt_gatt_attr::write(conn=NULL) is allowed. 
+
+The conn argument is really here just a a reference for the user to be able to implement any more complicated mechanism to verify if the name may be changed. The reason for placing it in _changed callback is to be able to notify other clients about the change (I know that BT standard does not allow it right now, but on the application side we can implement any other way of sending such a notification using any vendor define service).
+
+> Which thread should invoke the callbacks?
+
+I suppose right now it is called from the receiving thread of the stack and that also clears the issues with multithread access from my perspective.
+
+I get your reasoning for implementing it, but the reason for this PR is totally different topic and implemented in a way it is right now - it does not need any multithreading support until we do not move the notification callback into bt_set_name from its current place.
+
+*--- rkel (2025-08-01 21:10:41+00:00)
+Exactly the same like bt_conn_cb_register and bt_conn_cb_unregister. Are we documenting it? I cannot see anything that I would relate to thread safety documentation for mentioned functions. Is there any standardized way to do so?
+
+*--- rkel (2025-08-01 21:13:28+00:00)
+Thank you for sharing this. I will move it there - but it may take me a moment as I have to finish a few other tasks first.
+
+*--- Thalley (2025-08-04 09:14:18+00:00)
+> I cannot agree. If application calls bt_set_name it has already a way to know that the name is going to be changed. The only unknown "point of change" is when it is changed via client using GATT write to GAP service.
+
+There are cases where multiple applications are running on a device, each with their own advertising set (which is also why we want to have informational callbacks as a list of callbacks). If application A changes the name locally, then application B will still need to update the device name it is advertising. I agree with @alwa-nordic that local changes should still trigger callbacks. 
+
+w.r.t. the thread issue, that's also something we are trying to deal with in the LE Audio implementation, where we have many cases of attribute values that may be changed locally or remotely. In those cases we are generally dealing with
+
+1. Local application is reading or writing to modify a local value. This may occur in any thread, and any remote device may be writing or reading to the same value in the BT RX thread. For trivial values it's not a big issue, but for larger values that may need to be formatted on air, we use a mutex to lock the attribute, where remote access is guarded with a small timeout (e.g. 10ms in the read or write callbacks), and local access are guarded with K_NO_WAIT and will return an error immediately if the local change cannot occurs due to the mutex being locked
+2. Notifications sent based on value changes are usually done in the system workqueue. The reason for this is that whenever a change is happening, we may not have free ATT buffers to send/enqueue the notification immediately. Handling the notifications in the system workqueue with a dirty-bit approach allows us to easily implement a retry-if-no-buffers solution. Any access to the resources here is also guarded, and if the mutex cannot be taken immediately we simply retry with a delay. 
+
+We are not yet completely at a place where everything is properly guarded, or if the current solution is optimal, but it does work a lot better than doing nothing :)
+
+*--- Thalley (2025-08-04 09:17:26+00:00)
+I'm not 100% of board with this naming. 
+
+GAP is a profile where some values (like the Device Name) is accessible through GATT, but GAP is much more than just a few GATT attributes. 
+
+I would prefer to handle everything GAP related in a `bt_gap` namespace, regardless of whether it's GATT-based changes (this also better matches the naming used by all the LE Audio profiles as well as the other various GATT-based services and profiles we have in Zephyr (DIS, OTP/S, BAS, etc.)
+
+*--- Thalley (2025-08-04 09:19:52+00:00)
+For the `conn` or parameter, the behavior we have in many LE Audio profiles are that local changes are indicated by `conn == NULL`. For many of those changes there are usually other behavior tied to the `conn`, so LE Audio have a definite use case for this, but not so sure if GAP has that
+
+*--- Thalley (2025-08-04 09:24:11+00:00)
+Just an FYI: We have several times over the year discussed a significant re-write of how GATT is implemented in Zephyr, as the current design has a fairly fatal flaw in that write requests need to be handled immediately (see e.g. https://github.com/zephyrproject-rtos/zephyr/issues/29270). 
+
+During some of these discussions we also discussed callbacks with return values, where this is a mismatch between wanting to support asynchronous GATT requests and callbacks with return values. Until we actually get started on support asynchronous GATT requests, this isn't really an issue, but just wanted to mention it here
+
+*--- Thalley (2025-08-04 09:26:50+00:00)
+There is a recent PR that allows the user to only used the static bt_conn callbacks in https://github.com/zephyrproject-rtos/zephyr/pull/93703
+
+Should we consider omitting the dynamic callbacks in this PR, and only define the `BT_GATT_GAP_CB_DEFINE` approach? I think for most cases `BT_GATT_GAP_CB_DEFINE` is superior in terms of memory, with only a very small performance hit since callbacks registration cannot be delayed until they are needed or unregistered.
+
+*--- Thalley (2025-08-04 09:29:15+00:00)
+We generally do not guard definitions in the header files, as that doesn't really help anything and prevents users from using the `IS_ENABLED` macro
+
+```suggestion
+```
+
+*--- Thalley (2025-08-04 09:30:01+00:00)
+Have a look at the comments from https://github.com/zephyrproject-rtos/zephyr/pull/93703 - I think we can avoid the guard here and rely on the `IS_ENABLED` macro
+
+*--- Copilot (2025-08-04 09:30:42+00:00)
+The comment says 'Handle appearance write request' but the function is actually for verifying the request before it's processed, similar to name_verify. It should be 'Verify the appearance write request' to match the actual purpose.
+
+*--- Copilot (2025-08-04 09:30:42+00:00)
+There's significant code duplication between write_name_verify/write_name_notify_cb and write_appearance_verify/write_appearance_notify_cb. Consider extracting the common callback iteration pattern into a macro or helper function to reduce duplication.
+
+*--- alwa-nordic (2025-08-04 12:05:49+00:00)
+`bt_conn_cb_unregister()` does not have any thread-safety properties listed, and the implementation is also not thread-safe. And I think this is unfortunate and would like us to do something about this.
+
+Your solution here is not any worse than what we already have as you point out. I did not mean that it's up to you alone to find an answer. But we need to think this through and discuss it. Since I think we want to revamp the whole name/appearance API we have a chance to do it properly.
+
+I will insist that `bt_conn_cb_register()` and `bt_conn_cb_unregister()` should at the very least be thread-safe. It must be callable in a multi-threaded environment without corruption. The implementation uses `sys_slist` functions that are not all thread-safe.
+
+Apart from that, I also think a developer would expect that last invocation of the callback to be unregistered is finished before `bt_conn_cb_unregister()` returns. This would be a nice guarantee to have, but it is a double edged sword. To fulfill this, `bt_conn_cb_unregister()` has to wait for any current invocation of the callback to finish. This is a hazard that we should document to warn the user if we have.
+
+Alternatively, `bt_conn_cb_unregister()` can safely fail and return an error when the callback is currently in use. This may be the simplest option. We can have both blocking and non-blocking versions by e.g. taking a timeout parameter.
+
+Finally, instead of a blocking in `bt_conn_cb_unregister()`, we can make the API asynchronous. This both frees up a user thread for other purposes, but importantly also draws attention to the fact that a unregister may be waiting for other stuff to finish.
+
+I would like more discussion around this. Does anyone think differently than me about this?
+
+*--- alwa-nordic (2025-08-05 11:32:57+00:00)
+I agree, I would like the prefix to be `bt_gap`. The Bluetooth specification is referring to this as just the "GAP Service", so we too can maybe drop the "GATT"? I'm fine with ether `bt_gap_service_cb` or `bt_gap_gatt_service_cb`.
+
+*--- Thalley (2025-08-05 11:50:08+00:00)
+We should also consider moving the GAP service into a gap.c
+
+*--- alwa-nordic (2025-08-05 11:50:20+00:00)
+For clarity: I misread and thought this struct is `bt_gap_cb`. I see now that these callbacks are all only for the GAP Service. In this case, it's not too terrible to have a callback that fires when the write in GAP Service is accepted.
+
+But the PR description does not seem to want specifically this. It's just describing a callback for a name change, which I take to mean that the callback notifies it's time to poll `bt_get_name()`.
+
+*--- alwa-nordic (2025-08-05 11:52:39+00:00)
+Yes. Into `gap_svc.c` even better.
+
+*--- rkel (2025-08-05 22:04:53+00:00)
+Generally it is nice to have feature for the cb_register and cb_unregister to be thread safe. From other side - I personally am not using it at all. All my applications are using only build time macros using Iterable Sections. The only time I am using register and unregister functions are the places where I cannot decide on build time what I will need to connect and I am using them only in initialization. So I am not really good option to discuss exactly why and when we need it in real application.
+
+*--- rkel (2025-08-06 09:11:05+00:00)
+@cvinayak Where I can find the test scripts? I mean - I know already how to run the tests in BSim and how to check the outputs manually. But I cannot find the real tests in the repository. Maybe I should also update some code here to properly analyze the output log including the name change?
+
+*--- rkel (2025-08-06 09:31:06+00:00)
+Yes. I will update the description. Generally, my reasoning to propagate the information about conn in notification of the change is to give the device a possibility to notify all other connected clients, with the exception of the one that triggered the change, about the new device name. 
+It might simplify the user code to have a callback that always notifies about the name change - even though it was done by the application itself. But such applications usually have its own internal synchronization. Would it be ZBus, nRF CAF, or any other mechanism it is user responsibility to take care of it. And we can provide it and it would be used in rare complex applications. But the whole complicated code to take care of synchronization would stay here in the stack all the time. I am not sure if this is good way to go. I will change the description of the commit to point out that this relates to GAP service.
+I was discussing the naming in the issue #93723. At the beginning I had rather opinion to go towards bt_gap prefixes. But I had a feeling that the discussion goes toward using rather bt_gatt. The proposal here was more or less a compromise. Maybe I was not quite clear what I mean in the linked issue. Now when we all know that this strongly relates to GAP service I will try to rewrite it to be clear.
+
+*--- rkel (2025-08-06 09:57:37+00:00)
+Just to consider and the middle of reading through all the comments - there may be also totally different and more flexible solution. What do you think about extracting the gap service to services/gap.c - I am talking only about the service itself. And then we can enable it by default but leaving the user the option to disable the default implementation and implement anything more sophisticated / specialized inside its own application. In the end, from just the service perspective it is nothing more than 4 currently implemented characteristics.
+
+@Thalley, @alwa-nordic, @cvinayak - before I put more work into it, please lets discuss if the option presented here is not the option we wish to go - I mean:
+1. Separate GAP service into services, lets put it into services/gap_default.c, leaving its functionality exactly as it is right now.
+2. Add an option to disable default implementation.
+3. Add a sample where the default implementation is disabled and the service is implemented in the application with callbacks.
+
+*--- alwa-nordic (2025-08-06 11:43:59+00:00)
+Do you mean how the bsim tests are ran in CI?
+
+https://github.com/zephyrproject-rtos/zephyr/blob/0f66e9c68088e79f33edb5ed500d9f54da6a2c3e/.github/workflows/bsim-tests.yaml#L169
+
+Or do you mean unit testing? You will find those in tests/bluetooth and you can run them using `cd tests/bluetooth && west twister -GiT .`, for example.
+
+I this this change can be confidently unit tested. I suggest we assume GATT writes are already tested separately, so we only need to test that the attribute exists and that a write to it triggers callbacks correctly.
+
+*--- alwa-nordic (2025-08-06 12:09:44+00:00)
+Let's consider not implementing dynamic registration at all. Dynamic can always be implemented on top of static by the application or a convenience library.
+
+There are multiple different approaches for such a library, so I expect there would be more than one such library. Like for your case, it would make sense to have static registration with initialization-time enabling. I think this can be more RAM-efficient than a generic dynamic registration, especially if we need locking and other bells and whistles.
+
+Maybe dynamic registration is overkill for most users. We can point our users to the pattern where the callback itself keeps track of whether it is enabled, and just exits if it's not. And the implementer of the callback will be better informed about what kind of synchronization the callback needs when it's being disabled. Often no synchronization is necessary. This is a point for letting the callback itself handle disabling.
+
+We would want samples for various use cases to inform our users. One use case is for dynamic handlers during unit testing, where we would normally like to remove handlers specific to one test before running the next test. How to do this safely and conveniently is worth researching and documenting.
+
+*--- rkel (2025-08-06 21:21:46+00:00)
+Yes - we can. And a static variable would be automatically removed if not accessed in the file. But also - I had proposed even more dramatic update to #93703 -> #94193. The main reason for  this was to remove _node from the list if not used.
+
+*--- cvinayak (2025-08-07 07:10:13+00:00)
+`peripheral_hr` and `central_hr` sample are tested in bsim here: https://github.com/zephyrproject-rtos/zephyr/tree/169b47ce38aef2a7a6c2e0e09430b82c5ce3115b/tests/bsim/bluetooth/samples/central_hr_peripheral_hr
+
+audio samples are tested here: https://github.com/zephyrproject-rtos/zephyr/tree/169b47ce38aef2a7a6c2e0e09430b82c5ce3115b/tests/bsim/bluetooth/audio_samples
+
+These tested samples reuse the on-target sample implementations and ensure users get similar experience when using the sample on target.
+
+Ideally I will vote for, adding two new samples to demonstrate the new feature in the PR; and, it is not too much to cover it in bsim sample testing.
+
+This my thoughts on coverage (feel free correct me if otherwise, if something else is documented), in increasing order of quality goals:
+1. build, cover the control path compilation ( in  `tests/bluetooth/init` or existing samples) 
+2. Use the feature in existing `samples/bluetooth`, OR (3)
+3. Add new feature specific `samples/bluetooth/feature`
+4. Add bsim execution of re-usable `samples/bluetooth/feature`, OR (5)
+5. Add bsim execution of feature specifics `tests/bsim/bluetooth/feature`
+6. Add unit testing, `tests/bluetooth/feature`
+
+In this PR, (1) and peripheral side of (2)  or (3) is manually testable.
+
+If `peripheral_hr` and `central_hr`  is updated, then both user can manually test, and the feature gets bsim coverage.
+
+*--- rkel (2025-08-07 16:02:23+00:00)
+@Thalley, @alwa-nordic, @cvinayak - here is proof of concept of what I was posting in my last comment: #94235. It is a draft as there are still samples, tests and documentation missing. Also maybe I should move more Kconfigs into Kconfig.gap_default. 
+
+I was testing it manually and now I can enable and disable default GAP implementation. Lets talk if it is not better approach - giving the freedom to totally reimplement the GAP if user needs it.
+
+*--- Thalley (2025-08-11 07:57:30+00:00)
+I agree with the above statement (see my original comment here: https://github.com/zephyrproject-rtos/zephyr/pull/93946#discussion_r2250924534)
+
+*--- jhedberg (2025-08-14 10:42:27+00:00)
+As per Bluetooth WG discussion, this should probably be closed, since the consensus was to have a service that can be disabled through Kconfig.
+
+*--- rkel (2025-08-14 10:57:27+00:00)
+Agree. Then I will continue with #94235.

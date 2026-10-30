@@ -1,0 +1,65 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/71026
+TITLE: mgmt: hawkbit: optimize poll_sleep
+
+*--- opening post by maass-hamburg (2024-04-03 08:25:24+00:00)
+-  remove unnecessary condition for CONFIG_HAWKBIT_POLL_INTERVAL, this is already enforced by the Kconfig `range 1 43200`, so it does not have to be checked again in `hawkbit.c`
+- changes poll_sleep to be in seconds,
+- change type of sleep_time in hawkbit_update_sleep(), so the return value of hawkbit_time2sec() can be interpreted correctly.
+
+*--- kartben (2024-04-04 08:19:54+00:00)
+not related to this PR but, from a quick look at `hawkbit_time2sec` implementation, it feels like there is probably a lot of room for improvement there in terms of error handling
+
+*--- kartben (2024-04-04 08:21:44+00:00)
+same here re: error handling, might be worth handling better the case where `hawkbit_time2sec` returns -1?
+
+*--- kartben (2024-04-04 08:32:55+00:00)
+courtesy of chatgpt, might be a good starting point?
+
+```
+#include <stdlib.h> // For strtol
+#include <stdbool.h> // For bool type
+
+static int hawkbit_time2sec(const char *s) {
+    long hours, minutes, seconds;
+    char *next;
+
+    // Validate and convert hours
+    hours = strtol(s, &next, 10);
+    if (*next != ':' || hours < 0) return -1;
+
+    // Validate and convert minutes
+    minutes = strtol(next + 1, &next, 10);
+    if (*next != ':' || minutes < 0 || minutes >= 60) return -1;
+
+    // Validate and convert seconds
+    seconds = strtol(next + 1, &next, 10);
+    if (*next != '\0' || seconds < 0 || seconds >= 60) return -1;
+
+    return (hours * 3600) + (minutes * 60) + seconds;
+}
+```
+
+*--- kartben (2024-04-04 08:41:19+00:00)
+@maass-hamburg you may not have pushed the right fix?
+
+*--- maass-hamburg (2024-04-04 08:44:09+00:00)
+> @maass-hamburg you may not have pushed the right fix?
+
+@kartben it looks right to me, the commit message has changed
+
+*--- kartben (2024-04-04 08:47:24+00:00)
+> > @maass-hamburg you may not have pushed the right fix?
+> 
+> @kartben it looks right to me, the commit message has changed
+
+mmmh, no? :) https://github.com/zephyrproject-rtos/zephyr/pull/71026/commits/d54bc7161e958a4cf0138758f1f9fad5d261a0ef
+
+*--- maass-hamburg (2024-04-04 08:52:28+00:00)
+> > > @maass-hamburg you may not have pushed the right fix?
+> > 
+> > 
+> > @kartben it looks right to me, the commit message has changed
+> 
+> mmmh, no? :) [d54bc71](https://github.com/zephyrproject-rtos/zephyr/commit/d54bc7161e958a4cf0138758f1f9fad5d261a0ef)
+
+@kartben Oops changed it the wrong way around, should be right now.

@@ -1,0 +1,161 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/96330
+TITLE: drivers: input: add ft6146 driver
+
+*--- opening post by ck-telecom (2025-09-21 08:31:09+00:00)
+add initial driver for ft6146
+
+*--- faxe1008 (2025-09-21 09:13:05+00:00)
+Check your editor setting newline at eof
+
+*--- faxe1008 (2025-09-21 09:14:25+00:00)
+Move to end of struct to save on padding
+
+*--- faxe1008 (2025-09-21 09:16:48+00:00)
+This one is not used?
+
+*--- faxe1008 (2025-09-21 09:19:59+00:00)
+Maybe you can use the input touch, also gets you point rotation etc.
+https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers%2Finput%2Finput_ft5336.c#L54
+
+*--- faxe1008 (2025-09-21 15:12:13+00:00)
+Since there is an early return no need for else clause
+
+*--- faxe1008 (2025-09-21 15:14:19+00:00)
+LOG_DBG typically already prints the function name
+
+*--- fabiobaltieri (2025-09-23 11:09:13+00:00)
+no need for the parenthesis here
+
+*--- fabiobaltieri (2025-09-23 11:09:34+00:00)
+drop the initializers, there sare all assigned before they are used
+
+*--- fabiobaltieri (2025-09-23 11:10:15+00:00)
+reverse the condition, return early, unindent the code below
+
+btw is this expected or an error? wondering if there should be a log somewhere
+
+*--- fabiobaltieri (2025-09-23 11:12:16+00:00)
+`gpio_pin_set_dt` is supposed to set the logical value, so "assert reset" should be `gpio_pin_set_dt(..., 1)`, swap this and the one below and make sure your board is defined with this pin as active low
+
+*--- fabiobaltieri (2025-09-23 11:14:17+00:00)
+`ft6146_reset` also has a check for `config->reset_gpio.port`, maybe fold the `device_is_ready` and `gpio_pin_configure_dt` in there? then you can also initialize the pin as `GPIO_OUTPUT_ACTIVE` and get rid of a gpio set call
+
+*--- fabiobaltieri (2025-09-23 11:15:18+00:00)
+typically you'd validate the id against a known good value and log an error or warning if it does not match, how about doing that instead?  it's good practice to not print anything if nothing bad happens
+
+*--- fabiobaltieri (2025-09-23 11:15:34+00:00)
+drop, see the message above
+
+*--- ck-telecom (2025-09-25 02:30:00+00:00)
+just ignore more than 2 touch points
+
+*--- fabiobaltieri (2025-09-25 08:45:27+00:00)
+ok, comment still applies, do
+
+```c
+if (tuch_num >= MAX_POINT_NUM) {
+        return;
+}
+...
+/* rest of the code inline */
+```
+
+instead
+
+*--- fabiobaltieri (2025-09-26 16:54:19+00:00)
+@ck-telecom hey feel free to undraft when you want another round on review, meanwhile in case you missed it check the sonarqubecloud comment as well, there' some valid stuff in there.
+
+*--- faxe1008 (2025-10-04 10:47:40+00:00)
+There is `i2c_is_ready_dt`
+
+*--- faxe1008 (2025-10-04 10:48:34+00:00)
+Is it possible to have this in one operation?
+
+*--- fabiobaltieri (2025-10-13 09:52:57+00:00)
+still relevant
+
+*--- fabiobaltieri (2025-10-13 09:55:11+00:00)
+initialize as `GPIO_OUTPUT_ACTIVE` so it asserts the pin for you, then you can drop this `gpio_pin_set_dt`
+
+*--- fabiobaltieri (2025-10-13 09:55:49+00:00)
+is there a soft reset option via i2c?
+
+*--- fabiobaltieri (2025-10-13 09:58:12+00:00)
+this is doing a |= of an unitialized value, should be `chip_id = tmp << 8`, surprised the compiler does not complain about it, btw can you add an instance of this under `tests/drivers/build_all/input/app.overlay` as well?
+
+*--- fabiobaltieri (2025-10-13 09:58:51+00:00)
+maybe `-ENOTSUP`?
+
+*--- ck-telecom (2025-10-15 13:56:55+00:00)
+not support? no such a device maybe better
+
+*--- fabiobaltieri (2025-10-17 12:57:08+00:00)
+I read it as: the specific device is not supported by this driver. Also the log should be `%04x`
+
+*--- fabiobaltieri (2025-10-17 12:58:16+00:00)
+uh, the id check is gone now?
+
+*--- fabiobaltieri (2025-10-17 13:06:25+00:00)
+I'm a bit confused, why did you remove the device ID check? That was a very useful to have, I was just asking to change the return code and fix the error message to always show the full 16 bits
+
+*--- ck-telecom (2025-10-17 13:16:05+00:00)
+> I'm a bit confused, why did you remove the device ID check? That was a very useful to have, I was just asking to change the return code and fix the error message to always show the full 16 bits
+
+the chip id in my board is not same with original driver(other platform), so for now just ignore it coz I can't find the datasheet from the internet.
+
+*--- fabiobaltieri (2025-10-20 14:45:20+00:00)
+This is unused?
+
+*--- fabiobaltieri (2025-10-20 14:46:01+00:00)
+what are 0 and 1? first press and repeat? maybe add some defines for them
+
+*--- fabiobaltieri (2025-10-20 14:47:04+00:00)
+does it make sense to process all the touch_num? how does this react to multiple touches?
+
+*--- fabiobaltieri (2025-10-20 14:50:53+00:00)
+there's a lot of those `i * 6` in this block, how about adding local variable in the loop and using that as an offset? like
+
+```c
+uint8_t *point = &point_data[i * 6];
+```
+
+and then you should be able to just refer to these like `point[2]` etc... May be worth to add defines for those offsets too
+
+*--- fabiobaltieri (2025-10-30 11:52:24+00:00)
+few compliance checks are failing, can you take a look?  https://github.com/zephyrproject-rtos/zephyr/actions/runs/18906468271/job/53965816759?pr=96330
+
+*--- gmarull (2025-11-04 19:50:51+00:00)
+missing ready check
+
+*--- gmarull (2025-11-04 19:51:11+00:00)
+```suggestion
+DT_INST_FOREACH_STATUS_OKAY(FT6146_DEFINE)
+```
+
+*--- gmarull (2025-11-04 19:53:07+00:00)
+magic numbers here: define shifts/masks
+
+*--- gmarull (2025-11-04 19:53:39+00:00)
+ifdef to CONFIG_INPUT_FT6146_INTERRUPT
+
+*--- Copilot (2025-11-04 19:55:31+00:00)
+Incorrect config name 'INPUT_FT6416_PERIOD' should be 'INPUT_FT6146_PERIOD' to match the driver name.
+```suggestion
+config INPUT_FT6146_PERIOD
+```
+
+*--- Copilot (2025-11-04 19:55:32+00:00)
+Config symbol name 'CONFIG_INPUT_FT6416_PERIOD' is incorrect. It should be 'CONFIG_INPUT_FT6146_PERIOD' to match the Kconfig definition. This will cause a build error as the config symbol doesn't exist.
+```suggestion
+	k_timer_start(&data->poll_timer, K_MSEC(CONFIG_INPUT_FT6146_PERIOD),
+		      K_MSEC(CONFIG_INPUT_FT6146_PERIOD));
+```
+
+*--- Copilot (2025-11-05 13:21:02+00:00)
+The work queue is initialized after the interrupt/timer handlers are set up. This creates a potential race condition where the handlers could trigger before the work is initialized. Move `k_work_init` before the interrupt/timer setup (lines 196-225).
+
+*--- Copilot (2025-11-05 13:21:02+00:00)
+The function returns `ret` which may be uninitialized in the non-interrupt path. In the polling mode path (lines 221-224), `ret` is not assigned after the successful timer initialization. Return 0 explicitly here instead.
+
+*--- Copilot (2025-11-05 13:21:02+00:00)
+Missing `INPUT_TOUCH_STRUCT_CHECK(struct ft6146_config);` validation macro after the struct definition. This macro is used in similar drivers (ft5336, stmpe811, chsc5x) to ensure the common config is properly positioned as the first member for the touchscreen API.

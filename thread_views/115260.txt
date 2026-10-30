@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115260
+TITLE: bluetooth: classic: avdtp: fix typo in `UNSUPPORTED_CONFIGURATION`
+
+*--- opening post by lylezhu2012 (2026-08-04 02:41:18+00:00)
+Fix typo in `BT_AVDTP_UNSUPPORTED_CONFIGURATION` constant name. The constant was misspelled as `BT_AVDTP_UNSUPPORTED_CONFIGURAION`.
+
+Update the enum definition in `avdtp.h` and all references in `a2dp.c` to use the correct spelling.
+
+*--- Copilot (2026-08-04 02:43:59+00:00)
+Renaming this public error-code constant in a public header is an API-breaking change for downstream users that may still reference the misspelled identifier. Consider keeping a backward-compatible alias for at least one release cycle (e.g., a deprecated alias macro) so existing applications continue to build while they migrate to the corrected spelling.

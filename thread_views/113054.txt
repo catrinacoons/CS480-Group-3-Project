@@ -1,0 +1,11 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113054
+TITLE: modules: openthread: Fix CMake style in CMakeLists.txt
+
+*--- opening post by pdgendt (2026-07-08 16:52:07+00:00)
+Convert the `CONFIG_OPENTHREAD` and `CONFIG_OPENTHREAD_SOURCES` guards to early returns instead of wrapping the whole file, so the body no longer needs re-indenting, and fix the remaining nested-block indentation.
+
+*--- nashif (2026-07-08 17:30:14+00:00)
+did not know this works with cmake :)
+
+*--- Cristib05 (2026-07-09 04:35:34+00:00)
+I think added libs should also be indented. Or at least, that's what I've seen in practice and in some guidelines. Other than that, LGTM.

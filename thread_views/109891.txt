@@ -1,0 +1,38 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109891
+TITLE: drivers: audio: add dummy codec stub driver
+
+*--- opening post by TomasBarakNXP (2026-05-27 06:32:39+00:00)
+- Create a dummy codec stub driver for testing and development purposes.
+- Add an audio_codec node to the native_sim.dts
+- Add Kconfig option
+- Create a dts binding for the dummy stub
+
+Edit by @aescolar: Split from https://github.com/zephyrproject-rtos/zephyr/pull/106976
+
+*--- aescolar (2026-05-27 08:02:23+00:00)
+Is there some reason to limit it to this? (or to limit the bitwidts, rate and channels?)
+
+*--- TomasBarakNXP (2026-05-27 08:45:45+00:00)
+Probably not, I will remove the limitation.
+
+*--- TomasBarakNXP (2026-05-27 08:52:30+00:00)
+@aescolar do you know why the "check_init_priorities" is failing? Should I fix it here or should it be fixed separately?
+
+*--- aescolar (2026-05-27 09:22:00+00:00)
+> @aescolar do you know why the "check_init_priorities" is failing? Should I fix it here or should it be fixed separately?
+
+I guess for the same reason as why it failed in https://github.com/zephyrproject-rtos/zephyr/pull/106976 : this PR is adding an extra node which offsets the DT numbering, and that test is comparing against a hardcoded expected output.
+You can change the text in validate_check_init_priorities to the new output here in this same commit so it keeps passing. (Independently you may want to submit the change to that check_init_priorities test in a separate PR)
+
+*--- TomasBarakNXP (2026-05-27 09:29:37+00:00)
+> > @aescolar do you know why the "check_init_priorities" is failing? Should I fix it here or should it be fixed separately?
+> 
+> I guess for the same reason as why it failed in #106976 : this PR is adding an extra node which offsets the DT numbering, and that test is comparing against a hardcoded expected output. You can change the text in validate_check_init_priorities to the new output here in this same commit so it keeps passing. (Independently you may want to submit the change to that check_init_priorities test in a separate PR)
+
+I have submitted a PR #109908
+
+*--- aescolar (2026-06-04 07:49:38+00:00)
+if you could that would be nice
+
+*--- kartben (2026-06-04 10:54:03+00:00)
+`zephyr,codec-dummy`? Basically align with `zephyr,dummy-dc`

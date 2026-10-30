@@ -1,0 +1,460 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/95329
+TITLE: Bluetooth: Host: LTK request callback
+
+*--- opening post by alwa-nordic (2025-09-02 11:53:31+00:00)
+Introduce experimental option CONFIG_BT_HOOK_CONN_LTK_REQUEST to allow the application to handle missing LTKs for peripheral connections.
+
+Recommended review order:
+ - [subsys/bluetooth/host/Kconfig](https://github.com/zephyrproject-rtos/zephyr/pull/95329/files#diff-3abe882adb2271b5b37793fb9cd859d2ac5cbaa4450c9556668a6a6d696341b0)
+ - [include/zephyr/bluetooth/hci.h](https://github.com/zephyrproject-rtos/zephyr/pull/95329/files#diff-a96f52552d17b370752af9e806fc9c1dbffc2bd3e2aae2b12fc152ecab950e2e)
+ - [subsys/bluetooth/host/hci_core.c](https://github.com/zephyrproject-rtos/zephyr/pull/95329/files#diff-774b3de86adb275da54becf2a0958a2d4dae03d63e47840037ecc575e9d658b4)
+ - [tests/bsim/bluetooth/host/security/ltk_request_hook/test_ltk_request_hook.c](https://github.com/zephyrproject-rtos/zephyr/pull/95329/files#diff-851bb93a640e15e8b74d6c5af42f0491d2c73de9386ce7b35c1fc0ecc4b2b8a9)
+ - everything else
+
+*--- jhedberg (2025-09-02 12:33:19+00:00)
+My initial concern with this is that `struct bt_conn` is a higher-level abstraction than HCI, whereas this seems to mix passing a reference to the app and then expect the app to move one level down and do the responding using HCI? I'd prefer if we could just use the host-internal LTK response logic and have the hook somewhere there instead.
+
+Another question is how does this relate to our plans to have more flexible storage backends (remove dependency on settings, support ZMS, ITS, etc)? Such a flexible storage API could potentially allow the app do do a custom storage backend and provide LTK values that way.
+
+*--- alwa-nordic (2025-09-02 14:28:21+00:00)
+> https://github.com/zephyrproject-rtos/zephyr/pull/95329#pullrequestreview-3176554071
+
+I can convert it to the callback-register pattern instead. No problem. Any input on the details? What do we do when `bt_conn_ltk_request_cb_register` is called the second time?
+
+*--- alwa-nordic (2025-09-02 14:30:56+00:00)
+> https://github.com/zephyrproject-rtos/zephyr/pull/95329#pullrequestreview-3176554071
+
+The code you propose requires the LTK response to be synchronous on the callback thread. Is that good enough?
+
+*--- alwa-nordic (2025-09-02 15:23:16+00:00)
+https://github.com/zephyrproject-rtos/zephyr/pull/95329#issuecomment-3245132722
+> My initial concern with this is that `struct bt_conn` is a higher-level abstraction than HCI, whereas this seems to mix passing a reference to the app and then expect the app to move one level down and do the responding using HCI? I'd prefer if we could just use the host-internal LTK response logic and have the hook somewhere there instead.
+
+I agree with out. I don't like it myself. The reason it ended up like this is that I wanted the app to be able to respond asynchronously. But it did not look good to make the reply API block on command allocation. And it also did not look good to take a timeout.
+
+The best way to do it would be to have an infallible ltk_reply to the Host which would be asynchronously processed in tx_processor. That requires some space in bt_conn to hold the pending LTK, but I think that's fine.
+
+This is a good time to figure it out. Opinions?
+
+*--- PavelVPV (2025-09-02 20:10:07+00:00)
+> > [#95329 (review)](https://github.com/zephyrproject-rtos/zephyr/pull/95329#pullrequestreview-3176554071)
+> 
+> I can convert it to the callback-register pattern instead. No problem. Any input on the details? What do we do when `bt_conn_ltk_request_cb_register` is called the second time?
+
+I don't see why there should be many users of the callback.
+
+> > [#95329 (review)](https://github.com/zephyrproject-rtos/zephyr/pull/95329#pullrequestreview-3176554071)
+> 
+> The code you propose requires the LTK response to be synchronous on the callback thread. Is that good enough?
+
+It doesn't seem that the spec defines any timeout for the response. Extracting the key from a persistent  storage may take time depending on that storage. Thus, blocking Host may not be a good idea. But the application should provide the key ASAP. Ideally, it should be also possible for the application to respond immediately in the callback.
+
+> The best way to do it would be to have an infallible ltk_reply to the Host which would be asynchronously processed in tx_processor. That requires some space in bt_conn to hold the pending LTK, but I think that's fine.
+
+Could you explain why key needs to be stored in `bt_conn`? Why can't [ltk_reply](https://github.com/zephyrproject-rtos/zephyr/blob/fd526daba40ff1af25802f35e9bd2e212a73cdcc/tests/bsim/bluetooth/host/security/ltk_request_hook/test_ltk_request_hook.c#L90-L118) function be part of API?
+
+*--- alwa-nordic (2025-09-03 08:49:57+00:00)
+> > The best way to do it would be to have an infallible ltk_reply to the Host which would be asynchronously processed in tx_processor. That requires some space in bt_conn to hold the pending LTK, but I think that's fine.
+> 
+> Could you explain why key needs to be stored in `bt_conn`?
+
+This is my "the best way to do it" proposal. It needs to be stored in `bt_conn` *if* I modify `ltk_reply` to be non-blocking and infallible so it can't return -ENOBUFS. If it can't allocate the command buffer the key needs to be stored somewhere else.
+
+> Why can't [ltk_reply](https://github.com/zephyrproject-rtos/zephyr/blob/fd526daba40ff1af25802f35e9bd2e212a73cdcc/tests/bsim/bluetooth/host/security/ltk_request_hook/test_ltk_request_hook.c#L90-L118) function be part of API?
+
+That's a valid option. We could. The reason I didn't initially was to keep the API changes in this PR minimal.
+
+@jhedberg in https://github.com/zephyrproject-rtos/zephyr/pull/95329#issuecomment-3245132722 expresses concern that the application uses HCI directly to respond. Let's consider this when defining `ltk_reply` as an API. Should the semantics be the application is replying to the Host, not the Controller? I think that's a good idea. Do you agree?
+
+Can we make a public API that GAP/SMP uses, and that the application can use as well? Let's consider this. How will it work? Should GAP have priority somehow? Or does one or the other have exclusive access, determined per connection? Or should there globally be one user of this API, so if the application wants to both control the encryption some times and have GAP do it otherwise, then it has to forward requests to GAP.
+
+Let's consider whether I'm making the right thing at all. Maybe we should instead focus on a way for the application to import or provide a pairing/bond? I think this may be more messy for the application that just wants to encrypt the connection.
+
+*--- alwa-nordic (2025-09-03 12:35:58+00:00)
+I'll put this in conn.h instead, since I understand the consensus it that we want this API to exist at that level.
+
+*--- alwa-nordic (2025-09-03 12:56:33+00:00)
+I got a question about why this is missing the `ediv` and `rand` values from the parameters. I thought I would leave them out because they are legacy SMP-specific fields, so they will not be used by any modern application. I though adding them is just wasting ROM bytes. I also found it hard to document these fields well because the spec is a bit hard to follow.
+
+I think I know what these fields are, but I will have to spend some time verifying it. I'm fairly sure these values are just "higher layer data" associated with the centrals attempt to encrypt this connection, and that the Controllers do not care what's there and just copy it from Central Host Enable Encryption command to Peripheral Host LTK Request. I think they are sent in plaintext. Someone correct me if I'm wrong.
+
+I will add them just in case someone needs them. E.g. if someone is implementing SMP on top of this API.
+
+*--- alwa-nordic (2025-09-03 15:14:09+00:00)
+I'll also change it to the 'register callback' pattern, as requested. I'll go for the simplest approach: no unregister or changing the callback once it's set.
+
+*--- PavelVPV (2025-09-04 07:37:14+00:00)
+It can also be a `..._handler(callback)_set` function. An application can pass `NULL` to unregister callback.
+
+*--- alwa-nordic (2025-09-04 08:55:53+00:00)
+I'll add a non-blocking unregister. Is that fine?
+
+*--- PavelVPV (2025-09-04 08:59:17+00:00)
+Up to you. I just don't see a reason why we can't allow to disable handling of the request in application. If there is one, please write it here.
+
+*--- aescolar (2025-09-05 11:27:14+00:00)
+```suggestion
+#include <bs_tracing.h>
+```
+
+*--- alwa-nordic (2025-09-05 11:52:57+00:00)
+This doc is outdated. I'll fix it. It's a callback now, not a hook, and it does not inspect HCI nor decide whether SMP will handle it. SMP has priority now. It is just queried for a LTK by the Host if SMP did not have one, and it has the opportunity to asynchronously reply.
+
+*--- alwa-nordic (2025-09-05 11:55:05+00:00)
+Just to be clear: This is a just hack for the test. This new API is for peripherals only and there is no API for the Central for now.
+
+*--- aescolar (2025-09-05 12:06:06+00:00)
+```suggestion
+: "${ZEPHYR_BASE:?ZEPHYR_BASE must be set to point to the Zephyr root directory}"
+```
+
+*--- Copilot (2025-09-05 12:43:57+00:00)
+The include `<bs_tracing.h>` is duplicated on lines 7 and 8. Remove the duplicate.
+```suggestion
+
+```
+
+*--- Copilot (2025-09-05 12:43:57+00:00)
+The copyright year should be 2025 instead of 2024 to match the file creation date.
+```suggestion
+# Copyright 2025 Nordic Semiconductor ASA
+```
+
+*--- Copilot (2025-09-05 12:43:58+00:00)
+The copyright year should be 2025 instead of 2024 to match the file creation date.
+```suggestion
+# Copyright 2025 Nordic Semiconductor ASA
+```
+
+*--- aescolar (2025-09-05 12:55:00+00:00)
+```suggestion
+: "${ZEPHYR_BASE:?ZEPHYR_BASE must be set to point to the Zephyr root directory}"
+```
+
+*--- aescolar (2025-09-05 12:58:21+00:00)
+```suggestion
+./run.sh
+```
+why the exec instead of just calling it?
+
+*--- PavelVPV (2025-09-09 08:29:26+00:00)
+I'd suggest to put verb at the end of function name:
+- `bt_conn_ltk_request_cb_register`
+- `bt_conn_ltk_request_cb_unregister`
+
+because of autocompletion, easier to spot the deference of names when they are at the end but not in the middle and easier to remember and recall API name.
+
+It is really bad that we don't have function name conventions and some functions ends with verb representing an action, but some have the verb in the middle of a function name.
+
+*--- PavelVPV (2025-09-09 08:33:11+00:00)
+Not sure using `_HOOK_` word is good here. It has a bad connotation. Why not just `BT_CONN_HANDLE_LTK_REQUEST` or `BT_CONN_HANDLE_UNKNOWN_LTK_REQUEST` if we keep dependency on SMP?
+
+*--- PavelVPV (2025-09-09 08:34:41+00:00)
+Not sure why this API needs `EXPERIMENTAL`. Because we aren't certain that this is what we need or we want to keep ability to remove this API?
+
+*--- PavelVPV (2025-09-09 08:39:56+00:00)
+Casting `const uint8_t *` to `(uint8_t *)` is bad. We should not do this. Instead, `le_ltk_reply` should take `const uint8_t *`.
+
+*--- PavelVPV (2025-09-09 10:19:10+00:00)
+`rand` and `ediv` here are now passed in CPU endianness, which is little endian for nRF devices and for bsim in CI. But SMP will be broken if this code runs on a big-endian platform, because [this](https://github.com/zephyrproject-rtos/zephyr/blob/5be01c95dfcf050cd8d2b85fc29ecbbf2cd4f82f/subsys/bluetooth/host/smp.c#L3053-L3054) comparison will fail. I'd suggest to not change endianness of `rand` and `ediv` in this PR.
+
+It is OK to pass them in CPU endianness to `bt_conn_invoke_ltk_request_cb`.
+
+*--- HaavardRei (2025-09-09 10:23:59+00:00)
+It's not obvious what this function is used for. Maybe add something like "...if the Host cannot/will not provide a Long Term Key call this function".
+
+*--- HaavardRei (2025-09-09 10:35:09+00:00)
+In the register function you mention registering a single global callback, but in unregister you mention ensuring only the currently registered callback is removed. (Does this mean we can have multiple callbacks, or something else?) Needs to be clarified.
+
+*--- PavelVPV (2025-09-09 10:40:52+00:00)
+```suggestion
+ * directly by calling @ref bt_conn_le_ltk_reply or a negative reply via
+ * @ref bt_conn_le_ltk_neg_reply.
+```
+
+*--- PavelVPV (2025-09-09 10:47:32+00:00)
+I think it be a bit more user-friendly to return `-ENOTSUP` if `CONFIG_BT_HOOK_CONN_LTK_REQUEST` is not enabled and don't deal with linker errors. Another option is to wrap this API into `#if defined(CONFIG_BT_HOOK_CONN_LTK_REQUEST) ... #endif` in the header file such that build fails during compilation and not during linkage phase. But `-ENOTSUP` is more preferable IMHO.
+
+*--- HaavardRei (2025-09-09 10:48:55+00:00)
+Is there a reason you don't just extend this "#endif"?
+
+*--- HaavardRei (2025-09-09 10:53:41+00:00)
+This (and all the other testlib changes) should be split out as a separate commit.
+
+*--- HaavardRei (2025-09-09 10:56:05+00:00)
+```suggestion
+ * @brief Get the bt_conn_state field of the bt_conn_info struct
+```
+
+Nit; maybe more clear?
+
+*--- PavelVPV (2025-09-09 10:57:34+00:00)
+Since we have special Kconfig option (and if we want to keep it), we could enable the event handler if this option is enabled. If this is because of some security aspect that I am missing, then this needs to be elaborated here for users as well.
+
+*--- HaavardRei (2025-09-09 10:58:34+00:00)
+```suggestion
+/* Copyright (c) 2025 Nordic Semiconductor ASA
+```
+
+New file --> only 2025?
+
+*--- PavelVPV (2025-09-09 10:59:07+00:00)
+We may probably not need a Kconfig option for this API. If I'm not mistaken, with LTO this code will be eliminated if the registration function is never called. Without LTO yes, it will stay, but I guess all apps will eventually be compiled with LTO.
+
+*--- HaavardRei (2025-09-09 11:00:00+00:00)
+```suggestion
+/* Copyright (c) 2025 Nordic Semiconductor ASA
+```
+
+*--- PavelVPV (2025-09-09 11:03:08+00:00)
+Probably nit picking, but not sure if we need to share with a user such details of implementation:
+```suggestion
+ * Registers a single global callback. If a callback is already registered this will fail.
+```
+Same for `bt_conn_unregister_ltk_request_cb`.
+
+*--- PavelVPV (2025-09-09 11:06:56+00:00)
+Should we explain in the documentation what to do if this function fails to send the response?
+
+*--- PavelVPV (2025-09-09 11:09:36+00:00)
+```suggestion
+enum bt_conn_state bt_testlib_conn_state_get(struct bt_conn *conn);
+```
+?
+
+*--- PavelVPV (2025-09-09 11:10:48+00:00)
+```suggestion
+/* Copyright (c) 2025 Nordic Semiconductor ASA
+```
+or was it copied from somewhere else?
+
+*--- PavelVPV (2025-09-09 11:11:11+00:00)
+```suggestion
+/* Copyright (c) 2025 Nordic Semiconductor ASA
+```
+
+*--- HaavardRei (2025-09-09 11:11:35+00:00)
+It's nice to have documentation for the test, but perhaps the quick start entry belongs in a more top-level readme file?
+
+In Mesh we usually add the test procedure to the run script, but I'm not sure we have a procedure for this for Host?
+
+*--- PavelVPV (2025-09-09 11:13:35+00:00)
+I guess this test will be integrated into CI and `_build_and_run.sh` script won't be needed?
+
+*--- HaavardRei (2025-09-09 11:14:32+00:00)
+This is a ginormous list of includes. Do you need all of them?
+
+*--- PavelVPV (2025-09-09 11:15:05+00:00)
+Should be moved to `test_scripts/` like for most of other tests (some have test**s**_scripts).
+
+*--- PavelVPV (2025-09-09 11:15:18+00:00)
+Should be moved to `src/` folder.
+
+*--- PavelVPV (2025-09-09 11:15:55+00:00)
+Should this test be run on nRF53 as well?
+
+*--- jhedberg (2025-09-09 11:36:17+00:00)
+As discussed in the Bluetooth WG meeting, there are uncertainties around this feature which make it wise to keep it experimental or at least unstable, such as a potentially  related standard spec coming in the future as well as the redesign of the host stack's persistent storage code. Furthermore, this is also in line with the [API lifecycle spec](https://docs.zephyrproject.org/latest/develop/api/api_lifecycle.html) which e.g. states that any stable API "has been in-use and was available in at least 2 development releases".
+
+*--- PavelVPV (2025-09-09 11:42:51+00:00)
+> As discussed in the Bluetooth WG meeting, there are uncertainties around this feature which make it wise to keep it experimental or at least unstable, such as a potentially related standard spec coming in the future as well as the redesign of the host stack's persistent storage code.
+
+Not sure if some upcoming standard (which will or not come is unclear) is a criteria to keep this API experimental.
+
+> Furthermore, this is also in line with the [API lifecycle spec](https://docs.zephyrproject.org/latest/develop/api/api_lifecycle.html) which e.g. states that any stable API "has been in-use and was available in at least 2 development releases".
+
+I don't think this has direct relation. Also, `Connection Management` is not declared as stable: https://docs.zephyrproject.org/latest/develop/api/overview.html#api-overview
+
+*--- alwa-nordic (2025-09-09 12:25:37+00:00)
+I might have over-constrained the `register` function. It was my intention that it may become possible in the future to register multiple callbacks. (TBD how multiple callbacks will interact.) I'll update the contract on `register` not specify that it will fail if a callback is already registered.
+
+So `unregister` takes the callback-pointer to future-proof the API. But it also serves as a sanity check. It will prevent removing someone else's callback.
+
+Is this maximally future proof? Not really, since we will not be able to register an arbitrary number of callbacks without allocating. I will change `register` to return `-ENOMEM` instead of `-EALREADY` to account for this future. But maybe we can make a better interface for callbacks that avoids this problem altogether? I would prefer a compile-time registration method. What do you think? Any options?
+
+Please tell me if there is something else I should clarify.
+
+*--- alwa-nordic (2025-09-09 12:33:57+00:00)
+Would you prefer extending the ifdef instead?
+
+*--- alwa-nordic (2025-09-09 12:54:42+00:00)
+why not?
+
+*--- carlescufi (2025-09-09 13:14:08+00:00)
+I agree with Pavel. Either this is supported or not, but "hook" sounds a bit hacky. I would definitely prefer something like what is suggested above.
+
+*--- aescolar (2025-09-09 14:08:22+00:00)
+Brevity is good. You don't really need exec, but somebody may miss it and try to run something after which won't run.
+Anyhow, just a nit.
+
+*--- jhedberg (2025-09-09 15:34:23+00:00)
+> I don't think this has direct relation. Also, `Connection Management` is not declared as stable: https://docs.zephyrproject.org/latest/develop/api/overview.html#api-overview
+
+We're lacking versioning and formal stable/unstable/experimental indications for most Bluetooth APIs due to historical reasons. We've indicated "stability" of the Bluetooth APIs in other ways, sometimes explicit (through Kconfig symbols or documentation) but other times just through upstream developert consensus (e.g. Bluetooth Classic and Audio were for a long time assumed to be experimental). I'm not saying this is a good thing, but it's how it has been historically. I'm all in favor of starting to do this in a more formal ways, but that discussion is out of scope for this PR.
+
+If we set aside the way that API stability is indicated, I'd hope that there's no disagreement of the fact that newly introduced APIs don't not come with any kind of "stable API" guarantees.
+
+*--- PavelVPV (2025-09-09 19:48:59+00:00)
+> If we set aside the way that API stability is indicated, I'd hope that there's no disagreement of the fact that newly introduced APIs don't not come with any kind of "stable API" guarantees.
+
+Then why, for example, PRs #92580 or #93783, or #92856 don't add `EXPERIMENTAL` flag to the new API? I guess I can find more examples if dig a bit more into PRs history.
+
+*--- jhedberg (2025-09-09 21:29:00+00:00)
+You're not addressing (or maybe not understanding) the point I was trying to make. I asked to set aside the mechanism for a moment, yet that's exactly what you draw attention to. I wanted to start with finding agreement on the expected stability of newly introduced APIs regardless of how that stability is indicated (or not). Do we have it? (agreement)
+
+*--- PavelVPV (2025-09-10 08:00:02+00:00)
+If you have strong reasons to keep this API experimental, please outline them. So far, none of the arguments presented for doing so have withstood scrutiny.
+
+>  I asked to set aside the mechanism for a moment
+
+If we’re setting the mechanism aside, let’s not use any process considerations as arguments in the first place.
+
+*--- jhedberg (2025-09-10 11:31:24+00:00)
+@PavelVPV just to be clear, what exactly are you requesting? That this new API be immediately considered stable, or just anything else than experimental (e.g. unstable)?
+
+*--- carlescufi (2025-09-10 11:50:35+00:00)
+We have the Bluetooth API split into multiple entries in the API status table:
+https://docs.zephyrproject.org/latest/develop/api/overview.html
+
+So one option could be to introduce this as a new API on that table and then mark it as unstable (0.x.y), just like we have multiple APIs currently at 0.8.0.
+But this is not a new module or area, it's part of the core Bluetooth API which should be declared as stable by now. In these cases we usually either use the `select EXPERIMENTAL` option for those in the Kconfig that activates it.
+
+*--- PavelVPV (2025-09-10 12:58:22+00:00)
+@jhedberg, removing `select EXPERIMENTAL`.
+
+@carlescufi , but other newly introduced API (examples I have posted above) didn't follow this rule. What problem the specific API creates is not clear.
+
+*--- HaavardRei (2025-09-11 10:19:52+00:00)
+I think just mentioning the current functionality is sufficient. If we update the API we'll add more docs :)
+
+*--- HaavardRei (2025-09-11 10:21:39+00:00)
+It's just that there's the same ifdef above. If for some reason you want to remove the dependency on SMP for this specific code at a later time it might be nice to add a comment before the ifdef as to why, otherwise I see no reason not to combine/extend them.
+
+*--- alwa-nordic (2025-09-15 14:40:54+00:00)
+Should I run it on both or just nRF53?
+
+*--- alwa-nordic (2025-09-15 14:45:34+00:00)
+`_build_and_run.sh` is only a convenience. It's documentation "How to run", but the code is in a sh-file instead of in the README. It's not used in CI.
+
+*--- alwa-nordic (2025-09-15 15:22:58+00:00)
+Do you mean like which kconfigs to adjust? Or how to handle it runtime? We don't really have a good way to recover from buffer exchaustion. Maybe I should make it infallible after all?
+
+*--- alwa-nordic (2025-09-15 15:42:33+00:00)
+Linker error is the pattern we have been using consistenly in the Host now. The benefit over `-ENOSUP` is compile-time detection. We don't wrap APIs in ifdefs so that we can use `if(IS_ENABLED)` so our code is more readable. Does our toolchain really have that poor diagnostic messages for linker errors that we need to prefer name errors instead? Are we not buliding with debug symbols? We should look into that all the API that follows this pattern.
+
+*--- PavelVPV (2025-09-16 07:26:15+00:00)
+Running on nRF52 and nRF53 will cover both, single and multi-core platforms.
+
+*--- PavelVPV (2025-09-16 07:27:35+00:00)
+Then it shouldn't be in the repository. It shouldn't be used as a personal storage. It should only have what is needed to run in CI.
+
+*--- PavelVPV (2025-09-16 07:36:28+00:00)
+> Do you mean like which kconfigs to adjust? Or how to handle it runtime? We don't really have a good way to recover from buffer exchaustion.
+
+In my mind saying <ins>something like</ins>: `If function returns -ENOBUF, release the context and retry the operation.` could have been enough. We need to explain a user how to recover from this programmatically.
+
+> Maybe I should make it infallible after all?
+
+It is already like [this](https://github.com/zephyrproject-rtos/zephyr/blob/73ea9419c354526edf175607c5f0713f892a5196/subsys/bluetooth/host/hci_core.c#L2483), this just leaves us a bit of space to change this behavior later, so I'd say it is OK to leave the error core here.
+
+*--- PavelVPV (2025-09-16 07:45:01+00:00)
+> Linker error is the pattern we have been using consistenly in the Host now.
+
+> Does our toolchain really have that poor diagnostic messages for linker errors that we need to prefer name errors instead?
+
+> Are we not buliding with debug symbols?
+
+And this is a really bad pattern. Because it put a lot of efforts on user to figure out what is wrong. We need to remember that user have different experience and background. Linker errors are not always easy to figure out and can be caused by different issues. With this pattern we really say: "Aren't you able to figure out linker error? Then you should not use our stack.".
+
+> The benefit over -ENOSUP is compile-time detection.
+
+But we are missing that user application can have multiple variants with and without certain API. This pattern makes user to use `ifdefs` in their code which is not good, because they need to figure out which macro to use.
+
+> We don't wrap APIs in ifdefs so that we can use if(IS_ENABLED) so our code is more readable
+
+I'd argue that this makes it readable, because [sometimes](https://github.com/zephyrproject-rtos/zephyr/blob/73ea9419c354526edf175607c5f0713f892a5196/subsys/bluetooth/host/gatt.c#L1120-L1130) it leads to more complicated code. But this is a different topic for discussion.
+
+*--- alwa-nordic (2025-09-16 09:14:26+00:00)
+It's documentation and convenience, not personal storage. How should I address your comment? Do you want me to inline the commands to run in the README, or skip documenting how to run it entirely?
+
+*--- PavelVPV (2025-09-16 09:25:58+00:00)
+Tests that are ported to twister are built through twister, other tests are built through shell script. All tests run through shell script. There is nothing unique here. We don't (shouldn't) explain this in every test. If you want to keep this, it should be in some generic section. But I think it is kind of explained here already: https://docs.zephyrproject.org/latest/develop/test/bsim.html#building-and-running-the-tests
+
+*--- PavelVPV (2025-09-16 09:31:57+00:00)
+So, yes, this section should be removed. Only test purpose and procedure should stay.
+
+*--- alwa-nordic (2025-09-16 09:35:46+00:00)
+Ok. I'll remove it.
+
+*--- alwa-nordic (2025-09-16 09:35:55+00:00)
+Ok. I'll remove it.
+
+*--- alwa-nordic (2025-09-16 09:39:52+00:00)
+I'm not sure that's how copyright law works, but fine.
+
+*--- alwa-nordic (2025-09-16 11:08:18+00:00)
+I have cleaned up the includes now. Clangd IWUY tells me I need these.
+
+*--- alwa-nordic (2025-09-16 11:31:45+00:00)
+This is not the right place for this discussion. I'll keep to the pattern for now. Please raise a ticket or start a discussion if you want to.
+
+*--- PavelVPV (2025-09-16 12:34:46+00:00)
+Just to point out that even here we are not consistent: https://github.com/zephyrproject-rtos/zephyr/blob/0748b4e47d1f2888708b65d0a7ed5a2d10851b62/subsys/bluetooth/host/att.c#L4175-L4177
+But fine. Leaving it up to you.
+
+*--- alwa-nordic (2025-09-16 14:03:47+00:00)
+I don't understand what you are saying. Can you elaborate?
+
+*--- alwa-nordic (2025-09-16 14:09:51+00:00)
+Name updated.
+
+*--- PavelVPV (2025-09-16 18:58:31+00:00)
+Never mind. I changed my mind here.
+
+*--- alwa-nordic (2025-09-17 09:46:23+00:00)
+This prompted me to check, and LTO is not done currently, at least for `peripheral_hr` when compiled for `nrf52840dk/nrf52840`. Enabling the new config added 4 bytes to .bbs and 68 bytes to .text.
+
+*--- mahori-ravinder (2025-10-13 06:46:28+00:00)
+If application provides a callback, it makes sense for it to take precedence over internally stored  LTK.
+This allows for cases where application wants to use a key (that probably got exchanged via GATT) as LTK for all encryption hence forth.
+
+*--- mahori-ravinder (2025-10-13 06:55:06+00:00)
+> I understand the idea, but isn't this too complicated?
+> 
+> An application should enable the hook, implement API (which is not a very traditionaly way of implement applications), and also send the response by itself.
+> 
+> Why can't do this as such things are usually done through a handler when action from user is required?
+> 
+> ```
+> typedef bol (*bt_conn_ltk_request_handle_t)(struct bt_conn *conn, uint64_t rand, uint16_t ediv, uint8_t *ltk);
+> void bt_conn_ltk_request_cb_register(bt_conn_ltk_request_handler_t handler);
+> 
+> static void le_ltk_request(struct net_buf *buf)
+> {
+> ...
+> 
+> 
+> 	if (ltk_request_handler != NULL && ltk_request_handler(conn, evt->rand, evt->ediv, ltk) {
+> 		le_ltk_reply(handle, ltk);
+> 	else if (bt_smp_request_ltk(conn, evt->rand, evt->ediv, ltk)) {
+> 		le_ltk_reply(handle, ltk);
+> 	} else {
+> 		le_ltk_neg_reply(handle);
+> 	}
+> 	...
+> }
+> ```
+
+Another approach, that i internally ended up using was to allow application to set LTK for current connection (exposing the keys module to application)
+
+This way SMP just picks the key normally and removes the problem of thinking about if the response for LTK req from application should be sync or async.
+
+*--- mahori-ravinder (2025-10-13 06:56:13+00:00)
+The problem this PR addresses is faced by me as well. It would be helpful if this is prioritized. Thanks!
+
+*--- PavelVPV (2025-10-13 07:52:49+00:00)
+> (exposing the keys module to application)
+> 
+> This way SMP just picks the key normally and removes the problem of thinking about if the response for LTK req from application should be sync or async.
+
+This is what we should probably do here.

@@ -1,0 +1,59 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108385
+TITLE: Bluetooth: Audio: Fix malformed forloops
+
+*--- opening post by Thalley (2026-05-04 06:10:51+00:00)
+MISRRA 14.2 does not allow modifying the iterator inside for loops. Modify the loops to while where appropriate and add or modify additional checks for length before incrementing the iterator.
+
+*--- Copilot (2026-05-04 06:15:02+00:00)
+`cmd_config()` returns `int`, but this path returns `false` (i.e., 0 / success) when detecting an invalid length field. This will silently treat malformed codec data as success. Return a negative errno (e.g., `-EINVAL`) or `-ENOEXEC` consistently with the rest of the command error handling.
+
+*--- Copilot (2026-05-04 06:15:02+00:00)
+The `LOG_DBG` format string uses `%zu` for `i`, but `i` is a `uint16_t` here. This is a format/argument mismatch and can lead to incorrect output or undefined behavior on some platforms. Use a format specifier matching the type (or cast `i` to `size_t`).
+
+*--- Copilot (2026-05-04 06:15:02+00:00)
+Same format mismatch here: `i` is `uint16_t` but logged with `%zu`. Adjust the format specifier or cast `i` to `size_t` to match the `%zu` expectation.
+
+*--- Copilot (2026-05-04 06:15:02+00:00)
+The option-parsing loop does not advance `i` after consuming an option/value pair. After parsing `enc <code>` or `preset <name>`, `i` remains at the value index and the next iteration reprocesses the value as if it were another option (which will either do nothing or break parsing). Increment `i` appropriately so the loop progresses to the next token after each parsed pair.
+
+*--- Copilot (2026-05-04 06:15:03+00:00)
+There is a stray standalone `;` after `conn_index` which serves no purpose and may trigger style/MISRA warnings. Please remove it.
+
+*--- Copilot (2026-05-04 06:46:12+00:00)
+This loop iterates argv indices starting at 1, but later in the loop body `i` is used as an index into `member_params[]`/`connected_conns[]` (see assignments further down in this function). That makes the first argument map to the second connection and can access an unset/out-of-range element when `cap_argc == conn_cnt` (and at max argc it can exceed `member_params` bounds). Use a separate 0-based member index (or `i - 1`) for the parameter/connection arrays.
+
+*--- Copilot (2026-05-04 06:46:12+00:00)
+Same indexing issue as above: `i` iterates argv indices starting at 1, but it is used later as an index into `member_params[]`/`connected_conns[]`. This can skip the first connection and can read/write an unset/out-of-range element when `cap_argc == conn_cnt` (and at max argc it can exceed `member_params` bounds). Use a separate 0-based member index (or `i - 1`) for the parameter/connection arrays.
+
+*--- Copilot (2026-05-04 06:46:12+00:00)
+This loop starts at argv index 1, but the loop variable `i` is later used as an index into `cap_commander_reception_stop_member_params[]` and `connected_conns[]`. That skips index 0 and can attempt to use an unset element when the number of src_id arguments equals `conn_cnt` (and can go out of range when argc reaches the shell max). Use a separate 0-based member index (or `i - 1`) when indexing the parameter/connection arrays.
+
+*--- Copilot (2026-05-04 06:46:12+00:00)
+This loop runs until `i < argc`, but `argv[cap_argc]` is documented/handled as the broadcast code (see the memcpy below). As written, the broadcast code argument will be parsed as a `src_id`, and the loop variable is also later used as an index into `member_params[]`/`connected_conns[]` which can skip index 0 and exceed the connection count. Iterate only over the src_id arguments (exclude the last broadcast_code argument) and use a 0-based member index for the parameter arrays.
+
+*--- Copilot (2026-05-04 07:07:29+00:00)
+In `cmd_cap_commander_change_volume_offset()`, `volume_offset` is parsed as a signed `long` but later error logging uses `%lu`. This is a varargs type mismatch (undefined behavior) and will print negative offsets incorrectly; use the correct signed format specifier (or an explicit cast/type change).
+
+*--- Copilot (2026-05-04 07:07:30+00:00)
+In `cmd_cap_commander_change_microphone_gain()`, `gain` is parsed as a signed `long`, but later error logging uses `%lu` for the value. This is a varargs type mismatch (undefined behavior) and will misreport negative gains; use the correct signed format specifier (or change the type if negatives are not allowed).
+
+*--- Copilot (2026-05-04 07:07:30+00:00)
+In `cmd_cap_commander_change_microphone_gain()`, `arg` is declared twice in the same scope. This will fail to compile; keep a single `arg` and ensure it indexes the user-provided args consistently (likely `argv[i + 1U]`, matching the other per-connection parsers).
+
+*--- Thalley (2026-05-04 07:55:52+00:00)
+Outside the scope of this PR
+
+*--- Thalley (2026-05-04 07:55:54+00:00)
+Outside the scope of this PR
+
+*--- jhedberg (2026-05-04 10:20:08+00:00)
+Looking at the shell changes, maybe take this as an opportinity to convert to getopt()? :)
+
+*--- Thalley (2026-05-04 11:19:46+00:00)
+> Looking at the shell changes, maybe take this as an opportinity to convert to getopt()? :)
+
+Don't tempt me :D 
+
+But yes; we should, but I think that should be a more focused effort. Fixing just these few commands would not be the way to go about it from my point of view, and getting started on `getopt` for LE Audio will be a somewhat significant effort 
+
+<img width="175" height="196" alt="image" src="https://github.com/user-attachments/assets/6ff4cbca-b845-4c2b-b9a6-8b76bfbe017c" />

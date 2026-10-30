@@ -1,0 +1,68 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117314
+TITLE: boards: silabs: add xG21-RB4195B/RB4196B and consolidate xG21 radio boards
+
+*--- opening post by Martinhoff-maker (2026-08-25 14:29:04+00:00)
+- Add the remaining EFR32MG21B SoC variants (`efr32mg21b010/020` flash sizes) to `soc.yml`, Kconfig, and DTSI.
+
+- Add radio boards xG21-RB4195B (BRD4195B, +10 dBm, `efr32mg21b010f1024im32`) and xG21-RB4196B (BRD4196B, +20 dBm, `efr32mg21b020f1024im32`).
+
+- Move SLWRB4180A/B adn  xG21-RB4195B/96B  into `boards/silabs/radio_boards/xg21/` without renaming the boards; share `board.yml`, `Kconfig.defconfig`, and flash runners.
+
+- Extract the clock includes, oscillator settings, and USART0 pinctrl shared by every xG21 radio board into common include files.
+
+*--- Martinhoff-maker (2026-08-26 13:35:34+00:00)
+V2: remove factorization, easier to understand without it.
+
+*--- Martinhoff-maker (2026-08-27 12:50:11+00:00)
+V3: reapply factorization
+
+*--- jerome-pouiller (2026-08-27 13:55:20+00:00)
+Can you crop this picture?
+
+*--- jerome-pouiller (2026-08-27 13:56:23+00:00)
+ditto
+
+*--- jerome-pouiller (2026-08-27 13:58:39+00:00)
+In the last version of the SDK, I think you will find `target/silabs/xg21.cfg`.
+
+*--- jerome-pouiller (2026-08-27 14:26:03+00:00)
+Don't we place `/` node first?
+
+*--- jerome-pouiller (2026-08-27 14:27:05+00:00)
+ditto
+
+*--- Martinhoff-maker (2026-08-28 10:17:15+00:00)
+done
+
+*--- Martinhoff-maker (2026-08-28 10:17:54+00:00)
+yes, changed and then removed the unused old configruation.
+
+*--- Martinhoff-maker (2026-08-28 10:19:09+00:00)
+right.
+
+*--- Martinhoff-maker (2026-08-28 10:19:18+00:00)
+done.
+
+*--- Martinhoff-maker (2026-08-28 10:19:25+00:00)
+done.
+
+*--- Martinhoff-maker (2026-08-28 11:58:56+00:00)
+V4: address review + correction of openocd configuration + reconfiguring hfrcodpll clock for all xg21 boards.
+
+*--- Martinhoff-maker (2026-08-28 12:24:42+00:00)
+V5: Correction of xg21_rb4196b-pinctrl.dtsi file (AI can sill make obvious mistake while reworking the git history)
+
+*--- Martinhoff-maker (2026-08-28 13:37:27+00:00)
+V6: correction of the documentation build
+
+*--- asmellby (2026-08-31 07:51:08+00:00)
+Image must be named `slwrb4180a.jpg` since there are multiple boards in the same directory.
+
+*--- asmellby (2026-08-31 07:51:18+00:00)
+Image must be named `slwrb4180b.webp` since there are multiple boards in the same directory.
+
+*--- Martinhoff-maker (2026-08-31 09:50:49+00:00)
+done
+
+*--- Martinhoff-maker (2026-08-31 09:51:20+00:00)
+V7: change picture name + add missing copyright header.

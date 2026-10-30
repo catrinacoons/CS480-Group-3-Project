@@ -1,0 +1,12 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/101756
+TITLE: drivers: bluetooth: hci: nxp: enable calibration data by default
+
+*--- opening post by lylezhu2012 (2026-01-05 11:27:33+00:00)
+Enable HCI_NXP_SET_CAL_DATA and HCI_NXP_SET_CAL_DATA_ANNEX100 by default for NW612 and IW416 modules to ensure proper calibration during HCI initialization.
+
+*--- Copilot (2026-01-05 11:31:05+00:00)
+The HCI_NXP_SET_CAL_DATA_ANNEX100 configuration option should have a "depends on HCI_NXP_SET_CAL_DATA" statement. In drivers/bluetooth/hci/hci_nxp.c, the bt_nxp_set_calibration_data_annex100 function is defined within the CONFIG_HCI_NXP_SET_CAL_DATA block (lines 154-166 nested inside 143-168), making it impossible to use ANNEX100 without the base calibration data. Additionally, the runtime code shows that ANNEX100 must be sent after ANNEX55 with a 20ms delay, establishing a clear sequential dependency.
+```suggestion
+	bool "Bluetooth Controller calibration data annex 100"
+	depends on HCI_NXP_SET_CAL_DATA
+```

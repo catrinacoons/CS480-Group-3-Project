@@ -1,0 +1,28 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112092
+TITLE: doc: board catalog: add scope filter for compatible search
+
+*--- opening post by erwango (2026-06-26 09:17:16+00:00)
+The compatible search returned false positives: boards whose SoC has a peripheral but no on-board wiring (e.g. Ethernet MAC without a PHY) appeared in results.
+
+##### Initial proposal
+~~Add an "Enabled" toggle next to the "Supported devices" label. When on (default), only components with DTS status = "okay" are matched. When off, all components including on-chip ones are searched, restoring the previous behavior.~~
+##### New proposal to render it more clearly to the user (10/02)
+New default limits search to peripherals with enabled nodes. The "Include non enabled devices" toggle offers the possibility to extend the search to peripherals that are not enabled on the board (because support isn't implemented yet, or because there is no on-board wiring to expose it).
+
+##### Changes made
+gen_boards_catalog.py: track a second compatible set restricted to okay nodes; emit it as "compatibles_enabled" in the catalog dict.
+
+board-card.html: expose it as data-compatibles-enabled on each card.
+
+board-catalog.html: add the scope toggle on the right of the "Supported devices" label row; disabled when hw_features_present is false.
+
+board-catalog.js: scope-aware attribute selection in filterBoards(), scope-aware datalist in setupCompatiblesField(), URL persistence in updateURL()/populateFormFromURL(), reset in resetForm().
+
+Fixes #101257
+
+Assisted-by: GitHub Copilot:claude-sonnet-4.6
+
+*--- erwango (2026-06-26 09:41:56+00:00)
+Here is what it looks like:
+<img width="852" height="175" alt="image" src="https://github.com/user-attachments/assets/65edfb37-7460-4a20-b39c-21add8858e2a" />
+We should probably make it clearer that default is "Enabled on board" and user have the option to look for "Available on chip"

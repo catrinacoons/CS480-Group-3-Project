@@ -1,0 +1,51 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/77324
+TITLE: Add rt1180 lpadc support
+
+*--- opening post by lucien-nxp (2024-08-21 09:19:08+00:00)
+Register lpadc1/2 in dts file, enable adc_api case by using lpadc1 instance.
+
+*--- danieldegrasse (2024-08-21 13:21:08+00:00)
+Can use `DT_INST_PROP_OR` here, also why default to `-EPERM`?
+
+*--- lucien-nxp (2024-08-22 08:20:59+00:00)
+Updated. My original intention was to give .power_level variable an incorrect value, but now I think 0 might be more appropriate.
+
+*--- decsny (2024-08-22 18:35:54+00:00)
+can this be captured in DT instead of an sdk macro
+
+*--- decsny (2024-08-28 16:51:04+00:00)
+this is not the way to do this, what I meant is to add like a boolean property which would be set in the SOC level that says if the ip instance has this feature. and then you could add a BUILD_ASSERT in the init macro at the bottom of the file to check if the power level selection prop has been given despite not having the feature. And in the code here you should not use a preprocessor #if but use in C code `if (DT_ANY_INST_HAS_PROP_STATUS_OKAY(....)) {`
+
+*--- lucien-nxp (2024-08-30 03:30:22+00:00)
+What is the purpose of BUILD_ASSERT? For LPADC, much platforms have power level selection options, however rt1180 not. What criteria do I use in BUILD_ASSERT?
+
+*--- hakehuang (2024-08-30 10:23:57+00:00)
+board testing for tests/driver/adc pass
+
+*--- lucien-nxp (2024-09-05 02:01:21+00:00)
+> this is not the way to do this, what I meant is to add like a boolean property which would be set in the SOC level that says if the ip instance has this feature. and then you could add a BUILD_ASSERT in the init macro at the bottom of the file to check if the power level selection prop has been given despite not having the feature. And in the code here you should not use a preprocessor #if but use in C code `if (DT_ANY_INST_HAS_PROP_STATUS_OKAY(....)) {`
+
+Can't use in C code because powerLevelMode element is used a preprocessor #if to isolation in lpadc_config_t structure. Otherwise, C compiler will report a error:   'lpadc_config_t' has no member named 'powerLevelMode'.
+`#if defined(FSL_FEATURE_LPADC_HAS_CFG_PWRSEL) && (FSL_FEATURE_LPADC_HAS_CFG_PWRSEL == 1U)
+    lpadc_power_level_mode_t powerLevelMode; /*!< Power Configuration Selection. */
+#endif /* defined(FSL_FEATURE_LPADC_HAS_CFG_PWRSEL) && (FSL_FEATURE_LPADC_HAS_CFG_PWRSEL == 1U) */`
+
+*--- decsny (2024-09-05 17:02:25+00:00)
+i think we have a misunderstanding here, I'm confused what you're trying to do, the build assert should be checking a value from DT is what I meant
+
+*--- lucien-nxp (2024-09-06 08:51:32+00:00)
+> i think we have a misunderstanding here, I'm confused what you're trying to do, the build assert should be checking a value from DT is what I meant
+
+Add BUILD_ASSERT  at the bottom of macro.
+
+*--- decsny (2024-09-09 15:30:20+00:00)
+last comment is that this doesn't have to be a preprocessor #if, it can be a C if(DT_ANY_INST_etc(..)), this will help keep the code more testable since the file content doesn't change as much between different configurations
+
+*--- decsny (2024-09-09 15:31:04+00:00)
+unless, of course, I'm wrong because this will cause a build error if .powerlevelmode is not defined in the SDK, I didn't look into it. I'll approve and if you think this suggestion is good you can make it and I'll reapprove, otherwise this PR is good to me now
+
+*--- mmahadevan108 (2024-09-10 20:59:03+00:00)
+Why are you deleting the `gpt2` enablement for cm7?
+
+*--- lucien-nxp (2024-09-11 03:16:08+00:00)
+Sorry, most likely I made an error when I manually resolved the conflict. I have corrected for cm7 core.

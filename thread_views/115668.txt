@@ -1,0 +1,31 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115668
+TITLE: tests: kernel: improve and expand on kernel test documentation
+
+*--- opening post by nashif (2026-08-07 14:29:09+00:00)
+- **tests: kernel: semaphore: document test cases**
+- **tests: kernel: threads: document test cases**
+- **tests: kernel: timer, sys_timer: document test cases**
+- **tests: kernel: mutex: document test cases**
+- **tests: kernel: workq: document test cases**
+- **tests: kernel: fpu_sharing: document test cases**
+- **tests: kernel: mem_slab: document test cases**
+- **tests: lib: multi_heap: document test cases**
+- **tests: kernel: mem_protect: document test cases**
+- **tests: arch: interrupt: document test cases**
+- **tests: kernel: device, smp: document test cases**
+- **tests: give test cases unique, namespaced names**
+
+*--- npitre (2026-08-12 18:37:09+00:00)
+This describes a different test. `arm_test_isr_handler()` never touches the FPU: it calls `k_float_disable()` on a thread other than the current one and asserts that it fails with -EINVAL, and `sup_fp_thread_entry()` then rechecks that K_FP_REGS is still set. So the case is "k_float_disable() is rejected from ISR context and leaves the target thread's FP options intact", not FP context preservation across an FPU-using interrupt.
+
+The same block is repeated verbatim on the `#else` stub at line 327, so the one test name carries two copies of its documentation. Hoisting a single block above the `#if` would avoid that.
+
+*--- npitre (2026-08-12 18:37:09+00:00)
+Leftover continuation line. Now that the list above is one `@see` per line, this trails `@see k_timer_stop()` and doxygen will try to resolve `k_uptime_get(), k_busy_wait()` as further references on that command. Give them their own `@see` lines.
+
+Also line 255 in this file: `@see k_timer_stop` without the parens.
+
+*--- nashif (2026-08-12 20:02:09+00:00)
+> On the uniqueness rule itself, roughly 300 test-case names are still shared by more than one suite at this head, and nothing writes the convention down or enforces it, so clashes will reappear as fast as they get fixed. Documenting the rule in `doc/develop/test/ztest.rst` and having twister reject a duplicate name would make it stick. Related, and probably why the mismatch above went unnoticed: nothing in tree feeds `tests/` to doxygen (`tests/tests.dox` is not in `doc/zephyr.doxyfile.in`'s INPUT), so neither the `@ingroup` targets nor the block syntax get any CI check today. Is adding that build part of the plan here?
+
+This is all work in progress and CI integration will follow, the test name uniqueness started as a must have, now it is nice to have and will be documented once the doxygen build for tests is integrated. Lots of the issues above are rebase artifacts i missed, i am working on all of this in a branch and pushing changes in batches, but we are close, so please bear with me :)

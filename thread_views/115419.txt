@@ -1,0 +1,30 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115419
+TITLE: include: drivers: udc: change endpoint flags from bitfields to bool 
+
+*--- opening post by jfischer-no (2026-08-05 10:30:05+00:00)
+Using bitfields in struct udc_ep_stat may result in RMW bugs when it is
+modified in different contexts. Making the flags bool is the most
+efficient solution, with no drawbacks for existing UDC drivers.
+
+RMW bug was reported for the Kinetis driver where setting the busy flag
+after a new transfer races against the TOKDNE interrupt. This window is
+very small, and any USB transfer usually takes longer.  However, if
+something widens this window, the bug would become effective.
+Smartbond and bflb_v1 UDC drivers update endpoint flags from interrupt
+context as well.
+
+*--- leonardojc90 (2026-08-05 13:26:27+00:00)
+We validated this PR on the setup where the udc_kinetis bulk-IN stall from #114843 was originally reproducible (MCXA-series device, same udc_kinetis.c; CDC-ACM bridging a UART to a hardware echo fixture at 115200; byte-exact stream diffing; concurrent SWD memory polling of the running target). Both commits `git am` cleanly onto our working revision (ad42613252e).
+
+| driver state | recipe | result |
+|---|---|---|
+| unpatched + 150 µs widener inside the `udc_ep_set_busy()` RMW (load word → delay → store word, modeling mid-RMW preemption longer than the packet flight time) | 64 KB unpaced streaming | permanent wedge within the first 2–3 packets, 3/3 runs (IN and OUT both NAK forever; recovery only by reset) |
+| **this PR + the identical delay at the identical spot** | same | clean, byte-exact, 3/3 + 5×64 KB |
+| **this PR, unmodified** | 5×64 KB unpaced + 3×690 KB sustained duplex + 3×64 KB in 16-byte chunks at 80% pace (forces the thread-context arm path) | all clean, byte-exact, zero stalls |
+
+For reference, the irq_lock variant from #114843 produced the same clean result on the same rig in July (0 deletions / 320 KB, 8×60 s duplex cycles byte-exact, vs 15/18 cycles stalling unpatched). Two independent fix forms curing the same reproducible failure, plus the widener experiment failing exactly one way on bitfields and not at all on `bool`s, makes a solid case that the `udc_ep_stat` RMW hazard was the root cause of the whole family (the permanent-NAK stall, and the silent one-packet-per-event loss under the old recovery watchdog).
+
+One data point for the commit message's "if something widens this window" clause: our July firmware reproduced the stall organically (15/18 one-minute cycles); our current tree, with several unrelated defects since fixed, no longer does even unpatched (≈2.5 MB clean). The hazard needs both the bitfield RMW and a window-stretcher — and since any sufficiently busy interrupt load qualifies as one, making the flags `bool` is the right structural fix.
+
+Feel free to add:
+Tested-by: Leonardo José Consoni <leonardo@binho.io>

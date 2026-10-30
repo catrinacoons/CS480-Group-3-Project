@@ -1,0 +1,157 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/91688
+TITLE: drivers: sensor: mb7040: add support for MaxBotix MB7040 ultrasonic sensor
+
+*--- opening post by ww3ak (2025-06-16 11:21:52+00:00)
+Adds a new Zephyr sensor driver for the MaxBotix MB7040 ultrasonic rangefinder.
+
+The driver uses I2C communication to read range data from the sensor and exposes it via the Zephyr sensor API. 
+
+Functionality was tested on an esp32-s3.
+
+*--- Copilot (2025-06-16 20:06:08+00:00)
+Fix spelling of `measurment` to `measurement`.
+```suggestion
+	int "Delay in milliseconds to wait for distance measurement"
+```
+
+*--- Copilot (2025-06-16 20:06:09+00:00)
+Check the return value of `k_sem_take` and handle timeout errors to avoid using stale or invalid data after a timeout.
+```suggestion
+	ret = k_sem_take(&data->read_sem, K_MSEC(CONFIG_MB7040_DELAY_MS));
+	if (ret != 0) {
+		if (ret == -EAGAIN) {
+			LOG_ERR("Semaphore take timed out");
+			return -ETIMEDOUT;
+		} else {
+			LOG_ERR("Semaphore take failed with error %d", ret);
+			return ret;
+		}
+	}
+```
+
+*--- Copilot (2025-06-16 20:06:09+00:00)
+[nitpick] Remove or document the fixed 10 ms sleep after semaphore take—it could introduce unnecessary latency.
+```suggestion
+	// Ensure the sensor is ready before reading data
+```
+
+*--- Copilot (2025-06-16 20:06:09+00:00)
+Remove the newline character (`\n`) from the log message, as `LOG_ERR` appends its own line ending.
+```suggestion
+		LOG_ERR("I2C not ready!");
+```
+
+*--- Copilot (2025-06-16 20:06:10+00:00)
+The `MB7040_STATUS_GPIO` Kconfig option is defined but never used in code—consider removing it or guarding status GPIO support with `CONFIG_MB7040_STATUS_GPIO`.
+```suggestion
+# Removed the MB7040_STATUS_GPIO block as it is unused.
+```
+
+*--- ww3ak (2025-06-17 07:39:36+00:00)
+I believe I fixed/added necessary things!
+
+*--- pdgendt (2025-06-17 08:04:17+00:00)
+```suggestion
+static DEVICE_API(sensor, mb7040_api) = {
+```
+
+*--- ww3ak (2025-06-17 08:49:43+00:00)
+i tried and am running into this issue: https://github.com/zephyrproject-rtos/zephyr/issues/91521
+
+*--- msalau (2025-06-17 09:44:36+00:00)
+It seems this compile time detection of status GPIO will fail in case of 2 devices with and without such GPIO. I'd recommend using runtime detection of this feature by checking whether `cfg->status_gpio.port` is `NULL` or not.
+
+*--- msalau (2025-06-17 13:52:35+00:00)
+I don't think `SENSOR_CHAN_ALL` is a valid channel to get value from.
+
+*--- msalau (2025-06-17 13:55:34+00:00)
+`cfg->status_gpio` may be missing.
+
+*--- msalau (2025-06-17 13:56:02+00:00)
+Same: `status_gpio` may be missing.
+
+Also the interrupt should be disabled before leaving the function in case of an error.
+
+*--- msalau (2025-06-17 14:00:18+00:00)
+Please add a `status-gpios` property to build everyting under `#if MB7040_HAS_STATUS_GPIO ... #endif`
+
+*--- msalau (2025-06-17 14:16:20+00:00)
+Logic looks incomplete to me.
+
+When `status_gpio` is present:
+* 0 - success
+* `-EAGAIN` - timeout
+* other - some error
+
+When `status_gpio` is missing:
+* 0 - some internal error (there is no handler to set the semaphore except for the gpio interrupt handler which is not used)
+* `-EAGAIN` - success
+* other - some error
+
+*--- msalau (2025-06-17 14:18:42+00:00)
+```diff
+-LOG_MODULE_REGISTER(mb7040, LOG_LEVEL_DBG);
++LOG_MODULE_REGISTER(mb7040, CONFIG_SENSOR_LOG_LEVEL);
+```
+
+*--- ww3ak (2025-06-18 07:34:54+00:00)
+Is that line 84 not disabling it correctly? Or do you just mean location wise I should move it to the end of the function?
+
+*--- ww3ak (2025-06-18 07:59:50+00:00)
+![image](https://github.com/user-attachments/assets/2913795e-bbea-4b87-9575-55393a2db043)
+
+I was getting channel errors when it wasnt included and looked at some other drivers that seemed to have it (as shown in the image) . Including it fixed those channel errors
+
+*--- msalau (2025-06-18 08:14:00+00:00)
+It is ok to fetch `ALL` but one should `get` something specific.
+E.g.:
+[`adt7310_sample_fetch()`](https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/sensor/adi/adt7310/adt7310.c#L118) - `SENSOR_CHAN_ALL` is allowed
+[`adt7310_channel_get()`](https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/sensor/adi/adt7310/adt7310.c#L138) - `SENSOR_CHAN_ALL` is not allowed
+
+*--- msalau (2025-06-18 08:22:07+00:00)
+It does disable it, but this line is not executed if `mb7040_sample_fetch()` returns before that. E.g. if start of conversion fails.
+
+*--- kartben (2025-06-27 16:35:55+00:00)
+```suggestion
+test_i2c_mb7040: mb7040@ba {
+	compatible = "maxbotix,mb7040";
+	reg = <0xba>;
+	status-gpios = <&test_gpio 0 0>;
+};
+```
+
+*--- MaureenHelm (2025-06-27 17:26:01+00:00)
+Use `i2c_reg_write_byte_dt` instead
+
+*--- MaureenHelm (2025-06-27 17:29:36+00:00)
+Although I don't agree with the suggested change, the sleep duration should be documented with a comment. Why was this specific duration chosen?
+
+*--- MaureenHelm (2025-06-27 17:33:48+00:00)
+Address should be `ba`. Make sure reg prop below matches.
+
+*--- MaureenHelm (2025-06-27 17:35:55+00:00)
+The sensor driver API specifies `SENSOR_CHAN_DISTANCE` in meters
+
+*--- kartben (2025-06-27 17:56:39+00:00)
+Please don't mark comment as resolved unless you applied the change verbatim AND verified you pushed it. Here you forgot to push your changes, it seems :)
+
+*--- msalau (2025-06-27 20:55:06+00:00)
+The sensor stops responding to I2C requests for the duration of measurement. So when the status GPIO is not available polling (like an AT24 EPROM after a write command) is a way to get data faster than a fixed delay. Is this a viable alternative to a fixed delay?
+
+*--- ww3ak (2025-06-30 08:55:34+00:00)
+Should I format it as val1 having meters and val2 having the fractional components?
+
+*--- ww3ak (2025-07-01 10:28:03+00:00)
+I simplified the logic as much as possible, however, I do not agree on using the busy wait (WAIT_FOR)
+
+*--- ww3ak (2025-07-07 15:26:32+00:00)
+Sure! The semaphore is used to wait until the sensor finishes its measurement (either notified by the set status GPIO or using the default timeout). When I send the range command, I wait on the semaphore, and the interrupt callback (triggered by the status GPIO falling edge) gives the semaphore to signal that data is ready. This way, we avoid busy-waiting and only continue once the sensor is done. I hope this helps!
+
+*--- ww3ak (2025-07-07 17:44:05+00:00)
+done! is it all aligned now!
+
+*--- ww3ak (2025-07-08 07:42:10+00:00)
+@jilaypandya thanks for the approval! What do I have to wait for now for this to be merged?
+
+*--- ww3ak (2025-07-18 15:09:29+00:00)
+@MaureenHelm Hello! Would you be able to review this once more? Thank you!

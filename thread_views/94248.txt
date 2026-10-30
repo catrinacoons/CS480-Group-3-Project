@@ -1,0 +1,114 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/94248
+TITLE: drivers: sensor: add support for ALS31300 3D Hall Effect Sensor
+
+*--- opening post by fabocode (2025-08-07 21:49:26+00:00)
+## Overview
+
+This PR adds driver support for the Allegro Microsystems ALS31300 3-axis linear Hall Effect sensor with I2C interface.
+
+## Features Implemented
+
+- **3-axis magnetic field measurement** (X, Y, Z axes)
+- **I2C communication interface** 
+- **Device temperature readings**
+- **Standard Zephyr sensor API** (sample_fetch/channel_get)
+- **Add driver support for one-shot sensor reads** (Read/Decode Sensor API)
+- **Device tree integration** with proper bindings
+
+## Hardware Details
+
+The ALS31300 is a 3D linear Hall Effect sensor that provides 12-bit digital output proportional to the magnetic field strength in each axis. The sensor communicates via I2C and is commonly used in:
+- 3D position sensing applications
+- Joystick implementations  
+- Linear motion detection
+- Angle sensing applications
+
+## Testing
+
+- [x] Driver builds successfully
+- [x] Follows Zephyr sensor API conventions
+- [x] Device tree bindings validated
+
+## Files Modified/Added
+
+- `drivers/sensor/als31300/` - Driver implementation
+- `dts/bindings/sensor/allegromicro,als31300.yaml` - Device tree bindings
+- `drivers/sensor/CMakeLists.txt` - Build integration
+- `drivers/sensor/Kconfig` - Configuration options
+
+## References
+
+- [ALS31300 Product Page](https://www.allegromicro.com/en/products/sense/linear-and-angular-position/linear-position-sensor-ics/als31300)
+- Datasheet: Available on manufacturer website
+
+*--- Copilot (2025-09-01 13:01:53+00:00)
+The compatible string uses 'allegro' vendor prefix, but the expected format should be 'allegromicro' to match the company name Allegro Microsystems. This should be consistent with other Allegro device bindings.
+```suggestion
+compatible: "allegromicro,als31300"
+```
+
+*--- Copilot (2025-09-01 13:01:54+00:00)
+The function i2c_reg_write_byte_dt() expects a uint8_t value but reg27_value is declared as uint32_t. This will only write the lowest byte and ignore the upper 24 bits, which may not configure the device correctly.
+```suggestion
+	ret = i2c_reg_write_dt(&cfg->i2c, ALS31300_REG_VOLATILE_27, (uint8_t *)&reg27_value, sizeof(reg27_value));
+```
+
+*--- Copilot (2025-09-01 13:01:54+00:00)
+The function i2c_reg_read_byte_dt() expects a uint8_t* parameter but test_val is declared as uint8_t[4]. This function only reads a single byte, not 4 bytes as the array suggests.
+```suggestion
+	uint8_t test_val;
+
+	ret = i2c_reg_read_byte_dt(&cfg->i2c, ALS31300_REG_VOLATILE_27, &test_val);
+```
+
+*--- kartben (2025-09-01 13:02:31+00:00)
+mmh, why? This is typically done in the same commit that introduces the sensor, which I think makes sense? 
+https://github.com/zephyrproject-rtos/zephyr/commits/main/tests/drivers/build_all/sensor/i2c.dtsi
+
+*--- fabocode (2025-09-24 00:53:27+00:00)
+Got it, now I am following your suggestion
+
+*--- fabocode (2025-09-24 00:53:37+00:00)
+Is required `i2c_reg_write_byte_dt`
+
+*--- fabocode (2025-09-24 00:53:54+00:00)
+This is not applicable, after checking this will break build
+
+*--- fabocode (2025-09-24 00:54:25+00:00)
+I addressed this to follow the same pattern like bmp581 does
+
+*--- fabocode (2025-09-25 02:23:54+00:00)
+Sure, I added the copyright
+
+*--- fabocode (2025-09-25 02:24:51+00:00)
+I think the idea to have separate files is good, so I added `_async` and `_decoder` files
+
+*--- fabocode (2025-09-25 02:25:45+00:00)
+Sure, I added a function for this
+
+*--- MaureenHelm (2025-09-29 22:28:07+00:00)
+Why does this function take a device pointer argument?
+
+*--- MaureenHelm (2025-09-29 22:29:56+00:00)
+Use `sensor_value_from_micro`
+
+*--- MaureenHelm (2025-09-29 22:30:17+00:00)
+ditto
+
+*--- MaureenHelm (2025-09-29 22:30:45+00:00)
+Use `DEVICE_API`
+
+*--- MaureenHelm (2025-09-29 22:31:22+00:00)
+Why this particular value for the delay?
+
+*--- fabocode (2025-10-06 01:11:48+00:00)
+I will delete it, I thought  it might be used in the future, but this will simplify it
+
+*--- fabocode (2025-10-06 01:12:39+00:00)
+It was meant for testing at first. I tested and functionality is not affected, so I will delete it.
+
+*--- fabocode (2025-10-06 01:14:04+00:00)
+Sure, I included it
+
+*--- fabocode (2025-10-06 01:14:13+00:00)
+Thanks, I added this as well

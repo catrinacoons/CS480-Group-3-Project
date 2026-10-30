@@ -1,0 +1,11 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112160
+TITLE: tests: kernel: queue: document tests and align group naming
+
+*--- opening post by nashif (2026-06-26 21:31:56+00:00)
+Bring the queue test documentation in line with the test documentation
+conventions. Rename the Doxygen module from kernel_queue_tests to the
+tests_-prefixed tests_kernel_queue under all_tests, and rewrite the terse
+and translated-English per-test blocks into the @details / Test steps /
+Expected result template so each case states its requirement-level intent
+(FIFO/LIFO ordering, priority-then-wait-time delivery, alloc honouring the
+thread resource pool, unique-append rejecting duplicates, ...).

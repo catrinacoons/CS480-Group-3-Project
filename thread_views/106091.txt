@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/106091
+TITLE: samples: net: http_server: add basic CSS styling
+
+*--- opening post by kartben (2026-03-23 13:35:07+00:00)
+The HTML file is gzipped so for only about 300 bytes extra, add a minimal CSS so that the page looks nicer, especially on mobile.
+
+<img src="https://github.com/user-attachments/assets/e65e940d-dbe2-43a7-8760-5d4cefdc90db" alt="Screenshot" width="50%">
+
+*--- kartben (2026-03-25 16:50:18+00:00)
+I appreciate this might be seen as a new "feature" but I hope release manager can consider it for inclusion as this will likely be featured as part of the Zephyr 4.4 demo video (but of course I can always maintain a local patch for now!)

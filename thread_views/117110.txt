@@ -1,0 +1,15 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117110
+TITLE: Bluetooth: OTS: Client: call checksum cb on error responses
+
+*--- opening post by Thalley (2026-08-22 12:33:21+00:00)
+The oacp_ind_handler only invoked the obj_checksum_calculated callback when the indication contained a 32-bit checksum. Error responses to BT_GATT_OTS_OACP_PROC_CHECKSUM_CALC omit the checksum, so the callback was never called and the application had no way to learn that the procedure failed.
+
+Only parse the checksum when the result code is success, and always invoke the callback with the result code, passing a checksum of 0 for error responses. This matches the documented behavior of the callback.
+
+fixes https://github.com/zephyrproject-rtos/zephyr/issues/117018
+
+*--- Copilot (2026-08-22 12:36:09+00:00)
+This branch is still unreachable for the three-byte error response on normal targets. The earlier guards use `sizeof(op_code)`, `sizeof(req_opcode)`, and `sizeof(result_code)`, but these variables are unpacked enums and are typically four bytes; `[response opcode, checksum opcode, error]` therefore fails before the callback is reached. Please validate the protocol's one-byte fields explicitly (or decode them into `uint8_t` variables) so this fix works independently of `-fshort-enums`.
+
+*--- Thalley (2026-08-22 12:42:23+00:00)
+The enums are extraced as single-octets with net_buf_simple_pull_u8, and the enums reflect these smaller sized value, even if the enums themselves are larger.

@@ -1,0 +1,5 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116186
+TITLE: Bluetooth: Classic: L2CAP: Clarify misleading timeout handler comments
+
+*--- opening post by jhedberg (2026-08-13 11:06:54+00:00)
+The retransmission and monitor timeout handlers start with an early return whose comment says "ACL connection is broken". The wording suggests some sort of failure that would need to be logged or investigated, whereas the check simply covers the benign race where the work item runs after the ACL connection has been disconnected. Reword the comments to describe what is actually going on.

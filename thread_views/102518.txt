@@ -1,0 +1,112 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/102518
+TITLE: Bluetooth: CCP: Add support for bearer technology
+
+*--- opening post by Thalley (2026-01-19 15:44:57+00:00)
+Add support for setting and getting the bearer technology using the CCP API.
+
+depends on https://github.com/zephyrproject-rtos/zephyr/pull/102430
+
+*--- Copilot (2026-01-19 15:50:40+00:00)
+Consider adding input validation for the tech parameter to ensure it's within the valid range (BT_HFP_TECHNOLOGY_3G to BT_HFP_TECHNOLOGY_WCDMA) before calling bt_tbs_set_bearer_technology. While bt_tbs_set_bearer_technology does this validation, validating at the CCP API layer would provide better error handling and clearer API contract enforcement, consistent with how bt_ccp_call_control_server_set_bearer_provider_name validates the name parameter.
+
+*--- Copilot (2026-01-19 15:50:40+00:00)
+Inconsistent use of validation macros. The new bearer_tech functions use regular "if" statements for parameter validation (lines 215, 242, 248), while the existing bearer_provider_name functions use the "CHECKIF" macro (lines 124, 130, 161, 167). For consistency within this file, consider using CHECKIF for NULL parameter checks in the bearer_tech functions.
+
+*--- Copilot (2026-01-19 15:50:40+00:00)
+The shell command name is duplicated. Line 274 defines another "set_bearer_name" command, but it should be "set_bearer_tech" based on the help text and callback function.
+```suggestion
+			       SHELL_CMD_ARG(set_bearer_tech, NULL,
+```
+
+*--- Copilot (2026-01-19 15:50:41+00:00)
+The format string is missing the technology name. The format string has three format specifiers: %d, %s, and %d, but only two arguments are provided: index and tech. It should be "Bearer[%d] tech: %lu" (since tech is unsigned long) or add the missing technology name string using bt_hfp_technology_str(tech).
+```suggestion
+	shell_print(sh, "Bearer[%d] tech: %s (%lu)", index,
+		    bt_hfp_technology_str((enum bt_hfp_technology)tech), tech);
+```
+
+*--- Copilot (2026-01-19 15:50:41+00:00)
+The parameter name in the documentation is inconsistent with the actual parameter name. The doxygen says "@param technology" but the actual parameter is named "value".
+```suggestion
+	 * @param value         The technology read.
+```
+
+*--- Copilot (2026-01-19 15:50:42+00:00)
+The parameter direction marker is incorrect. The bearer parameter should not be marked as "[out]" for a setter function. Looking at the similar function bt_ccp_call_control_server_set_bearer_provider_name on line 100, setter functions in this API do not use direction markers for the bearer parameter. Remove "[out]" from the documentation.
+```suggestion
+ * @param bearer  The bearer to set the name for.
+ * @param tech    The new bearer technology.
+```
+
+*--- Copilot (2026-01-19 15:50:42+00:00)
+There's a typo in the documentation. The sentence "or is NULL" is incomplete and should be "or @p tech is NULL" to match the pattern used in other similar documentation.
+```suggestion
+ * @retval -EINVAL @p bearer or @p tech is NULL.
+```
+
+*--- Copilot (2026-01-19 15:50:42+00:00)
+Redundant wording. The sentence "Application using this application" should be "Applications using this callback" or "Application code using this callback".
+```suggestion
+  to ``enum bt_hfp_technology``. Applications using this callback should switch the type.
+```
+
+*--- Copilot (2026-01-19 15:50:42+00:00)
+The bearer parameter should be declared as const to match the header declaration on line 161 of include/zephyr/bluetooth/audio/ccp.h. The implementation should be "const struct bt_ccp_call_control_server_bearer *bearer" instead of "struct bt_ccp_call_control_server_bearer *bearer".
+
+*--- Copilot (2026-01-19 15:50:43+00:00)
+Typo in file path. The file should be "assigned_numbers.h" not "assign_numbers.h".
+```suggestion
+  :zephyr_file:`include/zephyr/bluetooth/assigned_numbers.h` instead of
+```
+
+*--- Copilot (2026-01-19 15:50:43+00:00)
+The doxygen brief comment is missing a space after the asterisk. It should be "* @brief" not "*@brief" for consistent formatting with the rest of the codebase.
+```suggestion
+	 * @brief Bearer technology has been read
+```
+
+*--- Copilot (2026-01-19 15:50:43+00:00)
+Inconsistent argc check. The get_bearer_tech function checks "argc > 2" but should check "argc > 1" to be consistent with other getter functions like get_bearer_name (line 142) and get_bearer_uci (line 168). The getter only takes an optional index parameter, not two parameters.
+```suggestion
+	if (argc > 1) {
+```
+
+*--- Copilot (2026-01-20 13:28:42+00:00)
+The validation logic only checks if tech > BT_BEARER_TECH_WCDMA but does not check if tech is less than BT_BEARER_TECH_3G (0x01). This means a value of 0 would pass validation here but fail later in bt_ccp_call_control_server_set_bearer_tech. The validation should use IN_RANGE(tech, BT_BEARER_TECH_3G, BT_BEARER_TECH_WCDMA) to match the API function's validation.
+
+*--- Copilot (2026-01-20 13:28:43+00:00)
+The parameter validation for the new tech functions uses plain 'if' statements instead of 'CHECKIF' macro which is inconsistent with the existing API functions in this file (e.g., bt_ccp_call_control_server_set_bearer_provider_name, bt_ccp_call_control_server_get_bearer_provider_name, bt_ccp_call_control_server_get_bearer_uci all use CHECKIF for NULL checks). The validation should use CHECKIF(bearer == NULL) and CHECKIF(tech == NULL) for consistency.
+
+*--- Copilot (2026-01-20 13:28:43+00:00)
+The migration guide says "Application can do search-and-replace" which is grammatically incorrect. It should be "Applications can do" (plural) to match the rest of the documentation style.
+```suggestion
+  ``BT_BEARER_TECH_*`` like ``BT_BEARER_TECH_3G``. Applications can do search-and-replace from
+```
+
+*--- Copilot (2026-01-20 13:28:43+00:00)
+Missing test coverage for invalid bearer technology values. The new API function bt_ccp_call_control_server_set_bearer_tech validates that tech is within the valid range (BT_BEARER_TECH_3G to BT_BEARER_TECH_WCDMA), but there's no test case covering this validation. Consider adding a test case that attempts to set an invalid technology value (e.g., 0 or a value > BT_BEARER_TECH_WCDMA) and verifies it returns -EINVAL.
+
+*--- Copilot (2026-01-20 13:28:43+00:00)
+The format specifier in the shell_print is incorrect. It should be "0x%02X" (with leading zero) instead of "0x%2X" to properly format hex values with two digits. This is inconsistent with the set_bearer_tech command at line 223 which correctly uses "0x%02X".
+```suggestion
+	shell_print(sh, "Bearer[%d] tech: %s (0x%02X)", index, bt_bearer_tech_str(tech), tech);
+```
+
+*--- Copilot (2026-01-20 13:28:44+00:00)
+The documentation shows "Bearer[0] name: New technology: 4G (0x02)" but based on the implementation at line 223 of ccp_call_control_server.c, the actual output should be "Bearer[0] new technology: 4G (0x02)" (not "name:").
+```suggestion
+   Bearer[0] new technology: 4G (0x02)
+```
+
+*--- sjanc (2026-05-04 08:10:34+00:00)
+I'd make this test to use 0x0a (or maybe BT_BEARER_TECH_WCDMA + 1, for easier grepping), so that it explicitly have to be updated if new bearer is added
+
+*--- Thalley (2026-05-18 09:44:53+00:00)
+Rebased to solve merge conflicts
+
+*--- Thalley (2026-06-08 11:21:53+00:00)
+> looks OK
+> 
+> BTW I wonder if there should be FOO_MIN and FOO_MAX defines in assigned_numbers.h (possible defined outside of packed enums) that would help those range checks, but this is outside of this PR scope
+
+Hmm, historically we have not done that for any assigned numbers values. We could have some internal MIN and MAX values

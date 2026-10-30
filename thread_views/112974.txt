@@ -1,0 +1,57 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112974
+TITLE: soc: realtek: bee: fix timing defaults
+
+*--- opening post by ZhiyuanTang17 (2026-07-08 08:13:07+00:00)
+1. Remove hardcoded TIMESLICE_SIZE default (rtl87x2g, rtl8752h)
+
+  The SoC-level default of 10 ms caused tracing samples (sample.tracing.user, sample.tracing.gpio) to stall at 115200 baud: three consecutive trace hooks after each sys-timer ISR emit ~9–12 ms of synchronous UART output, exhausting the timeslice before application threads get CPU time. Removing the override lets the kernel default (20 ms) apply, which provides sufficient headroom.
+
+**### Delete these two related commits for root cause solve PR:** 
+  2. Tune zephyr,min-timeout-cycles to 30 (rtl87x2g, rtl8752h) ->https://github.com/zephyrproject-rtos/zephyr/pull/113083
+
+  With MIN_DELAY = 32 = CYC_PER_TICK, the per-ISR overhead from elapsed() and drift correction accumulates without bound until the unannounced surplus reaches 2 * CYC_PER_TICK, triggering dticks=2 and firing two k_timer callbacks back-to-back in a single ISR. This appears as a ~1-cycle (31 µs) spurious period in tests/kernel/timer/timer_behavior. Setting MIN_DELAY = 30 (drain rate = 2 cycles/tick) resolves the accumulation. The value was validated by test on both platforms.
+
+  3. Relax IDLE_EVENT_STATS_PRECISION for 32 kHz SysTick platforms  ->  https://github.com/zephyrproject-rtos/zephyr/pull/113075
+
+The default 1% precision in tests/kernel/usage/thread_runtime_stats is unachievable at 32 kHz: with peak_cycles ~ 32, a single cycle deviation already represents ~3%. Raised to 7% for SOC_SERIES_RTL87X2G and SOC_SERIES_RTL8752H, consistent with the existing relaxation for RISC-V targets.
+
+
+Description Assisted By Claude
+
+*--- ZhiyuanTang17 (2026-07-09 02:35:24+00:00)
+> I disagree with a few things here. I don't deny the reported issues, however I think there is far better fixes that won't diminish test coverage.
+> 
+> Starting with #113053.
+> 
+> So this is a -1 just to put this on hold for now.
+
+ Thanks for the feedback. Understood — happy to hold this and follow #113053's approach instead.
+
+*--- npitre (2026-07-09 04:44:05+00:00)
+Digging in, each one pointed at a root cause worth fixing where the problem actually is rather than accommodating it per board, so I split them out. Here is how I would land each piece:
+
+* **remove hardcoded TIMESLICE_SIZE default** (7565efb): keep this, it is the one change here that genuinely belongs in the Bee SoC. A SoC should not pin the scheduler timeslice; the kernel's 20 ms default is fine and this just stops overriding it.
+
+* **tune SysTick min-timeout-cycles to 30** (286ac2b): the fixed 30-cycle floor is a symptom. MIN_DELAY is a wall-clock property (it must exceed the longest the SysTick IRQ can stay masked), so a hardcoded cycle count is wrong on any clock rate, not only 32 kHz. #113083 derives it from the cycle rate in the driver (about 1 cycle at 32 kHz), which removes the need for a per-board dts override and also lets the driver program sub-tick LOAD values again, fixing the dticks=2 double-fire that timeslicing exposed on your platform. With that in, this commit and the overrides can drop, and TIMESLICING no longer needs to be disabled.
+
+* **accommodate 32 kHz SysTick in timer_behavior** (1903a43): the test's tolerances were hand-tuned percentages with per-board exceptions, and 32 kHz needed yet another. #113053 recomputes the drift and jitter bounds from the clock (one tick, one period), so coarse clocks widen automatically and no board .conf overrides are needed. (Upstream just had to add an Infineon lptimer exception to the very same knob, which is the churn this avoids.)
+
+The related runtime-stats precision issue is handled the same way in #113075, comparing peak stats in the tick domain instead of with a percentage window.
+
+So my suggestion is to reduce this PR to just the TIMESLICE_SIZE commit and let the three standalone PRs cover the rest.
+
+*--- ZhiyuanTang17 (2026-07-09 05:54:12+00:00)
+> Digging in, each one pointed at a root cause worth fixing where the problem actually is rather than accommodating it per board, so I split them out. Here is how I would land each piece:
+> 
+> * **remove hardcoded TIMESLICE_SIZE default** ([7565efb](https://github.com/zephyrproject-rtos/zephyr/commit/7565efb782a3abf2425878404c4f8b656d2fa15e)): keep this, it is the one change here that genuinely belongs in the Bee SoC. A SoC should not pin the scheduler timeslice; the kernel's 20 ms default is fine and this just stops overriding it.
+> * **tune SysTick min-timeout-cycles to 30** ([286ac2b](https://github.com/zephyrproject-rtos/zephyr/commit/286ac2ba86926723e3e91fb5db21cc8aeb22d2e1)): the fixed 30-cycle floor is a symptom. MIN_DELAY is a wall-clock property (it must exceed the longest the SysTick IRQ can stay masked), so a hardcoded cycle count is wrong on any clock rate, not only 32 kHz. [drivers: timer: cortex_m_systick: derive the min timeout from the cycle rate #113083](https://github.com/zephyrproject-rtos/zephyr/pull/113083) derives it from the cycle rate in the driver (about 1 cycle at 32 kHz), which removes the need for a per-board dts override and also lets the driver program sub-tick LOAD values again, fixing the dticks=2 double-fire that timeslicing exposed on your platform. With that in, this commit and the overrides can drop, and TIMESLICING no longer needs to be disabled.
+> * **accommodate 32 kHz SysTick in timer_behavior** ([1903a43](https://github.com/zephyrproject-rtos/zephyr/commit/1903a432623098c237a0f81bdf100b34adb2b208)): the test's tolerances were hand-tuned percentages with per-board exceptions, and 32 kHz needed yet another. [tests: timer_behavior: compute drift and jitter bounds from the clock #113053](https://github.com/zephyrproject-rtos/zephyr/pull/113053) recomputes the drift and jitter bounds from the clock (one tick, one period), so coarse clocks widen automatically and no board .conf overrides are needed. (Upstream just had to add an Infineon lptimer exception to the very same knob, which is the churn this avoids.)
+> 
+> The related runtime-stats precision issue is handled the same way in #113075, comparing peak stats in the tick domain instead of with a percentage window.
+> 
+> So my suggestion is to reduce this PR to just the TIMESLICE_SIZE commit and let the three standalone PRs cover the rest.
+
+Thx, reduce the PR.
+
+*--- ZhiyuanTang17 (2026-07-23 06:49:43+00:00)
+@npitre please help take a look

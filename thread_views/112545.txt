@@ -1,0 +1,22 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112545
+TITLE: doc: security: publish disclosed CVEs, register new advisories
+
+*--- opening post by d3zd3z (2026-07-01 19:49:58+00:00)
+Update the vulnerability registry now that a batch of embargoes has lifted.
+
+- Replace the placeholder "Under embargo" text with full write-ups for 16 CVEs whose embargo has now passed, plus a newly disclosed entry for CVE-2026-7656.
+- The disclosed issues span Bluetooth host and controller (ISOAL framed RX, LE Audio BAP QoS state, SDP attribute parsing, RFCOMM disconnect race, ISO receive), the networking stack (recvmsg ancillary data, getaddrinfo use-after-return, DNS TXT/SRV parsing, SNTP async close race, HTTP static-FS path traversal, IPv6 Neighbor Discovery validation), the ext2 filesystem, the PL011 and Microchip SERCOM-G1 UART drivers, USB CDC-NCM, MCUmgr serial transport, and the net_buf refcount library.
+- All are fixed in main for v4.5.0 with backports to the affected LTS/release branches.
+- Register the next set of assigned-but-embargoed CVEs (2026-12629 through 2026-14368) as placeholders with their embargo dates.
+
+*--- Copilot (2026-07-01 19:54:41+00:00)
+This CVE write-up diverges from the inline-literal markup convention used by every other entry in this file (and even within this same paragraph). Here, file paths and code identifiers are left as plain text — e.g. `subsys/fs/ext2`, `de_rec_len`, `de_name_len`, `ext2_fetch_direntry()`, `block_size`, `block_off`, `rec_len`, `fs_dirent.name`, `memmove(de, next, next_reclen)` — whereas the other 16 entries wrap such tokens in double backticks (compare line 344 `` ``subsys/bluetooth/controller/ll_sw/isoal.c`` `` and line 347 `` ``isoal_check_seg_header()`` ``). The inconsistency is also internal: line 883 uses `` ``EXT2_MAX_FILE_NAME`` `` but line 884 writes the same symbol as plain `EXT2_MAX_FILE_NAME`. Consider wrapping the code identifiers and paths in this entry in `` `` `` to render consistently (re-wrapping lines as needed to stay within the 100-column limit).
+
+*--- d3zd3z (2026-07-01 20:27:21+00:00)
+The issue here is that this text comes from the vulnerabilities themselves, an in this case, I missed a vulnerability that didn't have a clean text. But, it is already published, frozen, and there really isn't much need to try and fix it now.
+
+*--- ceolin (2026-07-01 21:35:45+00:00)
+This CVE is sorted wrongly.
+
+*--- d3zd3z (2026-07-24 16:22:19+00:00)
+Out of date, #113533 is more recent.

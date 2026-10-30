@@ -1,0 +1,46 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113264
+TITLE: Bluetooth: Mesh: delayable_msg: fix NULL deref on empty busy list (#113175)
+
+*--- opening post by 94xhn (2026-07-10 20:47:50+00:00)
+Fixes #113175.
+
+## Problem
+
+`delayable_msg_handler()` pops a node from `access_delayable_msg.busy_ctx` and immediately uses it via `CONTAINER_OF` without checking for NULL:
+
+```c
+sys_snode_t *node = sys_slist_get(&access_delayable_msg.busy_ctx);
+struct delayable_msg_ctx *pending_msg =
+        CONTAINER_OF(node, struct delayable_msg_ctx, node);
+
+pending_msg->fired_time += 10;
+```
+
+When the busy list is empty, `sys_slist_get()` returns NULL, so `pending_msg` is also NULL (`node` is the first member of `struct delayable_msg_ctx`), and `pending_msg->fired_time += 10` performs a read-modify-write near address 0 - on Cortex-M targets this lands in the flash vector-table region and leads to a hard fault ("Bus fault on vector table read").
+
+The issue reporter captured this deterministically on real hardware (nRF5340, BLE mesh node) during node configuration, where a data race between `bt_mesh_delayable_msg_manage()` (BT RX workqueue) and `delayable_msg_handler()` (system workqueue) - both touching the same lock-free slist with no synchronization - causes the handler to sometimes run an extra time against an already-drained busy list, hitting this exact NULL-deref path. The captured hard fault register state was byte-identical to two separate production crashes reported weeks apart.
+
+## Fix
+
+This applies the immediate, minimal fix the reporter proposed: add a NULL check before dereferencing. This eliminates the crash.
+
+The underlying data race between the two execution contexts (the reporter's second, larger proposed fix - e.g. guarding the module's slists with a `k_spinlock`, or funneling both contexts through a single workqueue) is a separate, broader synchronization design question that deserves its own discussion/PR rather than being folded into this minimal crash fix.
+
+## Verification
+
+I don't have the nRF5340 hardware to reproduce the exact race end-to-end, so I verified the specific fix (the NULL check preventing the dereference) with a standalone C reproduction of the node-is-NULL -> `CONTAINER_OF` -> pending_msg-is-NULL -> dereference chain, confirming the pre-fix path computes a near-zero pointer that would be dereferenced, and the post-fix path returns early instead. The crash mechanism itself (NULL/near-NULL pointer dereference causing a hard fault on Cortex-M) is unambiguous from the reporter's own register dump and root-cause analysis, which I independently traced through the current upstream source to confirm still applies.
+
+## Disclosure
+
+Generative AI (Claude) was used to help investigate this issue, implement, and verify this fix. All changes were reviewed by me before submission.
+
+*--- alxelax (2026-07-15 12:42:40+00:00)
+It does not fix bug to full extent just the first part. Thread switching in blocking API is still possible. I created prototype for full bug fix: https://github.com/zephyrproject-rtos/zephyr/pull/113282
+I see your fix coincides with my first commit. I'm pretty sure entire patch should be backported since the bug is quite critical. It is better to do from the single PR. 
+I'm on vacation at the moment and can pick this up and continue bugfixing after 2 weeks.
+
+*--- 94xhn (2026-07-15 12:53:09+00:00)
+Thanks for the detailed analysis and the full prototype in #113282. I agree that the root race needs to be addressed and that one coherent series is preferable. I do not want to duplicate your follow-up work or lose its authorship. If maintainers prefer this PR as the canonical series, I can integrate the remaining commits from #113282 while preserving Aleksandr's authorship; otherwise I am also fine with #113282 superseding this PR. Maintainers, please advise which PR you would like to use for the complete fix.
+
+*--- alxelax (2026-08-04 12:22:04+00:00)
+Hi @94xhn, sorry for late response, I was on vacation. I refactored delayable message functionality in a favor of spinlock usage to protect context from competion. The code that you patched in this PR does not exist anymore. Please take a look at the previously referenced here my PR.

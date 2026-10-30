@@ -1,0 +1,40 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113395
+TITLE: babblesim bt audio samples tests: Build and run with twister
+
+*--- opening post by aescolar (2026-07-13 13:06:27+00:00)
+For background and motivation see https://github.com/zephyrproject-rtos/zephyr/pull/113101
+
+This PR changes the BT audio samples bsim tests to be both built and run using twister.
+This means that users which have Babblesim installed can run these tests with twister in a quite comparable way to single device test. For example:
+twister -T tests/bsim/bluetooth/audio_samples/ -vv --fixture bsim_multi_test
+
+Note these tests can still be run with run_parallel.sh as before. Just now the default test list used by CI does not include them.
+
+Related to:
+* https://github.com/zephyrproject-rtos/zephyr/pull/113225
+* https://github.com/zephyrproject-rtos/zephyr/pull/113244
+* https://github.com/zephyrproject-rtos/zephyr/pull/113101
+
+*--- Copilot (2026-07-13 14:15:40+00:00)
+This twister invocation does not specify any `-p/--platform` (or `-l/--all`). Twister will therefore select only platforms marked `testing.default: true`; the BabbleSim boards (nrf52_bsim/nrf5340bsim/nrf54l15bsim) are not default platforms, so this call will likely run 0 tests after `platform_allow` filtering.
+
+*--- Copilot (2026-07-13 14:15:41+00:00)
+This new BabbleSim-only test case is missing `depends_on: bsim`. Other bsim tests (including the new bap_broadcast_source.*.bsim cases) set this, and it ensures the test is only scheduled on platforms that declare `supported: bsim` / have BabbleSim available.
+
+*--- aescolar (2026-07-13 14:21:26+00:00)
+Same copilot mistake as https://github.com/zephyrproject-rtos/zephyr/pull/113225#discussion_r3560235460
+
+*--- Copilot (2026-07-13 14:44:32+00:00)
+The twister invocation doesn’t specify any platform selection (e.g. `-p` or `--all`). Twister’s default is to run only platforms marked as `testing.default` (see scripts/pylib/twister/twisterlib/environment.py:284-289), and the BabbleSim platforms used by `tests/bsim/bluetooth/audio_samples/` are not default. With the current `platform_allow` constraints, this will likely result in 0 runnable instances and the audio_samples suite silently not being executed.
+
+*--- aescolar (2026-07-13 14:59:55+00:00)
+https://github.com/zephyrproject-rtos/zephyr/pull/113395#discussion_r3571410153
+
+*--- Thalley (2026-07-13 15:09:15+00:00)
+Was not aware that this was a way to provide extra_args for a specific platform :) That's nice to know
+
+*--- Thalley (2026-07-13 15:13:36+00:00)
+Do we support variables in any way? i.e. any way we can store `${ZEPHYR_BASE}/samples/bluetooth/audio/bap_unicast_client` in a variable and then use that? We've done that in some of the bash files
+
+*--- aescolar (2026-07-13 16:16:40+00:00)
+I really doubt twister's yaml parser would support that :)

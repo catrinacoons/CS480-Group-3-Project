@@ -1,0 +1,273 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/97633
+TITLE: memc: BL61x psram controller
+
+*--- opening post by VynDragon (2025-10-15 13:54:12+00:00)
+Adds code to init the psram controller for the existing possible configuration on bl61x.
+
+*--- dsseng (2025-10-15 20:14:03+00:00)
+Is this the max supported PSRAM size? Should it maybe be overridden in the board DT with the amount of PSRAM actually populated
+
+*--- dsseng (2025-10-15 20:14:25+00:00)
+```suggestion
+```
+
+*--- dsseng (2025-10-15 20:17:00+00:00)
+I see now, this is an embedded PSRAM in chip. Should it then be set in the SoC-specific DT to not create a confusingly large region?
+
+*--- dsseng (2025-10-15 20:18:43+00:00)
+`flash_size` seems to only be used for logging, is it how it is supposed to be? Not sure if this information is useful
+
+*--- dsseng (2025-10-15 20:19:38+00:00)
+Move this higher, to make sure we only start initializing the psram controller when we ensured a supported config?
+
+*--- josuah (2025-10-15 20:22:19+00:00)
+You probably meant `ARRAY_SIZE(dqs_delay_trims)` so that it counts up  to `dqs_delay_trims[15]` to avoid overflowing?
+
+Possible to use `dqs_d_t = MIN(dqs_d_t, 15);` but it is also nice to use plain C.
+
+*--- dsseng (2025-10-15 20:22:49+00:00)
+I'm not sure, but coining in an idea that such tunables could be moved to the DT properties, as they describe a child hardware node the controller drives.
+
+But given the PSRAM is embedded, it might be unnecessary
+
+*--- VynDragon (2025-10-15 20:38:39+00:00)
+Yes, those are for information purpose, it had no cost to add.
+
+*--- VynDragon (2025-10-15 20:40:06+00:00)
+Well in theory this would be the max supported size, but here it is only the memory zone's size.
+
+4MB is only for BFLB version, qcom plans 2MB and 8MB version of qcc744, I will apply to the dts.
+
+*--- VynDragon (2025-10-15 20:41:46+00:00)
+This is a internal value for the controller related to a value set from efuse which has no root in anything available afaik so it's not very useful to set outside
+
+*--- josuah (2025-10-15 20:45:20+00:00)
+How about adding a comment to remind us to modify the drive strength when 8M parts are supported?
+```c
+/* TODO: configurable values for PSRAM_REG_WB_DRIVE_ST for other SRAM parts */ 
+```
+
+*--- josuah (2025-10-15 20:48:30+00:00)
+Does this need a `LOG_WRN()` or a `return -EINVAL;`?
+
+*--- josuah (2025-10-15 20:48:51+00:00)
+Does this need a `LOG_WRN()` or a `return -EINVAL;`?
+
+*--- josuah (2025-10-15 20:51:23+00:00)
+If wanting the syntax sugar for it:
+```c
+		case 1:
+			data->psram_size = MB(4);
+		break;
+		case 2:
+			data->psram_size = MB(8);
+		break;
+		case 3:
+			data->psram_size = MB(16);
+		break;
+```
+
+*--- josuah (2025-10-15 20:52:29+00:00)
+If wanting the syntax sugar for it:
+```c
+		case 1:
+			data->psram_size = MB(2);
+		break;
+		case 2:
+			data->flash_size = MB(4);
+		break;
+		case 3:
+			data->flash_size = MB(6);
+		break;
+		case 4:
+			data->flash_size = MB(8);
+		break;
+```
+
+*--- VynDragon (2025-10-15 20:53:09+00:00)
+done
+
+*--- VynDragon (2025-10-15 20:53:12+00:00)
+done
+
+*--- VynDragon (2025-10-15 20:53:16+00:00)
+done
+
+*--- josuah (2025-10-15 20:54:08+00:00)
+`EFUSE_FLASH_SIZE_SIZE` is used as a mask, so maybe you meant to use `GENMASK(EFUSE_FLASH_SIZE_SIZE, 0)`? Here or in the `#define`.
+
+*--- dsseng (2025-10-15 21:01:34+00:00)
+agreed, it'll be optimized out if loglevel isn't high enough
+
+*--- josuah (2025-10-15 21:01:47+00:00)
+Are the `_SIZE` things masks? If so, could also be:
+```suggestion
+#define EFUSE_PSRAM_SIZE_MSK 0x3
+#define EFUSE_FLASH_SIZE_POS 26
+#define EFUSE_FLASH_SIZE_MSK 0x7
+```
+
+Though, `_MSK` makes it sound like it is to be applied to the values, while it's for the *shifted* values...
+Maybe `_SHIFTED_MSK` though it is a bit verbose.
+Maybe this is the best compromise already.
+
+*--- dsseng (2025-10-15 21:02:04+00:00)
+Okay, thanks for explaining
+
+*--- josuah (2025-10-15 21:15:57+00:00)
+To remind the user they need to enable extra `CONFIG_...=y`.
+```diff
++	depends on SYSCON
++	depends on CLOCK_CONTROL
+```
+
+*--- VynDragon (2025-10-15 22:26:05+00:00)
+No, it's perfectly fine to have no internal flash and this code is unreacheable
+
+*--- VynDragon (2025-10-15 22:31:28+00:00)
+nvm, it's not for no flash, but still, doesnt matter, it's unknown and theorically impossible values.
+
+*--- VynDragon (2025-10-15 22:36:43+00:00)
+done
+
+*--- VynDragon (2025-10-15 22:36:45+00:00)
+done
+
+*--- VynDragon (2025-10-15 22:36:50+00:00)
+done
+
+*--- VynDragon (2025-10-15 22:36:54+00:00)
+done
+
+*--- VynDragon (2025-10-15 22:36:56+00:00)
+done
+
+*--- VynDragon (2025-10-15 22:36:59+00:00)
+done
+
+*--- VynDragon (2025-10-15 22:37:04+00:00)
+That's not what that value is for, but generally yes, future qcc744 (not out yet) psram sizes of 2MB, 8MB and 16MB are todo, done
+
+*--- VynDragon (2025-10-15 22:37:06+00:00)
+done
+
+*--- josuah (2025-10-15 22:39:35+00:00)
+thanks for checking
+
+*--- Copilot (2025-10-22 00:14:12+00:00)
+Corrected spelling of 'Inpit' to 'Input'.
+```suggestion
+	/* Input power down off */
+```
+
+*--- Copilot (2025-10-22 00:14:13+00:00)
+The register name appears to contain 'PUSLE' which should likely be 'PULSE'. Verify that this matches the hardware register documentation, and if it's a typo in the SDK header, consider adding a comment explaining the unusual spelling.
+```suggestion
+	tmp = sys_read32(cfg->base + PSRAM_CONFIGURE_OFFSET);
+	/* Note: The macro name contains a typo ('PUSLE' instead of 'PULSE') as per the SDK header. */
+```
+
+*--- Copilot (2025-10-22 00:14:13+00:00)
+The register name appears to contain 'PUSLE' which should likely be 'PULSE'. Verify that this matches the hardware register documentation, and if it's a typo in the SDK header, consider adding a comment explaining the unusual spelling.
+```suggestion
+	tmp = sys_read32(cfg->base + PSRAM_CONFIGURE_OFFSET);
+	/* Note: 'PUSLE' is likely a typo for 'PULSE' in the SDK header or hardware documentation.
+	 * The macro names are used as-is for compatibility.
+	 */
+```
+
+*--- VynDragon (2025-10-24 10:54:24+00:00)
+done
+
+*--- josuah (2025-10-24 17:16:58+00:00)
+It is not used in this driver (BFLB SDK grouped flash and RAM config), so may be ok to drop
+```suggestion
+```
+
+*--- josuah (2025-10-24 17:17:30+00:00)
+It is set but never used anywhere so can eventually skipped.
+```suggestion
+```
+
+*--- josuah (2025-10-24 17:17:59+00:00)
+Like above
+```suggestion
+	uint32_t psram_size;
+```
+
+*--- josuah (2025-10-24 17:18:20+00:00)
+And finally here too
+```suggestion
+```
+
+*--- josuah (2025-10-24 17:20:13+00:00)
+If you wanted to simplify the driver, it's possible to use that:
+
+```suggestion
+	dqs_d_t = dqs_d_t > 15 ? 15 : dqs_d_t;
+	dqs_d_t = (uint16_t)(0xFFFFFFFF0000ULL >> (dqs_d_t + 1));
+```
+
+To be sure it works, I've done this `test.c` and ran it with `cc -Wall -Wextra test.c && ./a.out`:
+```c
+#include <stdint.h>
+#include <stdio.h>
+
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof(*(x)))
+
+static const uint16_t dqs_delay_trims[16] = {
+	0x8000,
+	0xC000,
+	0xE000,
+	0xF000,
+	0xF800,
+	0xFC00,
+	0xFE00,
+	0xFF00,
+	0xFF80,
+	0xFFC0,
+	0xFFE0,
+	0xFFF0,
+	0xFFF8,
+	0xFFFC,
+	0xFFFE,
+	0xFFFF,
+};
+
+uint32_t test_prev(uint32_t dqs_d_t)
+{
+	dqs_d_t = dqs_d_t > ARRAY_SIZE(dqs_delay_trims) - 1 ?
+		ARRAY_SIZE(dqs_delay_trims) - 1 : dqs_d_t;
+	dqs_d_t = dqs_delay_trims[dqs_d_t];
+
+	return dqs_d_t;
+}
+
+uint32_t test_next(uint32_t dqs_d_t)
+{
+	dqs_d_t = dqs_d_t > 15 ? 15 : dqs_d_t;
+	dqs_d_t = (uint16_t)(0xFFFFFFFF0000ULL >> (dqs_d_t + 1));
+
+	return dqs_d_t;
+}
+
+int main(void)
+{
+	for (uint32_t i = 0; i < 1000; i++) {
+    		uint32_t prev = test_prev(i);
+    		uint32_t next = test_next(i);
+
+		if (prev != next) {
+			printf("error at i=%u 0x%08x != 0x%08x\n", i, prev, next);
+			return 1;
+		}
+	}
+
+	printf("ok\n");
+
+	return 0;
+}
+```
+
+*--- josuah (2025-10-24 17:20:36+00:00)
+If wanting to remove it, other comment below. \:)

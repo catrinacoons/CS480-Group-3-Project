@@ -1,0 +1,18 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115763
+TITLE: bluetooth: classic: sdp: improve error handling in sdp_client_get_total
+
+*--- opening post by lylezhu2012 (2026-08-10 01:37:51+00:00)
+Refactor `sdp_client_get_total()` to add comprehensive error handling and validation for SDP sequence parsing.
+
+Check the remaining buffer length before pulling data from the buffer. Using `BT_SDP_SEQ_UNSPEC` to check the SEQ type. And only handle the frame if the total length is valid.
+
+The function now properly validates input data and returns appropriate error codes, preventing potential buffer underflow and invalid data processing in SDP client operations.
+
+*--- Copilot (2026-08-10 01:41:39+00:00)
+The updated function signature exceeds the typical line-length/readability conventions used elsewhere in this file, making it harder to scan and review. Please wrap parameters so each line stays short and aligns consistently.
+
+*--- Copilot (2026-08-10 01:41:40+00:00)
+`len` is a uint32_t and is assigned to a uint16_t output parameter. Even though you guard `len > UINT16_MAX`, the assignment is still an implicit narrowing conversion and can trigger compiler/MISRA warnings. Make the cast explicit after the range check.
+
+*--- Copilot (2026-08-10 01:41:40+00:00)
+`sdp_client_get_total()` validates header pulls against `buf->len`, but at this point `buf->len` also includes the continuation state bytes (not just the `frame_len` attribute list). This means malformed `frame_len` values can still cause the sequence header parsing to consume bytes from the continuation state region before being rejected by the later `frame_len < removed` check. Consider validating pulls against `frame_len` (e.g., pass `frame_len` into `sdp_client_get_total()` or parse using a bounded view) so the function never reads past the attribute list area.

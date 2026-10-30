@@ -1,0 +1,5 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/105635
+TITLE: nvmem: Add read/write helper functions for little/big endian values
+
+*--- opening post by pdgendt (2026-03-17 10:08:19+00:00)
+Add static inline helper functions for reading or writing primitive values from or to NVMEM cells.

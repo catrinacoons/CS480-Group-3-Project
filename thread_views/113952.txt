@@ -1,0 +1,336 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113952
+TITLE: mgmt: mcumgr: grp: Add initial transport mgmt implementation
+
+*--- opening post by thedjnK (2026-07-19 13:52:05+00:00)
+Adds a function that can be enabled to show how many MCUmgr buffers
+    are available. Useful for tests, and was used to notice an issue
+    with ztest and default MCUmgr transport workqueue priority
+
+    Changes the priority from positive to negative to make it a
+    cooperative thread, this prevents issues when using ztest which make
+    the transport function stop running when a semaphore is given, which
+    eventually leads to a lack of network buffers
+
+    Adds documentation on a new experimental transport management
+    MCUmgr group
+
+    mgmt: mcumgr: grp: Add transport management group
+    Adds a new experimental group which supports transport bridging
+
+    mgmt: mcumgr: transport: dummy: Fix missing dependency
+    Fixes a missing dependency which is required to use this
+
+    mgmt: mcumgr: trasnport: smp_raw_dummy: Add transport mgmt support
+    Adds support for bridging using this transport
+
+    mgmt: mcumgr: trasnport: smp_dummy: Add transport mgmt support
+    Adds support for bridging using this transport
+
+    tests: mgmt: mcumgr: Add transport mgmt test
+    Adds a test which checks this using the dummy and raw dummy
+    transports
+
+Fixes #44224
+
+*--- maass-hamburg (2026-07-28 13:18:07+00:00)
+If a function is not used, the linker will normally remove that function from the build. so why not leave it in.
+
+You can enable CONFIG_OUTPUT_DISASSEMBLY then you get a zephyr.lst file next to your zephyr.bin file, which contains the whole code in assembly, if you want to take a look yourself.
+
+*--- thedjnK (2026-07-28 16:41:44+00:00)
+that is true but this is really only something tests should be using, hence the Kconfig guard
+
+*--- maass-hamburg (2026-07-28 16:51:12+00:00)
+Well then it should instead be marked as internal, so it does not show up in the docs.
+
+*--- de-nordic (2026-08-04 12:02:31+00:00)
+Should the selects here remain commented?
+
+*--- de-nordic (2026-08-04 12:03:56+00:00)
+```suggestion
+	  to an application or a device.
+```
+
+*--- de-nordic (2026-08-04 12:04:20+00:00)
+```suggestion
+	  application or a device.
+```
+
+*--- thedjnK (2026-08-11 20:05:47+00:00)
+that is from an old version of the PR, they were replaced last week
+
+*--- thedjnK (2026-08-11 20:05:53+00:00)
+fixed
+
+*--- thedjnK (2026-08-11 20:05:54+00:00)
+fixed
+
+*--- pdgendt (2026-08-12 08:41:09+00:00)
+Struct declarations should never be guarded in headers (see https://docs.zephyrproject.org/latest/contribute/coding_guidelines/index.html#rule-a-1-conditional-compilation). Only struct fields (that take up ROM/RAM space need to do that.
+
+*--- pdgendt (2026-08-12 08:43:03+00:00)
+Booleans are... already booleans.
+
+```suggestion
+	if (bridge_active) {
+```
+
+*--- pdgendt (2026-08-12 08:43:30+00:00)
+Nit
+
+```suggestion
+#define transport_mgmt_lock() (void)0
+#define transport_mgmt_unlock() (void)0
+```
+
+*--- pdgendt (2026-08-12 08:44:56+00:00)
+Ditto on the booleans (and other places too)
+
+```suggestion
+			if (bridges[i].status == 1) {
+				if (!outgoing &&
+				    bridges[i].incoming_transport == transport) {
+					other_transport = bridges[i].outgoing_transport;
+					break;
+				} else if (outgoing &&
+					   bridges[i].outgoing_transport == transport) {
+					other_transport = bridges[i].incoming_transport;
+					break;
+				}
+			}
+```
+
+*--- pdgendt (2026-08-12 08:46:29+00:00)
+More boolean equals.
+
+*--- thedjnK (2026-08-12 15:21:16+00:00)
+Removed
+
+*--- thedjnK (2026-08-12 15:21:28+00:00)
+Fixed
+
+*--- thedjnK (2026-08-12 15:21:29+00:00)
+Fixed
+
+*--- thedjnK (2026-08-12 15:21:34+00:00)
+Fixed
+
+*--- thedjnK (2026-08-12 15:21:35+00:00)
+Fixed
+
+*--- nordicjm (2026-08-14 09:33:46+00:00)
+@pdgendt or @fabiobaltieri would you be able to review this?
+
+*--- Copilot (2026-08-14 09:42:24+00:00)
+`writer` is a pointer member of `smp_streamer`, not an embedded object, so applying `CONTAINER_OF` to the address of this local pointer produces a bogus stack address. Invalid-mode handlers call this path and can crash while resetting the response. Reset the recovered writer directly (or change the callback API to pass the streamer).
+
+*--- Copilot (2026-08-14 09:42:24+00:00)
+The advertised custom group-ID modes never take effect because the group is always registered as ID 11. Assign `transport_mgmt_group_id()` before registration so both the Kconfig value and runtime callback select the actual registered group.
+
+*--- Copilot (2026-08-14 09:42:25+00:00)
+Custom group IDs are also bypassed in error responses: every `smp_add_cmd_err()` here and in the new transport callbacks tags the error with the default ID 11. Once custom registration is fixed, clients will receive an `err.group` that does not match the command group. Use `transport_mgmt_group_id()` consistently across all these call sites.
+
+*--- Copilot (2026-08-14 09:42:25+00:00)
+With `MAX_BRIDGES > 1`, this only searches for a free slot and allows the same incoming or outgoing endpoint to be connected repeatedly. Forwarding and disconnect lookup return only the first matching slot, leaving later bridges unreachable or routing to an older target. Reject a connect when either endpoint is already bridged in the requested direction, or redesign lookup to disambiguate multiple peers.
+
+*--- Copilot (2026-08-14 09:42:25+00:00)
+The protocol says `transport` and `all` must not both be present, but this rejects them only when `all` decodes to true. A request containing both fields with `"all": false` is accepted and disconnects the named transport. Check field presence regardless of the boolean value.
+
+*--- Copilot (2026-08-14 09:42:25+00:00)
+If any bridge is active but the requested transport is not part of one, the helper returns success and this command emits an empty success response. Return `TRANSPORT_MGMT_ERR_NOT_BRIDGED` when no matching bridge is found so a request cannot silently do nothing.
+
+*--- Copilot (2026-08-14 09:42:25+00:00)
+Bridge state can change between `transport_mgmt_is_bridged()` and `transport_mgmt_get_bridge()`, and the latter releases its lock before returning. A concurrent disconnect can therefore make `bridge` NULL or clear its transport pointer before the dereference. Provide an atomic lookup/use operation or hold a lifetime-protecting lock/reference through transmission.
+
+*--- Copilot (2026-08-14 09:42:26+00:00)
+The same lookup/use race exists for bridged responses: a concurrent disconnect can clear this static bridge after lookup and before `incoming_transport` is dereferenced. Protect bridge lifetime through the output call rather than returning an unlocked mutable pointer.
+
+*--- Copilot (2026-08-14 09:42:26+00:00)
+`req->len` still includes every subsequent SMP message in the input buffer, so passing a reference here sends the whole remainder on the first bridge output. The loop then advances and sends later messages again. Forward a buffer view/copy limited to exactly `sizeof(struct smp_hdr) + req_hdr.nh_len`.
+
+*--- Copilot (2026-08-14 09:42:26+00:00)
+This response path also forwards the entire remaining input buffer rather than the current SMP frame, duplicating concatenated responses when the loop reaches them. Pass a frame-limited buffer of header plus `nh_len` bytes.
+
+*--- Copilot (2026-08-14 09:42:26+00:00)
+The result of both CBOR encodes is discarded and this callback reports success even when the response buffer is exhausted, producing a truncated `configs` response. Propagate `ok` and set `rc` as the other bridge-info callbacks do.
+
+*--- Copilot (2026-08-14 09:42:27+00:00)
+This new public header is not self-contained: it declares `bool`/`uint16_t`, transport structs, and expands `MGMT_GROUP_ID_TRANSPORT` without including their definitions. Including this header directly therefore fails or creates prototype-scope struct tags. Add the required public headers after the guard.
+
+*--- Copilot (2026-08-14 09:42:27+00:00)
+No matching `transport_mgmt_lock()` is held here. If another thread currently owns the semaphore, this give releases that thread's lock and permits concurrent bridge mutation; otherwise it is simply spurious. Remove this unlock.
+
+*--- Copilot (2026-08-14 09:42:27+00:00)
+Inserting raw serial here renumbers every existing transport after serial (Bluetooth, shell, UDP, LoRaWAN, and SPI). These values are now exposed on the transport-management wire protocol and already form a public SMP client API, so existing numeric selections change meaning. Preserve the old IDs and assign raw serial the next unused in-tree value.
+
+*--- Copilot (2026-08-14 09:42:27+00:00)
+This unconditionally lists every SMP client transport. When `CONFIG_SMP_CLIENT` is also enabled, Bluetooth, UDP, LoRaWAN, and SPI entries are registered but have no bridge callbacks, so the command advertises them as bridge-capable even though `connect` immediately rejects them. Filter the list/count to transports implementing the required bridge functions.
+
+*--- Copilot (2026-08-14 09:42:28+00:00)
+This map emits four key/value pairs (`id`, `description`, `incoming`, and `outgoing`) but declares a maximum of two. In canonical CBOR mode the encoder uses this bound and cannot encode the advertised map correctly; use four consistently for start and end.
+
+*--- Copilot (2026-08-14 09:42:28+00:00)
+This map emits four key/value pairs but declares only two, which breaks bounded/canonical CBOR encoding. Use a bound of four for both map start and map end.
+
+*--- Copilot (2026-08-14 09:42:28+00:00)
+This map emits four key/value pairs but declares only two, which breaks bounded/canonical CBOR encoding. Use a bound of four for both map start and map end.
+
+*--- Copilot (2026-08-14 09:42:28+00:00)
+This map emits three key/value pairs (`id`, `description`, and `incoming`) but declares only two, which breaks bounded/canonical CBOR encoding. Use a bound of three for both map start and map end.
+
+*--- Copilot (2026-08-14 09:42:29+00:00)
+This new test manifest has no SPDX copyright/license header. New files in this repository must declare their license at the top.
+
+*--- Copilot (2026-08-14 09:42:29+00:00)
+This new configuration file has no SPDX copyright/license header. Add the required header before the Kconfig assignments.
+
+*--- Copilot (2026-08-14 09:42:29+00:00)
+This new documentation file is missing the required SPDX copyright and Apache-2.0 license header at the top.
+
+*--- Copilot (2026-08-14 09:42:29+00:00)
+Correct the public error identifier before it becomes part of the API.
+
+This issue also appears on line 172 of the same file.
+
+*--- Copilot (2026-08-14 09:42:30+00:00)
+Correct the spelling in this help text.
+
+*--- Copilot (2026-08-14 09:42:30+00:00)
+CMake path variables must be quoted so paths containing spaces remain a single argument.
+
+*--- pdgendt (2026-08-14 09:50:08+00:00)
+> @pdgendt or @fabiobaltieri would you be able to review this?
+
+I think Copilot comments need to be looked at/addressed.
+
+*--- thedjnK (2026-08-14 15:58:38+00:00)
+> > @pdgendt or @fabiobaltieri would you be able to review this?
+> 
+> I think Copilot comments need to be looked at/addressed.
+
+Valid issues have been addressed
+
+*--- Copilot (2026-08-18 10:23:21+00:00)
+`i` has reached `CONFIG_MCUMGR_GRP_TRANSPORT_MAX_BRIDGES` when the search loop exits, so this rollback passes a one-past-the-end bridge pointer. If the incoming side rejects a connection after the outgoing side accepted it, the outgoing disconnect callback receives invalid memory instead of the selected bridge.
+
+*--- Copilot (2026-08-18 10:23:21+00:00)
+The bridge pointer is selected while locked but used only after releasing the lock. Another thread can disconnect this bridge and reuse the same array slot before `transport_mgmt_disconnect_bridge()` reacquires the semaphore, causing this call to disconnect an unrelated newly created bridge. Keep lookup and disconnection in one critical section via an internal lock-held helper.
+
+*--- thedjnK (2026-08-18 17:07:08+00:00)
+@pdgendt should be all fixed now
+
+*--- pdgendt (2026-08-19 06:26:46+00:00)
+This should follow the include guard pattern from all other header files.
+
+```suggestion
+#ifndef ZEPHYR_INCLUDE_MGMT_MCUMGR_GRP_TRANSPORT_MGMT_TRANSPORT_MGMT_H_
+#define ZEPHYR_INCLUDE_MGMT_MCUMGR_GRP_TRANSPORT_MGMT_TRANSPORT_MGMT_H_
+```
+
+*--- pdgendt (2026-08-19 06:31:58+00:00)
+Maybe we should use an enum for the direction? Reading a call
+
+```c
+bool state = transport_mgmt_is_bridged(smp, true);
+// vs
+bool state = transport_mgmt_is_bridged(smp, TRANSPORT_MGMT_DIR_OUTGOING);
+```
+
+The latter is obvious for the reader.
+
+*--- pdgendt (2026-08-19 06:36:06+00:00)
+This function and doxygen is a bit confusing to me. "other" does not cover the meaning IMO. Do you actually need to pass the direction? Can't it be deduced from the transport you pass what the counterpart would be?
+
+*--- pdgendt (2026-08-19 06:40:43+00:00)
+If an enum is used for the directions, this could have an array of transport pointers, with the enum value as the index.
+
+*--- pdgendt (2026-08-19 06:43:52+00:00)
+Does it makes sense (haven't checked how this is rendered) to have this inside the `choice`?
+
+*--- pdgendt (2026-08-19 06:46:23+00:00)
+Nit, use early return for readability.
+
+```suggestion
+	if (!bridge_active) {
+		return false;
+	}
+
+	uint8_t i = 0;
+```
+
+*--- pdgendt (2026-08-19 06:47:18+00:00)
+Use a `for`-loop and just return?
+
+*--- pdgendt (2026-08-19 06:49:40+00:00)
+Similar here, but also missing some error returns?
+
+```suggestion
+	if (!bridge_active || bridge->status != 1) {
+		transport_mgmt_unlock();
+		return -EALREADY;
+	}
+	
+	uint8_t i = 0;
+```
+
+*--- pdgendt (2026-08-19 06:50:58+00:00)
+Not sure these comments add a lot of value?
+
+*--- thedjnK (2026-08-19 12:41:19+00:00)
+they're in the other groups but I agree it isn't really needed, removed
+
+*--- thedjnK (2026-08-19 12:41:20+00:00)
+Added in not connected error
+
+*--- thedjnK (2026-08-19 12:41:22+00:00)
+Changed to early return, kept while loops (I like them 😄)
+
+*--- thedjnK (2026-08-19 12:41:23+00:00)
+Updated
+
+*--- thedjnK (2026-08-19 12:41:26+00:00)
+prefer this to have separate names (as it is)
+
+*--- thedjnK (2026-08-19 12:41:27+00:00)
+you do need to pass the direction, you can bridge a transport twice (in theory) e.g. a UART can be bridge to bluetooth so read/write requests going into UART go out of bluetooth, and then read/write responses from bluetooth go back to the UART. But you can also bridge UDP to the UART so read/write requests coming in on UDP go out via the UART, then read/write responses coming in on the UART go to UDP. I don't know if such a system is something anyone would want but fundamentally it is supported. The "other" here is the transport is it bridged to **in that specific direction**, so if you put UART in and set direction to incoming, you'd get the bluetooth transport back, if you put UART in and set direction to outgoing, you'd get the UDP transport back
+
+*--- thedjnK (2026-08-19 12:41:29+00:00)
+Updated transport mgmt functions to use that
+
+*--- thedjnK (2026-08-19 12:41:31+00:00)
+Fixed
+
+*--- thedjnK (2026-08-19 12:42:19+00:00)
+Looks like this:
+<img width="245" height="63" alt="image" src="https://github.com/user-attachments/assets/2a66447b-e560-4b4e-84be-7601ebc76e85" />
+It is only shown if that option is selected
+
+*--- pdgendt (2026-08-19 12:49:33+00:00)
+Where is the actual enum?
+
+*--- thedjnK (2026-08-19 13:24:20+00:00)
+seems I accidentally cut it and saved the file without pasting when thinking of moving it to smp.h (did not move it because it's transport mgmt specific and transport mgmt includes smp.h, don't want to add transport mgmt include file specific things inside of smp.h)
+
+*--- pdgendt (2026-08-19 13:41:54+00:00)
+Replace with enum direction (same for other callback function types).
+
+*--- pdgendt (2026-08-19 13:42:43+00:00)
+Mixing tabs and spaces for indentation.
+
+*--- pdgendt (2026-08-19 13:43:36+00:00)
+Remove `== true` (in all 9 places).
+
+*--- thedjnK (2026-08-19 13:54:10+00:00)
+see point raised here https://github.com/zephyrproject-rtos/zephyr/pull/113952#discussion_r3813354044 smp.h should be independent of transport mgmt includes (since transport mgmt includes this file, not the other way around) so it is like this purposely (though I guess someone could still use them anyway since the values would be 0 and 1, with a castt)
+
+*--- thedjnK (2026-08-19 14:40:52+00:00)
+Discussed with Dominik and changed it to be a bool and use defines, which allows for linking in documentation from both files
+
+*--- thedjnK (2026-08-19 14:41:01+00:00)
+fixed
+
+*--- thedjnK (2026-08-19 14:41:07+00:00)
+fixed
+
+*--- pdgendt (2026-08-19 14:45:44+00:00)
+IMO not ideal, but not blocking this either.

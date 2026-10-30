@@ -1,0 +1,100 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/105420
+TITLE: tests: wdt_basic_api: Add magic number for noinit initialization
+
+*--- opening post by Harini-T (2026-03-13 05:42:40+00:00)
+Detect uninitialized noinit section using magic number (0xDEADBEEF). Noinit section marked NOLOAD contains random values on cold boot but is preserved after watchdog reset. Without detection, test fails on platforms where RAM is not pre-zeroed.
+
+*--- yvesll (2026-03-13 06:06:21+00:00)
+The check is redundant now.
+
+*--- Harini-T (2026-03-13 09:50:33+00:00)
+Hi @yvesll ,
+Thanks for the review. 
+
+The magic number check is essential for portability across boot modes.
+
+On platforms supporting SD card boot or external memory initialization, the noinit section may contain arbitrary patterns from previous sessions or manufacturing test data. Without the magic check, random RAM values (e.g., m_testcase_index = 0x00000002) could appear as valid test states, causing the suite to skip test cases or use uninitialized variables, leading to unpredictable failures.
+
+The magic pattern (1 in 4 billion collision probability) reliably distinguishes cold boot from watchdog reset across all platforms.
+
+Could you please clarify if there's a specific concern with this approach?
+
+*--- yvesll (2026-03-13 10:05:59+00:00)
+Yes, it's really a valid check. I mean `test_wdt_no_callback` can be moved into the first boot.
+
+*--- yvesll (2026-04-13 02:55:46+00:00)
+Hi @Harini-T can you help remove the redundant check on `m_testcase_index`?
+The PR itself is really valid.
+
+*--- Harini-T (2026-04-13 03:18:32+00:00)
+sure, i will update the PR. Thanks
+
+*--- Harini-T (2026-04-13 06:01:55+00:00)
+Hi @yvesll, can you please review ? I have updated the checks
+
+*--- yvesll (2026-04-13 06:03:05+00:00)
+~~Thanks for the update! One minor thing: `test_wdt_no_callback` can be moved directly into the `m_magic != WDT_TEST_MAGIC_NUMBER` block, since on cold boot `m_testcase_index` is guaranteed to be 0. The separate `if (m_testcase_index == 0U)` check after it is redundant.~~
+
+Alright, let's keep it to align with other testcases.
+
+*--- Harini-T (2026-04-13 06:43:09+00:00)
+Thanks for the suggestion. The if (m_testcase_index == 0U) check is intentionally separate from the magic block because test_wdt_no_callback needs to run twice:
+1. On cold boot — to install the watchdog and wait for reset
+2. 2. After the first WDT reset — to detect the reset occurred and advance m_testcase_index to 1
+
+After the WDT reset, the magic block is skipped (magic matches), but m_testcase_index is still 0 and m_state is CHECK_RESET. The separate check ensures test_wdt_no_callback is called again to complete the test case. Moving it into the magic block would break this flow.
+
+*--- Harini-T (2026-04-20 06:55:14+00:00)
+Hi @katsuster, @martinjaeger , @nashif 
+can you please review and provide your comments?
+
+*--- Harini-T (2026-05-07 18:37:03+00:00)
+Hi @nashif ,
+Can you please review and approve the PR?
+
+*--- Copilot (2026-05-12 15:16:13+00:00)
+The header comment still says “There are three tests”, but this file currently implements more than three (e.g., callback_1/callback_2, optional wait-mode, and bad-window-max). Please update the description to match the actual test cases (or note that the set is conditional on Kconfig/devicetree).
+
+*--- Copilot (2026-05-12 15:16:14+00:00)
+WDT_TEST_MAGIC_NUMBER is defined as an untyped hex literal. Since it’s compared/stored in DATATYPE (uint32_t or uint64_t) and this repo targets a MISRA-C subset, please make the constant explicitly unsigned/typed (e.g., cast to DATATYPE or use UINT32_C/UINT64_C as appropriate) to avoid integer-conversion surprises and keep the literal width clear.
+
+*--- Copilot (2026-05-12 15:16:14+00:00)
+Cold-boot detection relies solely on m_magic != WDT_TEST_MAGIC_NUMBER. Since NOINIT can contain arbitrary data, there’s still a (small but non-zero) chance m_magic matches by coincidence and leaves other noinit variables uninitialized, causing nondeterministic test behavior. Consider strengthening the initialization condition by also validating m_state/m_testcase_index ranges (or storing a second value like ~magic) before skipping initialization.
+
+*--- Harini-T (2026-05-19 06:53:47+00:00)
+Updated the header to: "There are multiple tests, conditional on Kconfig and devicetree."
+
+*--- Harini-T (2026-05-19 06:54:29+00:00)
+Updated the macro to explicitly cast to DATATYPE:
+ `
+ #define WDT_TEST_MAGIC_NUMBER ((DATATYPE)0xDEADBEEF)
+ `
+This ensures the literal width matches the platform (uint64_t on STM32F7/H7, uint32_t elsewhere) and avoids implicit integer-conversion warnings.
+
+*--- Harini-T (2026-05-19 06:55:21+00:00)
+This is already handled. m_testvalue is zeroed inside the magic check block:
+ `
+ if (m_magic != WDT_TEST_MAGIC_NUMBER) {
+     m_state = WDT_TEST_STATE_IDLE;
+     m_testcase_index = 0;
+     m_testvalue = 0;        / <-- initialized here /
+     m_magic = WDT_TEST_MAGIC_NUMBER;
+ }
+`
+No change needed.
+
+*--- Harini-T (2026-05-19 15:35:23+00:00)
+Addressed copilot's comments.
+@kartben @yvesll @nashif @kedareswararao  can you please review and provide your feedback?
+
+*--- nashif (2026-05-28 11:37:24+00:00)
+@kartben  please revisit.
+
+*--- Harini-T (2026-06-03 06:59:35+00:00)
+Hi @nashif ,
+Can you please approve the PR?
+
+*--- Harini-T (2026-06-15 06:59:39+00:00)
+Hi @nashif ,
+Could you please review this pull request when you have sometime?
+Thanks!

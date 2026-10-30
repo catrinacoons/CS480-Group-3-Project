@@ -1,0 +1,22 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/86014
+TITLE: Bluetooth: CAP: Add cap_unicast_group API
+
+*--- opening post by Thalley (2025-02-19 14:36:39+00:00)
+Adds a new abstract struct for unicast group that is specific for CAP. The difference between this and the BAP unicast group, is that the parameters are CAP streams and thus ensuring that the streams in the group adhere to the additional requirements that CAP has on top of BAP.
+
+Various samples, modules and tests have been updated to use the CAP struct and API.
+
+*--- Copilot (2025-04-07 08:54:51+00:00)
+The cleanup in the test fixture frees only the first parameter's allocations. If multiple stream parameters are allocated, this may lead to memory leaks. Consider iterating over all allocated stream parameters for proper deallocation.
+```suggestion
+	for (size_t i = 0; i < group_param->params_count; i++) {
+		free(group_param->params[i].rx_param->stream);
+		free(group_param->params[i].rx_param);
+	}
+```
+
+*--- Thalley (2025-04-07 09:30:32+00:00)
+There is only a single call to calloc for these, so there should only be a single call to free for these
+
+*--- Thalley (2025-05-23 16:14:14+00:00)
+Added 2 new functions to iterate on the streams in the BAP and CAP groups as well. Used by https://github.com/zephyrproject-rtos/zephyr/pull/85642

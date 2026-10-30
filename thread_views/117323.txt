@@ -1,0 +1,8 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/117323
+TITLE: mgmt: hawkbit: remove deprecated <zephyr/mgmt/hawkbit.h> header
+
+*--- opening post by kartben (2026-08-25 16:42:26+00:00)
+Removes the legacy `<zephyr/mgmt/hawkbit.h>` redirect header, deprecated in Zephyr 4.0 when the hawkBit API was split into `<zephyr/mgmt/hawkbit/*.h>` (see migration-guide-4.0.rst). It has emitted a `#warning` on inclusion ever since, so it is well past the two-release deprecation window. Nothing in-tree still includes the old path.
+
+*--- kartben (2026-08-27 13:19:47+00:00)
+rebased due to merge conflict :)

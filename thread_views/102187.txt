@@ -1,0 +1,331 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/102187
+TITLE: Bluetooth: Host: Add bt_keys config flag
+
+*--- opening post by HaavardRei (2026-01-13 13:49:02+00:00)
+Adds a flag `config_flags` to the `bt_keys` struct in order to be able to detect configuration changes between firmware updates. This is needed because the `bt_keys` struct has fields which are compiled in depending on which Kconfig options are enabled, enabling the possibility of stored data being intepreted wrongly if the struct changes.
+
+*--- HaavardRei (2026-01-13 13:52:03+00:00)
+Did manual testing of the feature:
+
+Test 1
+(Pre-commit) Establish a bond (security level 4) between devices A and B with no optional kconfigs.
+(Post-commit) reflash device A and reconnect --> ok (the configuration flag is added when settings are loaded).
+(Post-commit) reflash device B with signing enabled --> keys are cleared.
+
+Test 2
+(Post-commit) Establish a bond (security level 4) between devices A and B with signing disabled.
+(Post-commit) reflash device A with signing enabled--> keys are cleared due to non-matching configs.
+
+*--- alwa-nordic (2026-01-13 14:47:35+00:00)
+Whether this lands in the first octet is endianness-dependent.
+
+*--- Thalley (2026-01-13 14:58:20+00:00)
+Would it make sense to define this as a bitfield struct instead? 
+
+Something like 
+```c
+struct {
+    uint32_t version: 8;
+    uint32_t signing: 1;
+    uint32_t legacy_pairing_supported: 1;
+    uint32_t overwrite_oldest: 1;
+};
+```
+
+or
+
+```c
+struct alignas(uint32_t) {
+    uint8_t version;
+    bool signing: 1;
+    bool legacy_pairing_supported: 1;
+    bool overwrite_oldest: 1;
+};
+```
+
+*--- Copilot (2026-01-13 15:11:02+00:00)
+Grammar issue: "Existing keys is migrated" should be "Existing keys are migrated" since "keys" is plural.
+```suggestion
+  corrupted. Existing keys are migrated to the new format automatically, granted that the
+```
+
+*--- alwa-nordic (2026-01-13 16:06:41+00:00)
+The memory layout of bitfields is not defined by the C standard, so it's slightly dangerous to depend on this. It would be up to the various Zephyr platform ABIs.
+
+*--- Thalley (2026-01-13 16:12:17+00:00)
+> The memory layout of bitfields is not defined by the C standard, so it's slightly dangerous to depend on this. It would be up to the various Zephyr platform ABIs.
+
+Ah, yeah, so you are thinking that if an image was built in a different way and the firmware was updated, then this layout may have changed. I agree that if isn't standardized, we shouldn't rely on it
+
+*--- HaavardRei (2026-01-14 08:04:14+00:00)
+Added sys_le32_to_cpu to the macro.
+
+*--- alwa-nordic (2026-01-14 08:24:39+00:00)
+```suggestion
+	sys_cpu_to_le32(STORAGE_CFG_VERSION |                                                      \
+```
+
+This does not change behavior. `sys_le32_to_cpu` and `sys_cpu_to_le32` are the same function. But, the extra semantics in the names must be followed for readability.
+
+*--- KyraLengfeld (2026-01-14 08:30:59+00:00)
+Do I understand correctly that two lines after this the config flags are added to said key? In that case I suggest to add that info to this debug log, otherwise one might see this and think the key doesn't have the flags though right after the warning they will have.
+
+*--- KyraLengfeld (2026-01-14 08:32:29+00:00)
+```suggestion
+	/* Some Kconfig options can change the size of the keys structure. This check will
+```
+
+*--- KyraLengfeld (2026-01-14 08:32:59+00:00)
+IMO, Kconfig options already conveys they are optional :D
+
+*--- KyraLengfeld (2026-01-14 08:35:54+00:00)
+@HaavardRei did you consider the impact of the size increase? May be worth to look at the footprint (hint: we have internal KPI tests that might give an overview on the impact).
+
+*--- alwa-nordic (2026-01-14 08:37:20+00:00)
+```suggestion
+	/* BIT(24) and higher: reserved encoding version number. See STORAGE_CFG_CURRENT. */
+};
+```
+
+*--- alwa-nordic (2026-01-14 08:38:52+00:00)
+```suggestion
+	uint32_t config_flags;  /* little-endian */
+```
+
+I would like this. I know it's not customary for us. But I think this will be welcome.
+
+*--- Thalley (2026-01-14 08:50:51+00:00)
+Thanks for adding a migration guide entry, but I'm not really sure what users will need to do here? It's an internal field, and the text says that it's done automatically, so it seems like there's nothing actionable on the user's side?
+
+*--- Thalley (2026-01-14 08:51:57+00:00)
+Is this value intended to be updated when there are new changes to settings? 
+
+Consider using a decimal value for the version; using hex for versions is quite unconventional
+
+*--- Thalley (2026-01-14 08:54:05+00:00)
+Consider moving the CFG flags/value to a different `#define`; I think that will help with readability and maintainability, so this becomes something like 
+
+```c
+#define STORAGE_CFG_CURRENT \
+	sys_cpu_to_le32(STORAGE_CFG_VERSION | (STORAGE_CFG << 8))
+```
+
+*--- Thalley (2026-01-14 08:59:45+00:00)
+Should the `config_flags` be written to settings immediately after as well (if not already)?
+
+*--- Thalley (2026-01-14 09:01:28+00:00)
+For semantics; please add a name for this enum. 
+
+Also consider adding some sort of assert to ensure that we never use more than 24-bits for these
+
+*--- Thalley (2026-01-14 09:04:29+00:00)
+Did you consider all of the following Kconfig options?
+
+- BT_SMP_MIN_ENC_KEY_SIZE
+- BT_KEYS_SAVE_AGING_COUNTER_ON_PAIRING
+- BT_SMP_ALLOW_UNAUTH_OVERWRITE
+- BT_ID_ALLOW_UNAUTH_OVERWRITE
+- BT_SMP_OOB_LEGACY_PAIR_ONLY
+- BT_SMP_LEGACY_PAIR_ONLY
+
+*--- Thalley (2026-01-14 09:06:35+00:00)
+Do you want the `config_flags` to be store in RAM as little-endian (i.e. we don't need `sys_cpu_to_le32` when writing to FLASH, but we do need it when we set this value), or should it be converted at write-to-flash time?
+
+*--- HaavardRei (2026-01-14 09:32:48+00:00)
+I only considered the options that have a direct effect on the size of the bt_keys struct, as the initial problem is due to the size of this struct changes between reflashes. Do you think these require consideration?
+
+*--- HaavardRei (2026-01-14 09:55:16+00:00)
+The size increase will be 4 bytes * BT_MAX_PAIRED (size of key_pool). I guess we could look into a globally stored version flag for all keys (would require a separate entry in settings?) if the increase is an issue.
+
+*--- alwa-nordic (2026-01-14 10:28:07+00:00)
+I did not realize it could be misinterpreted before you said it. I meant the comment `/* little-endian */` to apply to the field as if it was a type specifier, so I mean it's "stored in RAM" as little-endian.
+
+Confusion about this is why I don't like using `uint32_t` for non-system-endianness values. It's bad for clarity. I would prefer that we have a `int8_t[4]` instead. @HaavardRei, would you be fine with that?
+
+*--- Thalley (2026-01-14 11:25:32+00:00)
+Ah, yeah that makes sense. Thought they were added due to other reasons, but that's just me not reading the commit message properly :) 
+
+I guess these are not necessary to check then
+
+*--- HaavardRei (2026-01-14 11:47:45+00:00)
+Fair point, I converted the message to DBG (as no user-action is really required) and added some more info to the print.
+
+*--- HaavardRei (2026-01-14 11:49:56+00:00)
+> Should the `config_flags` be written to settings immediately after as well (if not already)?
+
+As in `bt_keys_store`? I was considering this, and I guess we can add it after restoring the rest of the key if we do not want to add this field through this check on every reboot.
+
+*--- HaavardRei (2026-01-14 11:50:38+00:00)
+I pushed an implementation for uint8_t[4], please take a look if it's what you wanted :)
+
+*--- HaavardRei (2026-01-14 11:50:57+00:00)
+Yeah I agree, I'll remove it.
+
+*--- HaavardRei (2026-01-14 11:52:34+00:00)
+Changed to decimal. For the first part the main thing is to add something that isn't possible to achieve with the current implementation (thus choosing something out of range of enc_size), but it's possible to increment the version if the struct is changed further.
+
+*--- HaavardRei (2026-01-14 11:52:50+00:00)
+Done!
+
+*--- HaavardRei (2026-01-14 11:55:05+00:00)
+Added name, but I'm not fully sure how to add such an assert in an elegant manner. Do you have a suggestion?
+
+*--- Thalley (2026-01-14 12:07:30+00:00)
+One approach could be to add a final enum member and use the value of that to ensure that it's less than 2^24? e.g. something like  `BUILD_ASSERT(BT_KEYS_FLAG_MAX <= 0x1000000)`
+
+*--- Thalley (2026-01-14 12:09:43+00:00)
+From a struct perspective `!IS_ENABLED(CONFIG_BT_SMP_SC_PAIR_ONLY) ? BT_KEYS_CFG_LEGACY_PAIRING_SUPPORTED : 0)` makes sense (given that it matches `#if !defined(CONFIG_BT_SMP_SC_PAIR_ONLY)` in the struct`, but it does sort of jump in your eyes that this specific one is inverse. 
+
+It doesn't need a change, but in some ways it may be "better" to revert the logic so that flags are set when something is enabled only, and not when they are disabled
+
+*--- Thalley (2026-01-14 12:10:58+00:00)
+May be overly defensive, but consider a `BUILD_ASSERT(STORAGE_CFG_VERSION <= UINT8_MAX)`.
+
+*--- Thalley (2026-01-14 12:13:35+00:00)
+I guess we could technically do
+
+```suggestion
+	uint8_t cfg_version;
+	uint8_t cfg_flags[3];
+```
+
+I guess with the version being there, we could probably even adjust the size of `cfg_flags` as needed if we have some way to automatically migrate? If going with that approach, then we could start with `uint8_t cfg_flags[1];`
+
+This is a non-blocker
+
+*--- KyraLengfeld (2026-01-14 12:24:07+00:00)
+I mean any increase should be considered, not that it is wrong, but if the increase is in fact more than expected, we should at minimum make a follow up task or push for refactoring.
+
+*--- HaavardRei (2026-01-14 13:48:51+00:00)
+This doesn't really stop someone from adding a field to the enum which is larger than this maximum though.
+
+*--- Thalley (2026-01-14 14:08:58+00:00)
+> This doesn't really stop someone from adding a field to the enum which is larger than this maximum though.
+
+As long as the MAX ends up as the last defined value, it does, doesn't it? 
+
+It's true that it doesn't prevent anyone from adding a value _after_ that MAX value, but in the same manner there's nothing that prevents anyone from removing the check/BUILD_ASSERT either, except reviewers :D 
+
+Having a "end/max" enum value is something that is quite widely used in Zephyr though: 
+https://github.com/zephyrproject-rtos/zephyr/blob/main/include/zephyr/instrumentation/instrumentation.h#L29-L37
+https://github.com/zephyrproject-rtos/zephyr/blob/main/include/zephyr/multi_heap/shared_multi_heap.h#L69-L81
+https://github.com/zephyrproject-rtos/zephyr/blob/main/samples/bluetooth/cap_acceptor/src/cap_acceptor_broadcast.c#L43-L55
+https://github.com/zephyrproject-rtos/zephyr/blob/main/include/zephyr/bluetooth/mesh/cdb.h#L29-L33
+https://github.com/zephyrproject-rtos/zephyr/blob/main/include/zephyr/bluetooth/mesh/cdb.h#L64-L72
+
+*--- alwa-nordic (2026-01-14 15:11:13+00:00)
+Looks OK now.
+
+As pointed out by https://github.com/zephyrproject-rtos/zephyr/pull/102187#discussion_r2690198200, it would make sense that version is a separate field. I'll leave the decision up to you. FYI, We have `sys_get_le24` to read a 3-byte integer.
+
+*--- HaavardRei (2026-01-15 06:58:38+00:00)
+>As long as the MAX ends up as the last defined value, it does, doesn't it?
+
+This is true, my point is that there's nothing except reviewers stopping someone from adding an intermediate value that can be higher than the MAX/last defined value which IMO means that the BUILD_ASSERT really isn't more helpful than the added comment.
+
+*--- HaavardRei (2026-01-15 07:33:55+00:00)
+Separated them :)
+
+*--- HaavardRei (2026-01-15 07:37:26+00:00)
+Added
+
+*--- HaavardRei (2026-01-15 07:38:26+00:00)
+I'd rather not get into Kconfig refactoring in this PR, but I agree that it is not set in the most intuitive manner in bt_keys.
+
+*--- HaavardRei (2026-01-15 08:42:42+00:00)
+Hmm seems the increase for the bt shell application on a 52840 dk is 320 bytes (debug logs enabled) or 200 bytes (debug logs disabled). Is this within an expected/"acceptable" range?
+
+*--- Thalley (2026-01-15 11:18:11+00:00)
+> BUILD_ASSERT really isn't more helpful than the added comment.
+
+True, that is a fair point :)
+
+*--- Thalley (2026-01-15 11:19:04+00:00)
+Wasn't asking to refactor any Kconfig options; My comment was more in the line of whehter
+```
+!IS_ENABLED(CONFIG_BT_SMP_SC_PAIR_ONLY) ? BT_KEYS_CFG_LEGACY_PAIRING_SUPPORTED : 0) | 
+```
+
+should be
+```
+IS_ENABLED(CONFIG_BT_SMP_SC_PAIR_ONLY) ? BT_KEYS_CFG_SC_PAIR_ONLY : 0) | 
+```
+
+*--- Copilot (2026-01-15 11:22:46+00:00)
+Add a BUILD_ASSERT to validate that STORAGE_CFG_FLAGS fits within 24 bits (the size of cfg_flags array), similar to the existing check for STORAGE_CFG_VERSION. This ensures the compile-time assertion aligns with the comment in keys.h line 54 that states 'BIT(24) and higher: Invalid'.
+```suggestion
+	 (IS_ENABLED(CONFIG_BT_KEYS_OVERWRITE_OLDEST) ? BT_KEYS_CFG_OVERWRITE_OLDEST : 0))
+BUILD_ASSERT(STORAGE_CFG_FLAGS < BIT(24), "STORAGE_CFG_FLAGS exceeds 24 bits");
+```
+
+*--- Copilot (2026-01-15 11:22:46+00:00)
+The migration check assumes val[0] corresponds to cfg_version by checking if it doesn't equal STORAGE_CFG_VERSION. However, val[0] in old keys without config flags would actually be the enc_size field (which has a maximum value of 16). This logic is correct but could be clearer with a comment explaining that old keys are detected because their first byte (enc_size) will be ≤ 16, which is less than STORAGE_CFG_VERSION (17).
+```suggestion
+			/* This branch migrates keys stored without configuration flags to the
+			 * new format, assuming that only the configuration-related fields
+			 * are missing.
+			 *
+			 * For keys stored with configuration flags, the first byte in the
+			 * serialized data is the cfg_version field, which must match
+			 * STORAGE_CFG_VERSION.
+			 *
+			 * For older keys (without configuration flags), the first byte
+			 * instead corresponds to the enc_size field. enc_size has a maximum
+			 * value of 16, while STORAGE_CFG_VERSION is defined as 17. This
+			 * means that for old-format keys ((uint8_t)val[0] <= 16), the check
+			 * (uint8_t)val[0] != (uint8_t)STORAGE_CFG_VERSION will always be
+			 * true when combined with the shorter compatible length
+			 * (BT_KEYS_STORAGE_LEN_COMPAT), reliably detecting the old layout.
+```
+
+*--- Copilot (2026-01-15 11:22:46+00:00)
+The migration logic has a potential issue. When CONFIG_BT_KEYS_OVERWRITE_OLDEST is enabled, both migration branches check for `len == BT_KEYS_STORAGE_LEN_COMPAT`, but they handle different cases. The first branch (lines 426-437) migrates keys missing config flags (4 bytes), while the second (lines 438-444) migrates keys missing the aging counter (also 4 bytes). If both the config flags AND aging counter are missing (8 bytes total), neither branch will handle this correctly. Consider if a third migration path is needed for keys that predate both features.
+```suggestion
+		/* Handle legacy records that predate both configuration flags and the
+		 * aging counter. These records are 8 bytes shorter than the current
+		 * storage layout (4 bytes for cfg_version/cfg_flags and 4 bytes for
+		 * the aging counter).
+		 */
+		if (len == BT_KEYS_STORAGE_LEN - 2 * sizeof(uint32_t)) {
+			LOG_DBG("Keys for %s have no configuration flags or aging counter, "
+				"migrating to current format",
+				bt_addr_le_str(&addr));
+			keys->cfg_version = STORAGE_CFG_VERSION;
+			sys_put_le24(STORAGE_CFG_FLAGS, keys->cfg_flags);
+			memcpy(keys->storage_start + sizeof(keys->cfg_version) +
+				       sizeof(keys->cfg_flags),
+			       val, len);
+		} else if ((uint8_t)val[0] != (uint8_t)STORAGE_CFG_VERSION &&
+			   len == BT_KEYS_STORAGE_LEN_COMPAT) {
+```
+
+*--- Copilot (2026-01-15 11:22:47+00:00)
+The migration logic has a potential issue. When CONFIG_BT_KEYS_OVERWRITE_OLDEST is enabled, both migration branches check for `len == BT_KEYS_STORAGE_LEN_COMPAT`, but they handle different cases. The first branch (lines 426-437) migrates keys missing config flags (4 bytes), while the second (lines 438-444) migrates keys missing the aging counter (also 4 bytes). If both the config flags AND aging counter are missing (8 bytes total), neither branch will handle this correctly. Consider if a third migration path is needed for keys that predate both features.
+
+*--- Thalley (2026-01-15 11:23:25+00:00)
+Minor: We could consider adding a `uint8_t storage_data_start[0] __aligned(sizeof(void *));` or use `offsetof(struct bt_keys, enc_size)` to denote the "start" of the actual storage data rather than `keys->storage_start + sizeof(keys->cfg_version) + sizeof(keys->cfg_flags)`.
+
+In any case, it may be beneficial to at least do something like
+```c
+const uintptr_t storage_data_start = keys->storage_start + sizeof(keys->cfg_version) + sizeof(keys->cfg_flags)` before the `memcpy` to add some context to this calculation
+
+*--- HaavardRei (2026-01-15 12:15:42+00:00)
+Added a variant using offsetof
+
+*--- HaavardRei (2026-01-15 12:16:28+00:00)
+Ah, I understand. Adding as it'll make naming a bit more clear/consistent
+
+*--- HaavardRei (2026-01-15 12:17:09+00:00)
+Added a bit more info regarding this.
+
+*--- KyraLengfeld (2026-01-19 09:21:00+00:00)
+Well, assuming the difference in debug log enabled or not is the size increase (although really it should be compared to the state before the commit, logs disabled), the increase is 120 bytes, and I think BT_MAX_PAIRED of the bt shell application is 4? So the increase should be, based on your info in this conversation, 16 and not 120 bytes, or am I missing something? if that is the case, this increase is unexpected and should be looked into.
+
+*--- Thalley (2026-01-19 09:47:03+00:00)
+Maybe there should be some documentation/reasoning behind `cfg_flags` being 3 octets. It's not immediately obvious
+
+*--- HaavardRei (2026-01-19 13:41:15+00:00)
+Pushed a comment.
+
+*--- KyraLengfeld (2026-01-19 13:46:10+00:00)
+@HaavardRei  I see with your added comment now, the increase is not 4 times max paired, but 4 times 8 times max paired, and is in the ballpark it is expected at, so then that is fine (as it is a conscious decision)

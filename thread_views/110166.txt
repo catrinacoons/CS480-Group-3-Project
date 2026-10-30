@@ -1,0 +1,59 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/110166
+TITLE: drivers: pcie: Introducing CONFIG_PCIE_HOST
+
+*--- opening post by soburi (2026-05-31 00:46:39+00:00)
+The file `drivers/pcie/host/pcie.c` is compiled if `CONFIG_PCIE`
+is enabled, but it depends on the actual PCIe controller,
+and a contradiction occurs when the sub-option `CONFIG_PCIE_CONTROLLER`
+is set to `n`.
+
+To resolve this, we introduce `CONFIG_PCIE_HOST`.
+
+CONFIG_PCIE_HOST defaults to y when CONFIG_PCIE_CONTROLLER or X86 is
+enabled, and it controls compilation of the files under drivers/pcie/host/.
+Endpoint-only configurations can enable CONFIG_PCIE without pulling in the
+host support.
+
+*--- Copilot (2026-05-31 10:15:57+00:00)
+Multiple in-tree drivers (e.g. `drivers/ethernet/Kconfig.e1000`, `drivers/can/Kconfig.kvaser`, `drivers/smbus/Kconfig` SMBUS_INTEL_PCH, `drivers/virtio/Kconfig` VIRTIO_PCI) only `select PCIE` but rely on the host-side APIs (`DEVICE_PCIE_DECLARE`, `pcie_conf_read`, `pcie_get_mbar`, etc.) implemented in `drivers/pcie/host/pcie.c`. After this reorganization, `select PCIE` no longer pulls in those APIs; host support is only enabled when `PCIE_HOST` is set, which here only defaults `y` if `PCIE_CONTROLLER || X86`.
+
+For in-tree boards this is mostly covered (x86 targets get `PCIE_HOST=y` by default, and controller-based ARM/RISC-V boards set `PCIE_CONTROLLER`), but the contract of `select PCIE` has silently changed: out-of-tree boards (or future in-tree non-x86, non-controller hosts) that enable e.g. `ETH_E1000` will now build with `CONFIG_PCIE=y` but `CONFIG_PCIE_HOST=n` and fail to link the host APIs. Consider either having these drivers also `select PCIE_HOST`, or making `PCIE_HOST` default `y` whenever `PCIE` is enabled and let endpoint-only configs explicitly disable it.
+
+*--- gudnimg (2026-05-31 11:38:50+00:00)
+Nice 👍 Just want to mention its a good opportunity to also change `drivers/CMakeLists.txt` such that:
+
+`add_subdirectory(pcie)`
+
+is changed to:
+
+`add_subdirectory_ifdef(CONFIG_PCIE pcie)`
+
+https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/CMakeLists.txt#L12
+
+*--- soburi (2026-05-31 20:37:39+00:00)
+Already fixed.
+
+*--- maass-hamburg (2026-05-31 21:55:19+00:00)
+Actually this should select see https://github.com/zephyrproject-rtos/zephyr/pull/108984
+
+*--- maass-hamburg (2026-05-31 21:55:21+00:00)
+Same here, drivers should select
+
+*--- soburi (2026-05-31 23:23:53+00:00)
+I've corrected it. Thank you for pointing it out.
+
+*--- soburi (2026-05-31 23:24:03+00:00)
+Fixed it.
+
+*--- maass-hamburg (2026-06-14 13:38:34+00:00)
+Rebase needed
+
+*--- maass-hamburg (2026-06-15 08:24:13+00:00)
+with this change isn't ``menuconfig PCIE`` alone pretty useless?
+
+now drivers have to select both PCIE and PCIE_HOST (or PCIE_ENDPOINT).
+
+and for controller, i would rather say, that it should depend on PCIE_HOST.
+
+*--- maass-hamburg (2026-06-16 12:37:11+00:00)
+or less intrusive would be to keep `PCIE` but only for host and have PCIE_ENDPOINT independent of PCIE.

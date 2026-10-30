@@ -1,0 +1,246 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112681
+TITLE: kernel: queue: Add peek_next accessor
+
+*--- opening post by andreagilardoni (2026-07-03 11:44:22+00:00)
+Add the possibility of peeking the next element in the queue to the one provided as parameter without removing it. The aim for this PR is to add the possibility of observing a queue without modifying the internal structure of the queue itself. 
+
+@nashif @Mattemagikern
+
+*--- andreagilardoni (2026-07-03 11:49:27+00:00)
+For the sake of keeping the discussion open I am reporting what was being said in the old PR.
+
+> I can see the use case for this but I have a bad feeling. Not because the idea is unsound,
+> but because the current queue implementation puts us in an awkward spot that this API can't fully
+> escape.
+> 
+> The sticking point is an edge case that can't be reasonably fixed given how the queue works today.
+> Because peek_next keys off the payload value rather than a position, duplicate entries become ambiguous.
+> 
+> ```
+> [A, B, C, A, Z]
+> ```
+> 
+> `peek_next(q, A)` will always resolve to the first A and return B, even when the A you actually care
+> about is the second one, and there's no way to express "the next after that A" since the only handle
+> you can pass back in is the value itself.
+> That makes it unreliable for iteration, and it's not
+> something we can fix without reworking the queue implementation. (*)
+> 
+> Although this is only possible through the allocated-append path (`k_queue_alloc_append` /
+> `k_fifo_alloc_put`), where distinct nodes can point at the same data. The "direct" path guarantees
+> unique addresses, but `peek_next` can't tell which path populated the queue, so it can't assume
+> uniqueness.
+> 
+> So my hesitation is with the foundation this sits on rather than the feature itself.
+> 
+> (*)
+> The internal memory allocations and the alloc path scare me and I'm not sure the thing actually
+> works.
+> As I read: `k_queue_remove` it can't find an allocated node? as the data it searches for is not the same
+> as the data item in an allocated node. It can be fixed by using the _peek function with free=true if
+> I've read this right though.
+> And the same holds true for `k_queue_unique_append` unless I'm mistaken.
+
+_Originally posted by @Mattemagikern in https://github.com/zephyrproject-rtos/zephyr/pull/112324#pullrequestreview-4619513476_
+
+> Thanks @Mattemagikern for your insightful comment, I didn't see that corner case coming. I agree with you. What we need is to perform a visit of the tcp fifo and do not remove elements from it. I don't think it is possible without accessing the internal structures of the fifo itself, am I right? The tcp recv requeue operation works and we can accept to keep it, since the peek feature apparently I might be the first one using it.
+> 
+> One possible pattern we could implement is iterator, but I think it might be a much bigger work. I can try implementing it, but I might need some help because I am not familiar with zephyr kernel structures. The idea can be creating something like:
+> 
+> ```c
+> struct __iterator {
+>     uintptr* curr;
+>     uintptr* list;
+>     void *(*next(void*));
+> };
+> 
+> struct __iterator *iterate(uintptr* list);
+> void *__iterator_next(struct __iterator *);
+> ```
+> 
+> What do you think about that? 
+> If I am good enough at writing this I can make it possible to apply this logic to all the iterable data structures we have.
+> One big issue I see is that we cannot lock the list during the entire visit and for this reason what can we do if it changes and the current position was removed and deallocated?
+> 
+> Otherwise we could change the structure we use to store the packets and use an `sflist` directly, flagging this as a "I'll do that later".
+> 
+> > As I read: k_queue_remove it can't find an allocated node? as the data it searches for is not the same
+> > as the data item in an allocated node. It can be fixed by using the _peek function with free=true if
+> > I've read this right though.
+> > And the same holds true for k_queue_unique_append unless I'm mistaken.
+> 
+> Actually this are the places where I got inspired for the implementation of `peek_next`, but as I read through I find them quite convoluted for reasons beyond my comprehension. I think they might work as a consequence of being inited with flag `0x1`, but why and how are obscure to me.
+> 
+
+_Originally posted by @andreagilardoni in https://github.com/zephyrproject-rtos/zephyr/issues/112324#issuecomment-4873402423_
+
+*--- andreagilardoni (2026-07-13 08:14:39+00:00)
+Rebased onto main to solve merge conflicts
+
+*--- andreagilardoni (2026-07-13 13:37:14+00:00)
+@nashif what do you think about the tests I extended for this api?
+
+*--- nashif (2026-07-14 10:31:00+00:00)
+These are in the FIFO block and should be sys_trace_k_fifo_peek_next_enter/_exit(struct k_fifo *fifo, ...)
+
+rename the declarations to k_fifo_, add the two #define mappings alongside sys_port_trace_k_fifo_peek_tail_*, and add the definitions in tracing_string_format_test.c (only the queue-level sys_trace_k_queue_peek_next was added there).
+
+*--- nashif (2026-07-14 10:37:50+00:00)
+only gains a NULL-fault test; there is no positive k_queue_peek_next() test at all?
+
+*--- andreagilardoni (2026-07-15 07:16:48+00:00)
+Thanks, copy and paste betrayed me there.
+
+I see that `sys_trace_k_fifo_peek_(head|tail)` are missing, should I add them too? I don't know exactly how these functions are used, I just searched for what was done for the other peek functions and repeated it.
+
+*--- andreagilardoni (2026-07-15 07:25:40+00:00)
+I didn't know exactly where to put it, since all tests in `tests/kernel/queue` seemed more convoluted and covering synchronization use cases. I didn't see any trivial api test inside of the queue collection, am I missing it?
+
+However I saw that peek functionality was tested in the `tests/kernel/fifo/fifo_api`, which looked more appropriate to me, doesn't this cover our case?
+
+*--- andreagilardoni (2026-07-22 13:39:11+00:00)
+I split the commit introducing the new feature in 2: the first one adding the feature, the second one adding tracing to the feature
+
+*--- andreagilardoni (2026-08-03 07:50:03+00:00)
+Hi everyone, are there any updates, can I do something more to Improve this PR?
+
+*--- Mattemagikern (2026-08-03 09:54:54+00:00)
+@andreagilardoni Could you rebase this on origin/main? I think the CI errors may be resolved that way.
+
+On the overall change I'm still tentative on the same basis as before — not on
+this change's own merit, but on the API foundation.
+The point from https://github.com/zephyrproject-rtos/zephyr/pull/112681#issuecomment-4875812463 is still unresolved.
+
+`peek_next` keys off the payload value, so it's only well-defined when entries
+are unique. That holds for the direct path (`k_queue_append`/`k_fifo_put`),
+where the payload is the list node and addresses are unique by construction. It
+does not hold for the alloc path (`k_queue_alloc_append`/`k_fifo_alloc_put`),
+where distinct alloc_nodes can point at the same payload and peek_next can't
+tell which path populated the queue, so it can't assume uniqueness. With
+duplicates like `[A, B, C, A, Z]`, `peek_next(q, A)` always resolves to the
+first `A`, so it can't be used for reliable iteration.
+Though I'm not sure this is a problem in practice, but it could be, and resolving it will impact userspace. 
+A headache for sure. 
+
+You've really highlighted a thorny problem here haha. Well played! ^^
+
+But then again I think this feature is sound on its own for the direct path. :+1:
+
+*--- andreagilardoni (2026-08-03 11:20:46+00:00)
+@Mattemagikern I think the point you highlighted in your comment cannot be fixed in any way with this PR, given that the user of this api doesn't get access to the internal sflist node. This is the easiest way to get this api implemented.
+
+I don't know if this is the right place to discuss this, but I tried to address a different implementation for this feature in the same comment. I see another issue: O(n) for every peek operation which should be done in constant time. In order to fix this and the issue you raised, the best option we have is to implement an iterator that hides in itself the sflist node, abstracts the interaction with it. Then we will have all sorts of problems related to shared access to the list that need to be addressed and I think that it is not trivial.
+
+*--- Copilot (2026-08-07 00:29:05+00:00)
+`data` is evaluated by both tracing hooks and the queue call, so a side-effecting expression can be evaluated three times when tracing is enabled and the lookup may use a different pointer than the trace events. Cache it once, as `k_fifo_put()` does with `_data`.
+
+*--- Copilot (2026-08-07 00:29:06+00:00)
+These FIFO callbacks are declared and implemented, but this test backend never defines `sys_port_trace_k_fifo_peek_next_enter/exit` to forward to them. Unlike the head/tail mappings at lines 179-185, the generic fallback therefore makes every FIFO peek-next trace a no-op under this backend. Add both forwarding macros beside the existing FIFO peek mappings.
+
+*--- Copilot (2026-08-07 00:29:06+00:00)
+Correct the typo “match he expected” to “match the expected.”
+
+*--- Copilot (2026-08-07 00:29:06+00:00)
+The search identifies an occurrence only by its payload pointer, but `k_queue_alloc_append()` can enqueue the same pointer more than once. For a queue `[p, p, x]`, `k_queue_peek_next(queue, p)` always resolves the first occurrence and returns `p`, so an observation loop cannot advance to `x`. The API must either define/enforce unique payloads or expose an occurrence/cursor identity that can distinguish duplicate allocated entries.
+
+*--- Copilot (2026-08-07 00:29:07+00:00)
+Correct the typo “match he expected” to “match the expected.”
+
+*--- Mattemagikern (2026-08-07 06:28:52+00:00)
+Sorry @andreagilardoni, I keep dropping the ball on this one. 
+
+> I see another issue: O(n) for every peek operation which should be done in constant time. 
+
+That will resolve itself once(_if_) the `_alloc` path is removed. 
+Then the peek_next will become a wrapper of `sys_sflist_peek_next` most likely. 
+But for now we're stuck with this lol. 
+
+Remember: 
+> Could you rebase this on origin/main? I think the CI errors may be resolved that way.
+
+*--- npitre (2026-08-12 18:36:22+00:00)
+These two callbacks are dead: nothing defines `sys_port_trace_k_fifo_peek_next_enter/_exit` in this backend, so the fallback in tracing_hooks.h expands them to nothing. Add the mappings next to the peek_tail pair at line 185:
+
+```c
+#define sys_port_trace_k_fifo_peek_next_enter(fifo, data)                                          \
+	sys_trace_k_fifo_peek_next_enter(fifo, data)
+#define sys_port_trace_k_fifo_peek_next_exit(fifo, data, ret)                                      \
+	sys_trace_k_fifo_peek_next_exit(fifo, data, ret)
+```
+
+*--- npitre (2026-08-12 18:36:22+00:00)
+`data` is expanded three times here (both tracing hooks plus the call), so a side-effecting argument runs three times and the traced pointer can differ from the one looked up. Cache it first, as `k_fifo_put()` does:
+
+```c
+	void *_data = data;
+```
+
+Also rename `fpt_ret`, that is already the temp name in `k_fifo_peek_tail()`.
+
+*--- npitre (2026-08-12 18:36:22+00:00)
+The doc block for `k_queue_peek_next()` should say the lookup is by payload pointer, so with the same pointer enqueued twice through `k_queue_alloc_append()` it always resolves the first occurrence. For user mode that is not a corner case: `k_queue_append()` is not a syscall, so the alloc path is the only way a user thread can fill a queue, and `k_queue_peek_next()` is exposed as one.
+
+Separately, I would restructure so the not-found case does not rely on `sys_sflist_peek_next(NULL)` and on `ret` doubling as the loop scratch:
+
+```c
+	SYS_SFLIST_FOR_EACH_NODE(&queue->data_q, cur) {
+		if (z_queue_node_peek(cur, false) == data) {
+			ret = z_queue_node_peek(sys_sflist_peek_next(cur), false);
+			break;
+		}
+	}
+```
+
+*--- andreagilardoni (2026-08-13 14:38:55+00:00)
+> Separately, I would restructure so the not-found case does not rely on sys_sflist_peek_next(NULL) and on ret doubling as the loop scratch:
+
+I like your version, I would also change `sys_sflist_peek_next` to `sys_sflist_peek_nex_no_check`, since `cur` is not expected to be `NULL`. What do you think about that?
+
+*--- andreagilardoni (2026-08-13 14:40:49+00:00)
+Do you think having it defined this way `void *const _data` would be of any benefit?
+
+*--- nashif (2026-09-01 01:32:04+00:00)
+needs rebase
+
+*--- npitre (2026-09-01 19:03:39+00:00)
+The benefit is in binding the argument at all, not in the `const`. This macro is already a statement expression, so give `data` a name there and use it in all three places:
+
+```c
+#define k_fifo_peek_next(fifo, data)                                                               \
+	({                                                                                         \
+		void *fpt_data = (data);                                                           \
+		SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_fifo, peek_next, fifo, fpt_data);                 \
+		void *fpt_ret = k_queue_peek_next(&(fifo)->_queue, fpt_data);                       \
+		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_fifo, peek_next, fifo, fpt_data, fpt_ret);         \
+		fpt_ret;                                                                           \
+	})
+```
+
+`const` on the local is fine and documents that the macro will not reassign it, but the single evaluation is what fixes the problem: a caller writing `k_fifo_peek_next(f, next_candidate())` currently calls that function three times, and the traced pointer can differ from the one looked up. The `fpt_` prefix matches the existing `fpt_ret` so it will not collide with a caller's identifier.
+
+`fifo` is still expanded three times, but `k_fifo_peek_tail()` above already does that and the argument is an object, so I would leave that alone rather than grow the diff.
+
+*--- npitre (2026-09-01 19:03:39+00:00)
+Yes, and that follows from the restructure rather than being a separate change: once the next-node lookup happens inside the loop body, `cur` cannot be NULL there, so `sys_sflist_peek_next_no_check()` is the honest call and it is documented as the faster one for exactly that case.
+
+Two things worth keeping in mind. Its NULL *return* is still possible when the match is the last element, and that is fine because `z_queue_node_peek()` maps NULL to NULL. And with the lookup inside the loop, `ret` stays NULL on the not-found path without any reliance on `sys_sflist_peek_next(NULL)`, which is the part I was really after.
+
+*--- andreagilardoni (2026-09-02 08:18:53+00:00)
+@npitre @nashif can you please review my last changes?
+
+*--- npitre (2026-09-02 17:01:32+00:00)
+This says the first occurrence is returned, but what is returned is the element *following* the first occurrence. Two typos in it as well, `equeued` and `occurrencee`:
+
+```c
+ * The lookup is performed by payload pointer, so if the same pointer was enqueued
+ * multiple times with k_queue_alloc_append(), the element following the first
+ * occurrence is returned.
+```
+
+Worth documenting here that the queue lock is held for the whole scan, so the traversal runs with interrupts masked. `O(N) time` on its own does not tell a caller that.
+
+*--- npitre (2026-09-02 17:01:32+00:00)
+Carry the payload-pointer caveat into this doc block too. `k_fifo_alloc_put()` has the same duplicate-pointer ambiguity as `k_queue_alloc_append()`, and someone reading the FIFO API will not follow through to `k_queue_peek_next()` to find it.
+
+*--- npitre (2026-09-02 17:01:32+00:00)
+`match he expected` -> `match the expected`. Same typo at tests/kernel/fifo/fifo_api/src/test_fifo_contexts.c:397.

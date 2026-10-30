@@ -1,0 +1,275 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/86815
+TITLE: LVGL: multi-display support
+
+*--- opening post by JarmouniA (2025-03-09 00:50:27+00:00)
+LVGL multi-display support
+Closes #83567
+
+```
+west build -p always -b native_sim/native/64 samples/modules/lvgl/multi_display
+./build/zephyr/zephyr.exe
+```
+![Screenshot_lvgl2](https://github.com/user-attachments/assets/e29bcea4-af9a-4dae-bd7f-4a5f7c90dc71)
+
+Tested for potential regressions with `samples/modules/lvgl/demos`, `samples/subsys/display/lvgl`, & `tests/lib/gui/lvgl` on native_sim_64 and STM32H750B_DK.
+
+*--- towen (2025-03-12 17:58:35+00:00)
+Thanks @JarmouniA this works, tested on Xiao_ESP32S3 in #86929 
+My only slight annoyance is the amount of `#if` macros needed in main.c - it would (imo) be useful to have something like `DT_ZEPHYR_DISPLAY(n)` indexable at runtime so that we could iteratively initialise the displays, but this is a wider zephyr thing
+
+*--- JarmouniA (2025-03-12 18:04:55+00:00)
+I'm using printk here because I couldn't get it to work with LOG_ERR, it breaks the macro, haven't found the reason yet.
+
+*--- towen (2025-03-12 18:09:54+00:00)
+Probably because it is inside of a function-like macro..
+
+Does LV_DISPLAY_INIT need to be a macro? Wouldn't a function be better here?
+
+*--- faxe1008 (2025-03-13 11:38:52+00:00)
+use `LVGL_DISPLAY_OBJ` in this macro?
+
+*--- faxe1008 (2025-03-13 11:41:56+00:00)
+Maybe use COND_CODE0 so you can remove this IF_DISABLED?
+
+*--- faxe1008 (2025-03-13 11:43:46+00:00)
+Is there any benefit to renaming  the var?
+
+*--- faxe1008 (2025-03-13 11:45:21+00:00)
+Not needed space.
+
+*--- JarmouniA (2025-03-13 11:55:58+00:00)
+not really, will revert.
+
+*--- towen (2025-03-13 15:35:23+00:00)
+Hi @JarmouniA - maybe outside of the scope of this PR? But currently, the touch input events for both screens are passed to the same screen, which is not ideal
+
+*--- JarmouniA (2025-03-13 16:18:01+00:00)
+> Hi @JarmouniA - maybe outside of the scope of this PR? But currently, the touch input events for both screens are passed to the same screen, which is not ideal
+
+Yes, working on it.
+
+*--- JarmouniA (2025-03-13 20:26:59+00:00)
+clang-format complains if it's removed.
+
+*--- JarmouniA (2025-03-13 20:54:28+00:00)
+Fixed
+
+*--- JarmouniA (2025-03-16 23:17:35+00:00)
+> the touch input events for both screens are passed to the same screen, which is not ideal
+
+@towen added
+
+Could you test it by adding this to your overlay
+```
+	lvgl_pointer {
+		compatible = "zephyr,lvgl-pointer-input";
+		input = <&disp1_touch_controller>;
+		display = <&disp1>;
+		status = "okay";
+	};
+
+	lvgl_pointer2 {
+		compatible = "zephyr,lvgl-pointer-input";
+		input = <&disp2_touch_controller>;
+		display = <&disp2>;
+		status = "okay";
+	};
+```
+
+*--- faxe1008 (2025-03-19 08:50:30+00:00)
+I'd rather go for a phandle here since this will add verification
+
+*--- faxe1008 (2025-03-19 08:52:20+00:00)
+Hmm that is strange :D, I'd prefer living with the complaint and do a override on the merge.
+
+*--- faxe1008 (2025-03-19 08:53:24+00:00)
+Is there a reason for CONFIG_SERIAL, UART_NATIVE_POSIX and NO_OPTIMIZATIONS?
+
+*--- faxe1008 (2025-03-19 08:56:51+00:00)
+Not needed imo, since you are choosing the file in the cmakelists manually anyways. 
+Thinking about this it might make sense to move the CMakeLists stuff from `samples/modules/lvgl/demo` to `modules/lvgl/CMakeLists.txt` so this can be pulled in for other samples (like this multidisplay one) more easily.
+But as it stands this does nothing atm., so can be removed.
+
+*--- faxe1008 (2025-03-19 09:00:44+00:00)
+Amazing work @JarmouniA 🎉 , I guess the only thing missing to make this run smoothly inside of the simulator is the distinction in the SDL touch, so that each display is also linked to one instance, right?
+
+*--- fabiobaltieri (2025-03-19 09:41:26+00:00)
+just add a pair of `/* clang-format off */` `/* clang-format on */` marker, clang-format makes a mess with the macro quite often, no shame in formatting blocks manually
+
+*--- faxe1008 (2025-03-19 10:19:53+00:00)
+@JarmouniA opened this PR which should fix the issue:
+https://github.com/zephyrproject-rtos/zephyr/pull/87333/files
+
+*--- faxe1008 (2025-03-19 13:31:49+00:00)
+Also: I think this is also needed for all other input devices, right?
+
+*--- JarmouniA (2025-03-19 17:21:25+00:00)
+> @JarmouniA opened this PR which should fix the issue: https://github.com/zephyrproject-rtos/zephyr/pull/87333/files
+
+@faxe1008 I had something similar in the pipeline, but glad to see that you have taken care of it 🚀 will take a look later.
+
+*--- JarmouniA (2025-03-19 17:24:42+00:00)
+> NO_OPTIMIZATIONS
+
+Just for debugging, will remove when this comes out of draft
+> UART_NATIVE_POSIX
+
+Left from earlier testing
+
+*--- JarmouniA (2025-03-19 17:25:54+00:00)
+> input devices
+
+If you mean LVGL ones, no, since this is in the common input binding.
+
+*--- JarmouniA (2025-03-19 17:29:17+00:00)
+> I'd rather go for a phandle here since this will add verification
+
+Tried it first, but was not straightforward to link display phandle to its lv_display_t struct. Will have another look to see if it can be done in a simple way.
+
+*--- faxe1008 (2025-03-20 07:25:46+00:00)
+> If you mean LVGL ones, no, since this is in the common input binding.
+
+No I meant adding the same thing to keypad, encoder and button what you did inside of the `pointer_init` method (assigning the display).
+
+As for the phandle vs index: I guess you could do a linear search based on the phandle? Since we only need it during init the performance impact is close to zero.
+
+*--- JarmouniA (2025-03-20 08:28:48+00:00)
+> what you did inside of the pointer_init method (assigning the display).
+
+Ah, yes of crs.
+
+> I guess you could do a linear search based on the phandle
+
+Yes that's what I had in mind.
+
+*--- JarmouniA (2025-03-25 23:41:42+00:00)
+@faxe1008 rebasing this PR as is rn on top of #87333 breaks the 2nd window. Works again when `input-sdl-touch`/`lvgl-pointer-input` nodes, & `chosen/zephyr,touch` prop are removed from DTS (see https://github.com/JarmouniA/zephyr_dev/tree/test_sdl_multi-display-in). Something fishy is going on with SDL, may be related to #71410, will investigate further later.
+
+Also, regarding https://github.com/zephyrproject-rtos/zephyr/pull/86815#discussion_r2002772130, when implemented (see https://github.com/JarmouniA/zephyr_dev/tree/dev_lvgl_multi_disp_idx-to-ph) it broke the 2nd display as well (without rebasing on top of #87333), super weird !!
+
+*--- faxe1008 (2025-03-27 09:42:32+00:00)
+I am pretty sure that this has to do something with the multithreaded usage of SDL.
+
+*--- faxe1008 (2025-03-31 09:03:17+00:00)
+@JarmouniA raised https://github.com/zephyrproject-rtos/zephyr/pull/87883 but this does not seem to resolve the issue with the second window not being rendered.
+
+*--- pdgendt (2025-05-05 06:50:39+00:00)
+Try to keep line lengths to a max of 100 characters in rst files.
+
+*--- decsny (2025-05-05 17:03:23+00:00)
+oof, another thing that absolutely should not be done in DT but I have no alternative to suggest
+
+*--- JarmouniA (2025-05-05 17:12:46+00:00)
+For some context, this was a suggestion from @mbolivar.
+https://github.com/zephyrproject-rtos/zephyr/pull/84890#pullrequestreview-2585161312
+
+*--- decsny (2025-05-05 17:17:17+00:00)
+yeah, generally we are allowing a massive amount of technical debt in DT due to no proper multi instance static software configuration system in zephyr
+
+*--- faxe1008 (2025-05-06 07:03:29+00:00)
+Hmm not against this but maybe should be a seperate PR?
+
+*--- faxe1008 (2025-05-06 07:06:30+00:00)
+Also, why not have a const char* instead?
+
+*--- faxe1008 (2025-05-06 07:07:37+00:00)
+Regarding argument ordering, I'd put this further up in the list perhabs after  `&disp_data->window, dev,`
+
+*--- faxe1008 (2025-05-06 07:08:52+00:00)
+formatting looks a bit odd.
+
+*--- faxe1008 (2025-05-06 07:15:59+00:00)
+You want to use `lv_indev_set_display` instead here.
+
+*--- faxe1008 (2025-05-06 07:26:49+00:00)
+Maybe this should be part of `lvgl_common_input.h` instead, because you also need to link the other pseudo devices to a certain screen. Something like:
+```
+lv_display_t* lvgl_input_get_display(const struct device* dev)
+```
+
+*--- faxe1008 (2025-05-06 07:30:10+00:00)
+Nit naming, this relates to the display buffers, so should be part of it I guess.
+
+*--- faxe1008 (2025-05-06 07:32:17+00:00)
+Naming: No need to abbreviate BUFFER and also adding MACRO as a suffix is a bit strange.
+
+*--- faxe1008 (2025-05-06 07:36:06+00:00)
+LVGL upstream has recently moved some of the newer demos to a new repository.
+https://github.com/lvgl/lvgl/pull/8022
+
+Since I do not see having a fork of that one as well or maintaining the sample in tree, as pseudo mirror, this sample will probably be removed in the next update of our LVGL fork. I mean it works but I guess it would make things slimer if we did not add it just to remove it a few weeks in the future.
+
+*--- faxe1008 (2025-05-06 07:36:20+00:00)
+Same with this one, unfortunately.
+
+*--- JarmouniA (2025-05-06 20:17:06+00:00)
+Removed.
+
+*--- JarmouniA (2025-05-06 20:25:07+00:00)
+@faxe1008 Thank you for your great feedback, I reworked the input part, I think it's much cleaner now.
+
+*--- faxe1008 (2025-05-07 08:39:21+00:00)
+Nit: blank line
+
+*--- faxe1008 (2025-05-07 08:45:40+00:00)
+Is there a reason why you split it into two loops, would something like this work?
+
+Would also allow to get rid of the array:
+```
+for (i = 0; i < DT_ZEPHYR_DISPLAYS_COUNT; i++) {
+    lv_disp = lv_display_get_next(lv_disp);
+    if (lv_disp == NULL) {
+        LOG_ERR("Could not find LV display objects of all Zephyr displays");
+        break;
+    }
+    lv_disp_data = (struct lvgl_disp_data *)lv_display_get_user_data(lv_disp);
+    if (disp_dev == lv_disp_data->display_dev) {
+        return lv_disp;
+    }
+}
+```
+
+*--- faxe1008 (2025-05-07 08:46:39+00:00)
+Maybe make this an assert even. Further down there is no error check, so adding it here make sense imo.
+
+*--- faxe1008 (2025-05-07 09:02:47+00:00)
+Kinda divided on the whole sample with console harness. Had a larger discussion about this not too long ago. Personally I'd avoid adding it since things like the allocation printout is implementation detail inside of `sys_heap`. If someone was to change the text for whatever reason, he'd need to adjust the LVGL sample. That just feels odd.
+
+*--- faxe1008 (2025-05-07 09:05:23+00:00)
+Just also tested it. Very very nice, excited to get this in 💯
+
+*--- Copilot (2025-05-07 10:02:44+00:00)
+Returning 0 immediately after logging an error for an unready display device may hide critical error conditions. Consider returning a negative error code (e.g., -ENODEV) to signal failure consistently with other parts of the code.
+
+*--- Copilot (2025-05-07 10:02:44+00:00)
+[nitpick] The iteration over displays using lv_display_get_next(lv_disp) starting with a NULL value may be non-obvious. It would be beneficial to add a clarifying comment or consider using a more explicit iteration mechanism to improve readability.
+```suggestion
+
+	/* Iterate over all LVGL displays. Passing NULL to lv_display_get_next
+	 * retrieves the first display, and subsequent calls return the next display.
+	 */
+```
+
+*--- Copilot (2025-05-07 10:02:44+00:00)
+[nitpick] Renaming the rendering buffer allocation function and changing its return type from int to void alters the error propagation behavior compared to previous versions. Please document the rationale for this change to ensure that potential failures (if any) are handled appropriately.
+
+*--- JarmouniA (2025-05-07 12:16:15+00:00)
+Added `__ASSERT_NO_MSG` and kept the LOG_ERR so that, even if `CONFIG_ASSERT=n`, the user gets the error message.
+
+*--- mmahadevan108 (2025-05-09 16:12:29+00:00)
+@JarmouniA Touch screen support stopped working on the FRDMRW612 board after this change was merged. Anything we need to do to update `drivers/input/input_gt911.c`  driver?
+
+I am using `samples/subsys/display/lvgl` and see the below on the console
+
+```
+[00:33:06.473,136] <wrn> lvgl: Could not put input data into queue              
+[00:33:06.483,728] <wrn> lvgl: Could not put input data into queue              
+[00:33:06.494,312] <wrn> lvgl: Could not put input data into queue              
+[00:33:06.504,911] <wrn> lvgl: Could not put input data into queue              
+[00:33:06.515,515] <wrn> lvgl: Could not put input data into queue              
+[00:33:06.536,652] <wrn> lvgl: Could not put input data into queue              
+[00:33:06.546,960] <wrn> lvgl: Could not put input data into queue  
+```
+
+*--- JarmouniA (2025-05-09 16:40:36+00:00)
+@mmahadevan108 looking into it.

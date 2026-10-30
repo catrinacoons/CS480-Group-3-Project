@@ -1,0 +1,74 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112221
+TITLE: drivers: timer: add NXP RTC (rtc_jdp) system timer
+
+*--- opening post by Holt-Sun (2026-06-28 07:01:49+00:00)
+## Summary
+
+Add a Zephyr system timer driver for the NXP RTC (`rtc_jdp`) IP on the MCXE31x family, letting the RTC serve as the kernel tick source. Because the RTC keeps counting across all low-power states, it works as a low-power system timer with no companion timer. The RTC counter driver already exists; this PR adds the system-timer role on the same IP plus the arbitration so the two roles coexist.
+
+## Design
+
+It is a chosen-selected singleton (enabled via `zephyr,system-timer` -> an `nxp,rtc-jdp` node, like `mcux_lptmr_timer.c`), tickless against the RTC's single absolute compare register (RTCVAL), with the free-running 32-bit counter as the cycle counter. A RTCVAL write synchronizes into the slow RTC clock domain and sets `INV_RTC` while in progress (further writes are ignored), so the driver waits for `INV_RTC` to clear before each write per the reference manual. The scheduling horizon is capped at half the counter range so an absolute compare can never wrap past the counter and look like the past (mirroring `mcux_os_timer.c`/`mcux_gpt_timer.c`). The MCXE31x defconfig disables SysTick and derives the clock rate from the chosen node when this timer is selected (prescaler = 1 -> 32 kHz, 1000 ticks/s). The counter driver yields the RTC instance when it is the chosen system timer so both drivers never bind the same hardware. The role is opt-in; the board default (SysTick + RTC-counter calendar) is unchanged.
+
+## Testing
+
+Validated on `frdm_mcxe31b`: `tests/kernel/timer/timer_api` passes 15/15, and `tests/kernel/timer/timer_behavior` passes with zero drift and zero jitter over 10,000 samples (mean exactly 32 cycles/tick, `late_callbacks = 0`). Default-build regressions confirm SysTick stays the default and the RTC counter still instantiates when the RTC is not the system timer.
+
+*--- lucien-nxp (2026-06-28 15:01:15+00:00)
+Could we calculate "tick" instead of hard-coding it? If user modify the prescaler in dts, user maybe forget to modify the value here.
+
+*--- Holt-Sun (2026-06-29 02:42:51+00:00)
+Good point — switched it to calculate at runtime instead of hard-coding. The driver now selects TIMER_READS_ITS_FREQUENCY_AT_RUNTIME and computes the rate from clock-frequency / prescaler in init (like mcux_stm_timer.c).
+
+*--- Copilot (2026-06-29 02:45:19+00:00)
+Division by zero is possible before the validity guard runs. If `cycle_rate` (clock-frequency / prescaler) is smaller than `CONFIG_SYS_CLOCK_TICKS_PER_SEC`, `rtc_cycles_per_tick` becomes 0, and line 261 (`(COUNTER_MAX / 2U) / rtc_cycles_per_tick`) divides by zero before the `rtc_cycles_per_tick <= rtc_min_delay` check on line 265 can return `-EINVAL`. This is reachable with an allowed prescaler enum (e.g. 512 → ~62 Hz with the default 1000 ticks/s). Check for a zero cycles-per-tick before computing the derived values.
+
+*--- Holt-Sun (2026-07-01 02:08:33+00:00)
+@npitre , please take a look at this PR, thank you.
+
+*--- zejiang0jason (2026-07-01 04:26:17+00:00)
+Should enable RTC at last, after compare value and interrupt configured?
+
+*--- npitre (2026-07-01 04:43:43+00:00)
+Confirming @copilot's point: this divides by `rtc_cycles_per_tick` before the `<= rtc_min_delay` guard below, so a `rtc_cycles_per_tick == 0` (cycle_rate < ticks/s, reachable with a large prescaler enum) faults here. Zero-check before these derived computations.
+
+*--- npitre (2026-07-01 04:43:43+00:00)
+This is the round-up-from-now + `ticks - 1` idiom from mcux_os/gpt. Your own mcux_stm_timer.c (#111724) uses the cleaner absolute form: track `last_elapsed` (set in `sys_clock_elapsed()`), then `next = (last_elapsed + ticks) * CYCLES_PER_TICK` with a single CLAMP, dropping the `ticks - 1` and the `adj` rounding. Worth mirroring it here.
+
+*--- npitre (2026-07-01 04:43:43+00:00)
+RTCVAL is an equality compare that syncs into the slow domain after `now` was sampled, but this does a single pre-write `MIN_DELAY` bump, not the read-back/retry safe-set your STM driver uses. Is `MIN_DELAY = max(2*MINIMUM_RTCVAL, cyc/8)` guaranteed to exceed the INV_RTC write-sync latency, so the compare can never land already-passed? If not strictly, a missed equality match stalls until the counter wraps (~36 h at 32 kHz); the STM-style post-write retry would be safer.
+
+*--- npitre (2026-07-01 04:43:44+00:00)
+Minor/consistency: private spinlock + `sys_clock_announce()` here, vs the unified `sys_clock_lock()` / `sys_clock_announce_locked()` your STM driver adopted. Prefer the latter for a new driver.
+
+*--- Holt-Sun (2026-07-01 09:24:30+00:00)
+Done — RTCVAL and the match interrupt are configured first, RTC_EnableRTC() is called last.
+
+*--- Holt-Sun (2026-07-01 10:05:37+00:00)
+Fixed. sys_clock_driver_init() now returns -EINVAL on
+`cycle_rate == 0 || (cycle_rate % CONFIG_SYS_CLOCK_TICKS_PER_SEC) != 0`
+before deriving cycles_per_tick, so a rate below the tick rate (e.g. a
+large prescaler enum) is rejected up front and never reaches the
+division. Same guard style as mcux_stm_timer.c.
+
+*--- Holt-Sun (2026-07-01 10:05:47+00:00)
+Done — rewrote it to the mcux_stm_timer.c absolute form. sys_clock_elapsed()
+records last_elapsed, and sys_clock_set_timeout() computes
+cycles = (last_elapsed + ticks) * cycles_per_tick with a single clamp to
+cycles_max, then programs last_count + cycles. The `ticks - 1` and the adj
+round-up are gone.
+
+*--- Holt-Sun (2026-07-01 10:06:05+00:00)
+Switched to the STM-style post-write read-back/retry. rtc_jdp_set_compare()
+writes RTCVAL, re-reads the counter, and bumps the compare forward
+(doubling) until it is safely ahead, so a missed equality match can no
+longer stall to a 32-bit wrap. The single pre-write MIN_DELAY bump is
+removed. I kept the pre-write INV_RTC wait (the RM ignores an RTCVAL write
+while a prior one is still syncing) and use a small margin on the read-back
+to cover the sync latency, so correctness no longer relies on MIN_DELAY
+exceeding it.
+
+*--- Holt-Sun (2026-07-01 10:06:26+00:00)
+Done. The ISR now uses sys_clock_lock() / sys_clock_announce_locked(), and
+sys_clock_set_timeout() / sys_clock_elapsed() assert sys_clock_is_locked()
+instead of taking a private spinlock. The k_spinlock is removed.

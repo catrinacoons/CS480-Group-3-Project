@@ -1,0 +1,24 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/105801
+TITLE: drivers: flash: nrf_rram: add alignment validation for write and erase
+
+*--- opening post by mohittalwar23 (2026-03-19 06:02:49+00:00)
+The nrf_rram_write() and nrf_rram_erase() functions were missing input validation for address and length alignment.
+
+nrf_rram_write() did not verify that addr and len are multiples of WRITE_LINE_SIZE (16 bytes), allowing unaligned writes to succeed when they should return -EINVAL.
+
+nrf_rram_erase() did not verify that addr and len are multiples of PAGE_SIZE (4096 bytes), allowing unaligned erases to succeed when they should return -EINVAL.
+
+Add alignment checks to both functions to correctly reject invalid operations as required by the flash API contract.
+
+Fixes #102511
+
+*--- nordic-piks (2026-03-19 14:07:50+00:00)
+Checked at HW, working fine.
+
+*--- mohittalwar23 (2026-03-23 12:56:50+00:00)
+Thanks guys, It was a great learning opportunity, I look forward to contribute more.
+
+*--- alxelax (2026-05-06 14:52:08+00:00)
+Seems like this PR broke mesh dfu on platforms with RRAM. It will be nice to check API users if API functionality behavior is changed.
+Some API users do not expect rejection due to unaligned addresses.
+https://github.com/zephyrproject-rtos/zephyr/blob/main/subsys/bluetooth/mesh/blob_io_flash.c#L150-L154

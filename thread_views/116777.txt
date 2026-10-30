@@ -1,0 +1,53 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116777
+TITLE: drivers: timer: fix the builds broken by the tick-span assert
+
+*--- opening post by kartben (2026-08-19 11:34:27+00:00)
+`main` is currently red: two `twister-build` jobs fail in [run 32237823617](https://github.com/zephyrproject-rtos/zephyr/actions/runs/32237823617) ([job 2](https://github.com/zephyrproject-rtos/zephyr/actions/runs/32237823617/job/96021798802), [job 25](https://github.com/zephyrproject-rtos/zephyr/actions/runs/32237823617/job/96021798919)). Both come from the `BUILD_ASSERT` added in 3b0639faaf080b60a5e43ab492e048872a980668 (#116279), and they are two separate problems.
+
+### The assert does not compile where the rate is not a constant
+
+`sample.cpu_freq.thermal_cap` on `frdm_mcxn236` fails with `expression in static assertion is not constant`.
+
+The assert sits in the `#else` of `TIMER_CORE_PRECOMPUTE_CYC_PER_TICK`, but that branch also covers `CONFIG_SYSTEM_CLOCK_HW_CYCLES_PER_SEC_RUNTIME_UPDATE` (a `configdefault` on MCXN), where `TIMER_CORE_CYCLES_PER_SEC` expands to a `sys_clock_hw_cycles_per_sec()` call.
+
+The header already tracks exactly this case as `TIMER_CORE_CHECK_CYC_PER_TICK_AT_INIT`, and the neighbouring cycles-per-tick `!= 0` assert is guarded with it — the new one just missed it. `timer_core_init()` already runs the runtime equivalent, so nothing was needed there.
+
+### The assert bounds a tick against the wrong thing
+
+The other ten failures are `benchmark.kernel.{application*,core,latency*}` on mps4, and here the assert rejects a configuration that keeps time correctly. This is not an mps4 quirk: `benchmark.kernel.core` fails the same way on `frdm_mcxn236`, which CI never surfaced because `platform_key: arch` happened to pick other platforms.
+
+`TIMER_CORE_MAX_UNANNOUNCED_CYCLES` is `MIN(TIMER_CORE_COUNTER_SAFE_SPAN, TIMER_CORE_ALARM_MAX_CYCLES)`, and those two bound different things:
+
+| | bounds | exceeding it means |
+|---|---|---|
+| `COUNTER_SAFE_SPAN` | what the counter can resolve | the masked delta is ambiguous, and nothing recovers it |
+| `ALARM_MAX_CYCLES` | what the arming register holds | the deadline takes more than one arm to reach |
+
+Only the first is a correctness bound. On mps4 the benchmarks ask for one tick per second at 25 MHz, so a tick is 25000000 cycles: past the 24-bit SysTick `LOAD` (16777215), but well inside the counter's safe span (2147483647). Time resolves correctly there, it just takes several arms per tick.
+
+So this asserts on `TIMER_CORE_COUNTER_SAFE_SPAN` alone. The arm path still clamps to `MAX_UNANNOUNCED_CYCLES`, so no alarm is ever programmed out of range.
+
+The change only weakens the assert, so nothing that builds today can start failing. Every in-tree driver that narrows `ALARM_MAX_CYCLES` is RELOAD (`cortex_m_systick`, `ite_it8xxx2`, `ite_it51xxx`, `mchp_xec_rtos`) or COMPARE_ORDERED (`nrf_rtc_timer`), and both fire immediately on an already-passed deadline. No COMPARE_EXACT driver narrows it, so there `ALARM_MAX_CYCLES` stays at `COUNTER_MASK` and the assert is unchanged.
+
+### On the earlier revision of this PR
+
+The first version raised the tick rate on `mps4/corstone315/fvp` instead. That was wrong twice over: the assert is what is at fault, and `platform_key: arch` makes the platform it picks unstable, so CI simply moved the same ten failures onto `mps4/corstone320/fvp`. Every Cortex-M SysTick board above ~16.7 MHz would have been next in line.
+
+### Notes
+
+@npitre — the assert's intent is right and worth keeping, this only narrows what it tests. Raising it rather than retargeting it quietly, in case the alarm bound was meant to be in there.
+
+Not for this PR, but worth an issue: when a tick does outrun the alarm, `TIMER_CORE_MAX_SPAN_TICKS` truncates to zero and the arm path falls to the `ALARM_MIN_CYCLES` floor, so it re-arms every ~10 us instead of at the alarm's full reach. Time still advances, just far more expensively than it needs to.
+
+### Verification
+
+Built locally with Zephyr SDK 1.0.1 / arm-zephyr-eabi 14.3.0, the same SDK CI uses.
+
+| check | result |
+|---|---|
+| the ten failing scenarios on `mps4/corstone315/fvp` and `mps4/corstone320/fvp` | 20/20 built |
+| `sample.cpu_freq.thermal_cap` on `frdm_mcxn236/mcxn236` | built |
+| `benchmark.kernel.core` on `frdm_mcxn236/mcxn236` | built |
+| the same builds against the unpatched header | 3 errored, reproducing both CI messages |
+| a 24-bit counter at 25 MHz with a 1 Hz tick | still rejected, so the assert keeps its teeth |
+| `sys_kernel`, `latency_measure` and `kernel/common` on qemu_x86, qemu_cortex_m3, mps2/an385, nrf52840dk, qemu_riscv32 and frdm_k64f | 75 built, 0 failed |

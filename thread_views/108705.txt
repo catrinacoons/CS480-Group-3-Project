@@ -1,0 +1,19 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108705
+TITLE: drivers: i2c: i2c_infineon_pdl multi-target fixes
+
+*--- opening post by stites-infineon (2026-05-07 23:02:28+00:00)
+Fixing some target misbehaviors I found while working with multiple i2c targets on a single bus.
+
+Updates:
+1. Fix potential missing event when swapping directions / repeated starts
+2. Make target more robust against controller timing between ACK and sending first byte
+3. Target was set to ACK every address, now checks for match
+4. Set pins back to (optional) sleep state gpio when unregistering, and reconfigure them for i2c when registering.  This prevents an unregistered I2C from breaking the bus by holding it low
+5. Disabled NVIC when unregistering targets.  Infineon has dedicated interrupts for SCBs, so this is safe.
+6. Preemptively arm write buffer to avoid a potential race condition when target RX auto-ACK is enabled (more relevant for following PR where I make this an option)
+
+*--- stites-infineon (2026-05-08 21:31:49+00:00)
+Forcing pushing for SonarqubeCloud fixes - had to restructure the event handler to reduce complexity
+
+*--- stites-infineon (2026-05-16 00:31:57+00:00)
+I'm going to be out for a couple months.  @mcatee-infineon has agreed to take over managing this PR.

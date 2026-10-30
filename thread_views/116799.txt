@@ -1,0 +1,25 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116799
+TITLE: tests: benchmarks: app_kernel: let board fragments reach userspace runs
+
+*--- opening post by kartben (2026-08-19 12:50:36+00:00)
+`tests/benchmarks/app_kernel` keeps its per-board tuning in `boards/`, but the three userspace scenarios never see it.
+
+They pass their config as `extra_args: CONF_FILE=prj_user.conf`, and `configuration_files.cmake` merges `socs/` and `boards/` only when `CONF_FILE` is *unset*:
+
+```cmake
+if(NOT DEFINED CONF_FILE)
+  zephyr_file(CONF_FILES ${APPLICATION_CONFIG_DIR} KCONF CONF_FILE NAMES "prj.conf" ... REQUIRED)
+  zephyr_file(CONF_FILES ${APPLICATION_CONFIG_DIR}/socs KCONF CONF_FILE QUALIFIERS ...)
+  zephyr_file(CONF_FILES ${APPLICATION_CONFIG_DIR}/boards KCONF CONF_FILE ...)
+else()
+```
+
+So `boards/nrf52_bsim.conf` is silently inert for `benchmark.kernel.application.user*` today. It has gone unnoticed because those scenarios filter on `CONFIG_ARCH_HAS_USERSPACE`, which nrf52_bsim does not have, so the fragment and the scenarios never meet.
+
+This hands the file over as `EXTRA_CONF_FILE` through the `extra_conf_files` key instead, which leaves `CONF_FILE` unset and lets the `boards/` merge happen. `prj_user.conf` is cut down to the two symbols it actually adds on top of `prj.conf`, since `EXTRA_CONF_FILE` merges *after* `boards/` and a full copy would put the base values straight back over any board fragment.
+
+### Verification
+
+Built `tests/benchmarks/app_kernel` on `qemu_x86` and `qemu_cortex_a53`, 12 configurations, before and after. All 12 merged `.config` files come out byte-identical, so this is a no-op wherever no board fragment exists and only changes behaviour where one does.
+
+Noticed while working on #116777, but independent of it and based on `main`.

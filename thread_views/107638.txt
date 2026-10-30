@@ -1,0 +1,42 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107638
+TITLE: drivers: spi: spi_dw: add TI SSP frame format support
+
+*--- opening post by sudiiyengar-en (2026-04-21 04:34:26+00:00)
+The DesignWare SSI controller supports both Motorola SPI and TI SSP frame formats via the CTRLR0.FRF field, but the driver previously hard-coded Motorola and silently ignored the SPI_FRAME_FORMAT_TI flag.
+
+Program CTRLR0.FRF based on config->operation. When TI SSP is selected, skip CPOL/CPHA programming since SCPH and SCPOL have no meaning in that format per the DW SSI databook.
+
+Define FRF field positions for both the standard and HSSI variants of the IP, matching the existing +2 offset pattern used for SCPH, SCPOL, TMOD, SLV_OE and SRL.
+
+
+Assisted-by: Claude:claude-opus-4.7
+
+*--- tbursztyka (2026-04-29 18:10:55+00:00)
+not found of this, now to configure the controller the driver will go twice through config. Please, keep it as it was before.
+
+*--- sudiiyengar-en (2026-04-29 18:18:11+00:00)
+I made these changes based on SonarQube analysis feedback. Since this is executed after spi_context_configure(), my understanding is that it would only be configured once. If that assumption isn’t correct, I’m happy to revert to the previous behaviour.
+
+*--- tbursztyka (2026-05-22 12:24:34+00:00)
+Sure, by line 252, it will be configured once. My point was that, there is no need to "validate" a configuration before actually using it. It's useless.
+
+*--- sudiiyengar-en (2026-05-22 12:28:11+00:00)
+@tbursztyka I accept your comments.  It only validates the pointer. I had pushed the pr for this issue .https://github.com/zephyrproject-rtos/zephyr/pull/105492 was closed it as WG will take action.
+
+*--- tbursztyka (2026-06-18 09:42:11+00:00)
+Keep the indentation as it was. (configure your editor to follow linux code style, so it won't mess this up)
+
+*--- tbursztyka (2026-06-18 09:42:15+00:00)
+same
+
+*--- tbursztyka (2026-06-18 09:44:28+00:00)
+this has nothing to do in this commit., remove it.
+
+*--- sudiiyengar-en (2026-06-18 12:03:53+00:00)
+Thanks, addressed it.
+
+*--- sudiiyengar-en (2026-06-18 12:04:00+00:00)
+Thanks, addressed it.
+
+*--- sudiiyengar-en (2026-06-18 12:04:24+00:00)
+Thanks, addressed it.

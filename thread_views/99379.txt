@@ -1,0 +1,250 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/99379
+TITLE: Ethernet bridge forward decision and IP layer communication support
+
+*--- opening post by yangbolu1991 (2025-11-14 09:41:13+00:00)
+Ethernet bridge currently supported very sample forwarding for all input packets.
+We will have more features development based on virtual bridge, like IP communication, fdb, vlan ...
+
+So, this PR did below work.
+- Moved bridge code to folder.
+- Handled bridge input with added forward decision.
+- Supported virtual bridge RX and IP protocols.
+- Added bridge sample with DHCP and added i.mxrt1180 board as an example.
+
+In the sample, ports were bridged and virtual bridge interface was with DHCP client enabled to get IP.
+For i.MXRT 1180, 5 ports were bridged including 4 DSA ports and 1 normal Ethernet port. See the log below.
+
+```
+[00:00:00.052,000] <inf> phy_mii: PHY (3) ID 1CC816
+[00:00:00.103,000] <inf> phy_mii: PHY (2) ID 1CC816
+[00:00:00.140,000] <err> net_dsa_tag: Failed to connect tag protocol
+[00:00:00.143,000] <inf> dsa_netc: DSA user port 0 Link down
+[00:00:00.144,000] <inf> dsa_netc: DSA user port 1 Link down
+[00:00:00.144,000] <inf> dsa_netc: DSA user port 2 Link down
+[00:00:00.144,000] <inf> dsa_netc: DSA user port 3 Link down
+[00:00:00.144,000] <inf> nxp_imx_eth_psi: ENETC0 MAC: 00:00:00:01:02:00
+[00:00:00.144,000] <inf> nxp_imx_eth_psi: ENETC0 Link down
+[00:00:00.144,000] <inf> nxp_imx_eth_psi: ENETC1 MAC: 00:00:00:01:03:00
+*** Booting Zephyr OS build v4.3.0-339-g698792a29a43 ***
+[00:00:00.145,000] <inf> net_bridge_sample: Find bridge iface 1.
+[00:00:00.145,000] <inf> net_bridge_sample: Find iface 2. Add into bridge.
+[00:00:00.146,000] <inf> net_eth_bridge: Bridge 1 is setup
+[00:00:00.146,000] <inf> net_bridge_sample: Find iface 3. Add into bridge.
+[00:00:00.146,000] <inf> net_eth_bridge: Bridge 1 is setup
+[00:00:00.146,000] <inf> net_bridge_sample: Find iface 4. Add into bridge.
+[00:00:00.146,000] <inf> net_eth_bridge: Bridge 1 is setup
+[00:00:00.146,000] <inf> net_bridge_sample: Find iface 5. Add into bridge.
+[00:00:00.146,000] <inf> net_bridge_sample: Find iface 6. Add into bridge.
+[00:00:00.146,000] <inf> net_eth_bridge: Bridge 1 is setup
+[00:00:00.146,000] <inf> net_bridge_sample: Find iface 7. Add into bridge.
+[00:00:00.146,000] <inf> net_eth_bridge: Bridge 1 is active
+uart:~$
+uart:~$
+uart:~$
+[00:00:03.238,000] <inf> phy_mii: PHY (2) Link speed 100 Mb, full duplex
+[00:00:03.239,000] <inf> dsa_netc: DSA user port 0 Link up
+[00:00:03.615,000] <inf> phy_rt_rtl8211f: PHY 4 is up
+[00:00:03.615,000] <inf> phy_rt_rtl8211f: PHY (4) Link speed 1000 Mb, full duplex
+[00:00:03.615,000] <inf> dsa_netc: DSA user port 2 Link up
+uart:~$
+uart:~$
+[00:00:06.642,000] <inf> net_dhcpv4: Received: 192.168.0.102
+uart:~$
+uart:~$
+uart:~$ net ping 192.168.0.10
+PING 192.168.0.10
+28 bytes from 192.168.0.10 to 192.168.0.102: icmp_seq=1 ttl=64 time=5 ms
+28 bytes from 192.168.0.10 to 192.168.0.102: icmp_seq=2 ttl=64 time=2 ms
+28 bytes from 192.168.0.10 to 192.168.0.102: icmp_seq=3 ttl=64 time=2 ms
+uart:~$
+uart:~$
+uart:~$ net bridge
+Bridge Status   Config   Interfaces
+1      up       ok       2 3 4 5 7
+uart:~$
+uart:~$ net iface 1
+Default interface: 1
+
+
+Interface bridge0 (0x1400b638) (Virtual) [1]
+==================================
+Virtual name : <enabled>
+No attached network interface.
+Link addr : EF:75:EE:44:74:19
+MTU       : 1500
+Flags     : NO_AUTO_START,IPv4,IPv6
+Device    : BRIDGE_0 (0x38035a58)
+Status    : oper=UP, admin=UP, carrier=ON
+Promiscuous mode : disabled
+IPv6 unicast addresses (max 2):
+        fe80::ef75:eeff:fe44:7419 autoconf preferred infinite
+IPv6 multicast addresses (max 3):
+        <none>
+IPv6 prefixes (max 2):
+        <none>
+IPv6 hop limit           : 64
+IPv6 base reachable time : 30000
+IPv6 reachable time      : 29063
+IPv6 retransmit timer    : 0
+IPv4 unicast addresses (max 1):
+        192.168.0.102/255.255.0.0 DHCP preferred
+IPv4 multicast addresses (max 2):
+        224.0.0.1
+IPv4 gateway : 192.168.0.2
+DHCPv4 lease time : 3600
+DHCPv4 renew time : 1800
+DHCPv4 server     : 192.168.0.10
+DHCPv4 requested  : 192.168.0.102
+DHCPv4 state      : bound
+DHCPv4 attempts   : 1
+DHCPv4 state      : bound
+uart:~$
+
+```
+
+Thanks a lot.
+
+*--- yangbolu1991 (2025-11-17 08:56:47+00:00)
+> Thanks for this. Couple of comments to the sample app. I think we have now multiple samples related to ethernet, so it might make sense to create `samples/net/ethernet` and place this bridge sample and existing gptp, lldp and vlan samples there. Other thing about the bridge sample, it needs to support native_sim application somehow, otherwise testing / trying bridge related things is limited to rather small audience.
+
+Thanks @jukkar 
+
+Updated to v2. Changes include.
+- Created ethernet folder in samples and moved related bridge, lldp, vlan, gptp and dsa to it.
+- Added native_sim platform support in bridge. (Not sure if it's enough. Or you want me to write some more host shell script for testing?)
+
+Thank you very much.
+
+*--- jukkar (2025-11-17 09:27:31+00:00)
+Why do we need to do this as bridging is done in L2?
+
+*--- jukkar (2025-11-17 09:40:33+00:00)
+> * Added native_sim platform support in bridge. (Not sure if it's enough. Or you want me to write some more host shell script for testing?)
+
+I am not sure if this is enough yet, my point is that if one does not have nxp hw, it should be possible to read the documentation and try the bridging using for example native_sim easily. If that requires some extra host setup, those should be documented somewhere too. Usually I have created a config file to be used by the `net-setup.sh` script in cases like this.
+
+*--- yangbolu1991 (2025-11-17 10:26:37+00:00)
+For Ethernet bridge, the L2 bridging happened between the bridged interfaces. 
+But the virtual bridge interface could behave as normal Ethernet port to use. It can be assigned IP to use.
+This allows the device to communicate with networking for applications.
+This is frequently used in linux. See `linux bridge configuration`
+https://wiki.archlinux.org/title/Network_bridge
+
+PC, switch or router based on linux may utilize such feature.
+Thanks.
+
+*--- yangbolu1991 (2025-11-18 08:41:40+00:00)
+Updated to v3. Changes include,
+- Rebased to address conflict.
+- Fixed doc issues.
+- Added script and readme for verify bridging with native_sim.
+
+Thanks a lot.
+
+*--- jukkar (2025-11-25 08:33:21+00:00)
+Fair enough. I would suggest adding to the commit message the reasoning too, now it states the obvious thing which we can see from the changes but does not answer the question "why this change is done".
+
+*--- maass-hamburg (2025-11-25 08:42:03+00:00)
+this can be put outside the #if
+
+*--- maass-hamburg (2025-11-25 08:43:52+00:00)
+use https://docs.zephyrproject.org/latest/contribute/guidelines.html#copyright-and-license-notices (`SPDX-FileCopyrightText:`)
+
+*--- yangbolu1991 (2025-11-25 09:56:01+00:00)
+Thanks @jukkar 
+I should have described in commit message. Let me update:)
+
+*--- yangbolu1991 (2025-11-25 09:58:37+00:00)
+Updated to v4. Changes include,
+- No code changes. Just improved commit message per @jukkar  suggestion.
+
+Thanks.
+
+*--- yangbolu1991 (2025-11-26 03:32:19+00:00)
+Thanks. Will do that.
+
+*--- yangbolu1991 (2025-11-26 03:33:18+00:00)
+Thanks. Will fix for all new added copyright.
+
+*--- yangbolu1991 (2025-11-26 03:41:39+00:00)
+Updated to v5. Changes include,
+- Rebased to address conflict.
+- Code improvement and copyright format fix-up per @maass-hamburg  comments.
+
+Thanks.
+
+*--- jukkar (2025-11-26 07:51:21+00:00)
+Please rename this variable to avoid the sonarcloud warning, or you could place it in main and make it static.
+
+*--- yangbolu1991 (2025-11-26 09:16:25+00:00)
+Thanks @jukkar 
+
+Updated to v6. Changes include,
+- Renamed global variable to avoid variable shadowing warning in sonarcloud.
+
+*--- maass-hamburg (2025-11-26 11:51:49+00:00)
+@yangbolu1991 please also take a look at the found issues from sonarqubecloud
+
+*--- yangbolu1991 (2025-11-26 12:12:33+00:00)
+> @yangbolu1991 please also take a look at the found issues from sonarqubecloud
+
+Since I moved all ethernet samples to folder, the orignal code issues exposed now.
+Do you want me to append some more patches to fix them in this PR?
+
+Thanks
+
+*--- maass-hamburg (2025-11-26 12:22:35+00:00)
+> > @yangbolu1991 please also take a look at the found issues from sonarqubecloud
+> 
+> Since I moved all ethernet samples to folder, the orignal code issues exposed now. Do you want me to append some more patches to fix them in this PR?
+> 
+> Thanks
+
+If it is not to much for you, fixing them now would be nice. Otherwise it would probably be forgotten again. (non blocking)
+
+*--- yangbolu1991 (2025-11-27 10:56:48+00:00)
+Updated to v7. Changes include,
+- Appended 4 patches to fix original code quality issues.
+
+Let's see if all issues are fixed.
+Thanks.
+
+*--- jukkar (2025-11-28 14:09:30+00:00)
+What is the idea here, why do we need to do these changes in this file?
+
+*--- jukkar (2025-11-28 14:14:07+00:00)
+Also here, what is this change fixing. The sonarcloud "issues" need to be carefully read, sometimes they do not make any sense.
+
+*--- yangbolu1991 (2025-12-01 02:42:19+00:00)
+The changes here is per sonarcloud's suggestion.
+Use '[[' instead of '[' for conditional tests. The '[[' construct is safer and more feature-rich.
+
+I will add detail description for these sonarcloud issues patches.
+Thanks.
+
+*--- yangbolu1991 (2025-12-01 02:47:02+00:00)
+I don't think any function need to be fixed here.
+I think the only benefit of the changes here is avoiding warning noise, so that we don't have to check and analyze it every time. Does it make sense? Or, should we just leave it as it was.
+
+Thanks a lot.
+
+*--- jukkar (2025-12-01 11:50:06+00:00)
+Different static analysis tools are differently pedantic, for example Sonarcloud in many times gives just weird suggestions. I would say we can ignore the suggestion like this, I mean we are creating a "void *" pointer, so why would we need to cast to uintptr_t in cases like this.
+
+*--- yangbolu1991 (2025-12-02 02:19:58+00:00)
+Thanks @jukkar .
+Understand. I don't have to try to clean issue numbers, and let me just choose the real problem to fix.
+
+*--- yangbolu1991 (2025-12-02 02:23:30+00:00)
+Updated to v8. Changes include,
+- Rebased to address conflict.
+- Added detailed commit message for code quality improvement patches. And dropped some meaningless changes.
+
+Thanks.
+
+*--- Copilot (2025-12-02 10:32:56+00:00)
+The phrase "it seems zephyr iface will not connect interface in net name space" contains a grammatical error. It should be "it seems the Zephyr iface will not connect to an interface in a net namespace" or similar.
+```suggestion
+3. Run script for post-setup. zeth1 will be moved to another net namespace. (We couldn't complete this
+   post-setup before running native_sim application, because it seems the Zephyr iface will not connect to an interface in a net namespace.)
+```

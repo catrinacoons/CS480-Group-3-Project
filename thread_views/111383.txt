@@ -1,0 +1,132 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111383
+TITLE: ci: do_not_merge: show the merge-block reason as a commit status
+
+*--- opening post by krish2718 (2026-06-16 12:33:06+00:00)
+A blocked PR (`DNM`, `DNM (manifest)`, etc.) shows the same red `Prevent Merging` as a genuine CI failure, so you can't tell them apart without opening the PR.
+
+Publish a `Merge gate` commit status naming the reason, e.g. `Gated (not a CI failure): label "DNM (manifest)"`. It shows on hover and in the merge box. The job still exits 1, so the merge stays blocked a no branch-protection change.
+
+Also harden `print_rate_limit()` so a diagnostics error can't abort the gate.
+
+*--- nashif (2026-06-16 13:21:08+00:00)
+nice
+
+*--- fabiobaltieri (2026-06-16 13:35:31+00:00)
+```
+Request POST /repos/zephyrproject-rtos/zephyr/statuses/79ba20afaa092aa7ea13096a0c2af21806b9658e failed with 403: Forbidden
+WARNING: could not publish 'Merge gate' status: Resource not accessible by integration: 403 {"message": "Resource not accessible by integration", "documentation_url": "https://docs.github.com/rest/commits/statuses#create-a-commit-status", "status": "403"}
+```
+guess it'll fix itself once this gets merged
+
+*--- fabiobaltieri (2026-06-16 13:42:28+00:00)
+the change is cool, these commends are fairly useless though, I understand Claude adds them so that you can make sense of what it did, but really imagine what's going to happen to the code base if every line of code has a comment describing what the thing was doing when the person asked whatever ai to do it, we'd end up with more comments than code, just drop all of these, you'd have never written them yourself if you had done the change by hand
+
+same for the ones in the code, what's the point having a paragraph explaining why you have a try catch exception, just add the try catch exception, if you want to describe the reason put it in the commit message one can always go to the history and figure it out, and likewise for the variable name, just asign it no need to have the whole story of the feature and how it was envisioned when it was implemented etc etc. We can read the code just drop the comments, unless the code is hard to understand. In that case just refactor the code and make it understandable.
+
+*--- nashif (2026-06-16 13:44:10+00:00)
+> ```
+> 
+> ```
+> 
+> 
+>     
+> 
+>   
+> 
+> guess it'll fix itself once this gets merged
+
+hmm, no, if it fails now, it will fail after merge, tested somewhere else after merging, same failure
+
+*--- nashif (2026-06-16 13:45:58+00:00)
+> the change is cool, these commends are fairly useless though, I understand Claude adds them so that you can make sense of what it did, but really imagine what's going to happen to the code base if every line of code has a comment describing what the thing was doing when the person asked whatever ai to do it, we'd end up with more comments than code, just drop all of these, you'd have never written them yourself if you had done the change by hand
+
+actually in this specific case of permissions, comments are really needed. need to basically justify why you require some permissions and what you need the permissions for. For other general comments added across the script/workflow, yeah, I agree. :)
+
+*--- kartben (2026-06-16 13:46:45+00:00)
+I disagree. We already do it like this for all other workflows and this acts as a detailed justification of why plain "read" isn't enough.
+
+*--- fabiobaltieri (2026-06-16 13:47:36+00:00)
+the problem I have with the specific permission comments is that it's totally decoupled with whatever needs it, so you add a comment here saying "ah it's needed for this feature", then the code evolves and uses it for other feature and your comment is out of date
+
+*--- fabiobaltieri (2026-06-16 14:02:55+00:00)
+> I disagree. We already do it like this for all other workflows and this acts as a detailed justification of why plain "read" isn't enough.
+
+Sure just drop it in the code then
+
+*--- krish2718 (2026-06-16 14:23:17+00:00)
+> the problem I have with the specific permission comments is that it's totally decoupled with whatever needs it, so you add a comment here saying "ah it's needed for this feature", then the code evolves and uses it for other feature and your comment is out of date
+
+Yeah, I see your point, but it should ideally document all the reason for that permission, handy in understanding and debug.
+
+> For other general comments added across the script/workflow, yeah, I agree. :)
+
+I will dial it down on the comments :)
+
+*--- krish2718 (2026-06-16 14:23:42+00:00)
+> > guess it'll fix itself once this gets merged
+> 
+> hmm, no, if it fails now, it will fail after merge, tested somewhere else after merging, same failure
+
+I am verifying on my fork and will see the permissions needed and then post it here.
+
+*--- krish2718 (2026-06-16 20:05:24+00:00)
+> Thanks, looks good to me but putting a dnm until we can very it actually plays well with the org config
+
+Not just that, it was not showing up in the hover, still had to scroll through the tests, so, pivoted to tagging a `CI Failed` label, this can act as a quick filter to filter out the CI fails due manifest update only.
+
+*--- nashif (2026-06-16 21:09:47+00:00)
+> > Thanks, looks good to me but putting a dnm until we can very it actually plays well with the org config
+> 
+> Not just that, it was not showing up in the hover, still had to scroll through the tests, so, pivoted to tagging a `CI Failed` label, this can act as a quick filter to filter out the CI fails due manifest update only.
+
+so what actually this changes? I do not see the difference :|
+
+*--- krish2718 (2026-06-16 22:47:14+00:00)
+> > > Thanks, looks good to me but putting a dnm until we can very it actually plays well with the org config
+> > 
+> > 
+> > Not just that, it was not showing up in the hover, still had to scroll through the tests, so, pivoted to tagging a `CI Failed` label, this can act as a quick filter to filter out the CI fails due manifest update only.
+> 
+> so what actually this changes? I do not see the difference :|
+
+A new label to see genuine CI failures, `DNM/DNM(manifest)` labels cannot be used to filter for genuine failures. But I agree hover + status was the original idea, its lost its charm now :-(.
+
+*--- fabiobaltieri (2026-06-17 10:46:51+00:00)
+ok I'm a bit confused now, so it does not work? it cannot work? how was it supposed to show up?
+
+*--- krish2718 (2026-06-17 11:07:26+00:00)
+> ok I'm a bit confused now, so it does not work? it cannot work? how was it supposed to show up?
+
+My initial idea/understanding was: As the colors are fixes:
+
+* hovering - shows the merge gate status
+* clicking - shows the checks to see which of them failed
+
+But I was wrong, there is no hover function and its just a click and this PR adds another job that says "CI failed only due to DNM/DNM-manifest". But this defeats the purpose to quickly see which PRs in the list needs your attention, so, I had pivoted to tagging a label with `CI Failure` and then only look at those PRs.
+
+*--- nashif (2026-06-17 11:29:09+00:00)
+ok, I think we need something like this: 
+
+<img width="792" height="53" alt="image" src="https://github.com/user-attachments/assets/bb89593f-8bc1-4732-b914-d91641acce04" />
+
+
+This is very barebones now, but we can make it work I think..
+
+https://github.com/zephyrproject-rtos/zephyr-testing/pull/428
+
+workflow https://github.com/zephyrproject-rtos/zephyr-testing/blob/main/.github/workflows/merge_policy.yml
+
+This could also be used to block merge while waiting for additional reviews without showing the PR as failing CI...
+
+*--- nashif (2026-06-17 11:54:05+00:00)
+more in the direction we want:
+
+<img width="788" height="91" alt="image" src="https://github.com/user-attachments/assets/42547877-b05f-4697-9fd8-4ebee9f814c9" />
+
+*--- krish2718 (2026-06-17 12:31:59+00:00)
+Does the overall CI status in the `pulls` show as pending or failed? If its shows as pending then there would still be an ambiguity if CI is pending or CI is done + due to DNM its pending?
+
+*--- fabiobaltieri (2026-06-17 14:47:11+00:00)
+> Does the overall CI status in the `pulls` show as pending or failed? If its shows as pending then there would still be an ambiguity if CI is pending or CI is done + due to DNM its pending?
+
+In https://github.com/zephyrproject-rtos/zephyr-testing/pull/428 it shows as failed but it's because the current test still failed, I think it would normally show as pending, which is certainly confusing, I mean it says "waiting for status" and then print the status, and there's nothing it's really waiting for it'll never move on. I like that you can print a status but clarity-wise I'm thinking this is a net neutral. Differently confusing. It's github what can you do it's confusing and inconsistent by design, though I would not mind to have it failing and have a reason? is that an option? that I think it's less confusing... blocking, failed, same same, waiting, not so much.

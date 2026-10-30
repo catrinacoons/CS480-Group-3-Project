@@ -1,0 +1,12 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108209
+TITLE: samples: Bluetooth: Audio: add U suffix to unsigned hex literals
+
+*--- opening post by Thalley (2026-04-29 14:06:18+00:00)
+Add the U suffix to unsigned hex integer literals across all Bluetooth Audio sample application source files to comply with Zephyr MISRA-C coding guidelines (Rule 7.2: a u or U suffix shall be applied to all integer constants that are represented in an unsigned type).
+
+Content inside block/line comments, string literals, character literals, and case labels was left unmodified.
+
+Assisted-by: Copilot:claude-sonnet-4.6
+
+*--- Copilot (2026-04-29 14:10:25+00:00)
+The updated CSIP_SIRK_DEBUG macro line is now very likely >100 columns due to the added "U" suffixes. Zephyr’s style guidelines require keeping modified code to 100 columns or fewer (see doc/contribute/style/code.rst). Please wrap the initializer across more continuation lines so each line stays within the limit.

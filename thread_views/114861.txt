@@ -1,0 +1,44 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114861
+TITLE: boards: microchip: add Microchip M2S Hello FPGA Kit board support
+
+*--- opening post by akBavMat (2026-07-29 12:37:53+00:00)
+This adds initial Zephyr board support for the Microchip M2S Hello FPGA
+Kit (SmartFusion2 M2S010 SoC), building on the SmartFusion2 SoC and
+driver support merged in a previous PR.
+
+New board target: `m2s_hello_fpga_kit/m2s010`
+
+Included:
+- board.yml / board.cmake (OpenOCD flash/debug runner)
+- Devicetree (`m2s_hello_fpga_kit_m2s010.dts`) enabling UART console
+  and a user LED via GPIO
+- Kconfig defaults (`m2s_hello_fpga_kit_m2s010_defconfig`)
+- twister board metadata (`m2s_hello_fpga_kit_m2s010.yaml`)
+- Board documentation (`doc/index.rst`) including clock configuration
+  notes, since this SmartFusion2 port does not program the MSS clock
+  tree from Zephyr — CPU/peripheral clocks must already be configured
+  in the SmartFusion2 hardware design and reflected in the devicetree
+
+Note: the SmartFusion2 SoC support, clock controller driver, and
+devicetree bindings this board relies on were added separately in a
+prior PR and are already in `main`; this PR only adds the board port
+itself.
+
+Testing performed:
+- `west build -b m2s_hello_fpga_kit/m2s010 samples/hello_world`
+- Verified UART console output and LED toggling on hardware
+- `west twister -b m2s_hello_fpga_kit/m2s010 --scenario ...` <!-- fill in scenarios actually run -->
+
+Signed-off-by: Anton Vynohradov <vynohradov.external@bavariamatic.com>
+
+*--- Copilot (2026-07-30 19:39:21+00:00)
+Devicetree compatible strings should use hyphens, not underscores. This board's compatible is inconsistent with the existing SmartFusion2 board (e.g. m2s010_mkr_kit uses "microchip,m2s010-mkr-kit"), and the underscore form is non-standard.
+
+*--- Copilot (2026-07-30 19:39:22+00:00)
+The board documentation directory includes doc/img/m2s_hello_fpga_kit.webp, but index.rst does not reference it. Either include the image (common pattern in board docs) or drop the unused asset to avoid carrying dead binary files.
+
+*--- AntonVynohradov (2026-08-03 20:49:07+00:00)
+Replaced underscores with hyphens.
+
+*--- AntonVynohradov (2026-08-03 20:51:07+00:00)
+I have added the reference for the file m2s_hello_fpga_kit.webp to the index.rst file.

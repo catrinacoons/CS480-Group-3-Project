@@ -1,0 +1,366 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/119110
+TITLE: modem: cellular: on-demand GNSS power control
+
+*--- opening post by papadkostas (2026-09-14 23:14:44+00:00)
+This PR adds on-demand control of the GNSS receiver integrated in a cellular modem API
+
+Integrated GNSS receivers are common in asset trackers, where power consumption is critical: the receiver should only run while the application needs a fix, and switching it on or off should not disturb the cellular link. The driver of the GNSS receiver is the owner of that decision, so this PR gives it an API to switch the receiver through the modem driver, at any point in the modem's lifecycle. First user of this is U-blox SARA-R4. Some fixes landed additionaly in `modem_cellular` as they were found while testing it on hardware.
+
+## On-demand GNSS power control
+  - Two new optional chat scripts in struct modem_cellular_config_scripts: 
+    - `gnss_power_on` GNSS power on AT commands
+    - `gnss_shutdown` GNSS shutdown AT commands
+  - Two new functions added, `modem_cellular_gnss_power_on` and `modem_cellular_gnss_shutdown`. The caller blocks until the above mentionedscripts has run, at most `CONFIG_MODEM_CELLULAR_GNSS_REQUEST_TIMEOUT_S` (default 60 s).
+  - A request runs from a new `RUN_GNSS_REQUEST_SCRIPT` state, entered from `WAIT_FOR_APN`, `AWAIT_DIAL`, `AWAIT_REGISTERED` or `REGISTERED` when no other script is running on the AT channel. The modem returns to the same state afterwards, so the cellular link, including a running PPP session, is not affected.
+  - Events that arrive while the GNSS script runs, such as registration changes or the interface going up or down, are queued and handled once it completes.
+  - A request made while the modem is suspended or still starting up waits until the modem reaches one of these states. 
+  - Before the modem powers off, `gnss_shutdown` runs over the AT channel. The last known receiver state is tracked, so a script for the state the receiver is already in is not sent again.
+
+For the SARA-R4, `CONFIG_MODEM_CELLULAR_U_BLOX_SARA_R4_GNSS` provides the scripts (`AT+UGPS=1,0,15` and `AT+UGPS=0`) and adds `AT+UGPRF=2` to the init script. It routes the GNSS data to a muxed virtual port and must be sent before CMUX is started.
+
+Modems without these scripts are not affected: the API returns `-ENOTSUP` and the new state is never entered, however slight code and RAM memory increase is noticiable. Will take care of it after review. 
+
+## Power management
+
+  - **Child devices:** with `CONFIG_DEVICE_DEPS`, the modem refuses to suspend (`-EBUSY`) while one of its devicetree children is in use: a child under runtime PM that holds a usage reference, or any other child in
+  `PM_DEVICE_STATE_ACTIVE`. Previously the modem powered off underneath it. The application now suspends the children, such as the GNSS receiver, before releasing the last modem reference. An asynchronous runtime suspend cannot  report the refusal, so this order matters.
+  - **Suspend during PPP teardown:** a suspend arriving in `AWAIT_PPP_DEAD`, typically right after the interface is brought down, was dropped, so `pm_action()` waited for its 30 s timeout and the modem stayed powered. It is now
+  handled once the PPP teardown has settled.
+
+## Fixes
+
+  - `cmd_pipe` was left pointing at DLCI2 after dialing, so power-off scripts ran on the PPP data channel instead of the AT channel.
+  - The `+CME ERROR` abort match is extended to `"+CME ERROR: "`, so `argv[1]` holds only the error code.
+  - `modem_chat_release()` now also cancels the script timeouts, so a script started right after releasing a running one no longer inherits its deadlines.
+
+  ## Testing
+
+**Setup:** custom board with an nRF5340 and a u-blox SARA-R422M10S. An out-of-tree u-blox GNSS driver on CMUX DLCI3 calls the new API from its own PM handling. This out-of-tree driver, I plan to share next month together with extra related functionality.
+
+  | Scenario | Result |
+  |---|---|
+  | Start-up with the GNSS option | `AT+UGPRF=2` accepted before `AT+CMUX`. A power-on request made during the power pulse waits and runs from `AWAIT_DIAL`, `AT+UGPS=1,0,15` answers `OK` in about 1.2 s, the receiver initialises on DLCI3 and GNSS driver initializes and gets fixes. |
+  | Receiver off/on while idle and connected | 5 cycles in `AWAIT_DIAL` and 6 in `REGISTERED` with PPP up: all `OK`, the link and the periodic script unaffected. |
+  | Request while a periodic script runs | 18 requests at a 300 ms poll interval of which 4 that arrived during a poll started only after it completed. All completed. |
+  | Request for the state the receiver is already in | Completes with no additional AT command sent. |
+  | Interface brought up during a GNSS script | The dial waits for the script, then runs once. Link comes up. |
+  | Suspend while a request waits or runs | From `REGISTERED` state, 50, 300 and 800 ms after the request: `-ECANCELED`. The running `AT+UGPS=1` completes before `AT+UGPS=0` and the power-off, and the next dial connects. During modem  start-up (3.5 and 4.4 s after resume): `-ECANCELED`, normal power-off. |
+  | Request while the modem stays suspended | Waits, then `-ETIMEDOUT` after the configured timeout. No state change. |
+  | Suspend while the GNSS receiver is in use | Refused with `-EBUSY` (`Refusing to suspend: child device ... is still in use`). The modem stays up. |
+  | Interface down from a connected state, then suspend | The suspend arrives in `AWAIT_PPP_DEAD`, is handled when that state is left, and the modem reaches `IDLE` about 1.1 s later with a 10 s periodic interval. Before this change, `pm_action()` timed out after 30 s with the modem still on. |
+  | Power-off with the receiver state known off | `gnss_shutdown` is skipped. |
+  | Power-off with the receiver state unknown | `AT+UGPS=0` is sent, the module is either responding with OK or refuse with`+CME ERROR: 1799` aborting the script at once, and the power-off continues normally. |
+  | Cycle tests | 50 cycles of receiver off, interface down, suspend, resume, interface up, receiver on: 50/50, no script failures, no dropped events. |
+
+Built with `tests/drivers/build_all/modem` on native_sim, also with `CONFIG_GNSS=y` and `CONFIG_MODEM_CELLULAR_U_BLOX_SARA_R4_GNSS=y`.
+
+Only the SARA-R4 has been tested. The mechanism is generic and could be applied to other cellular modems that attach the GNSS receiver on MUX, regardless if they have user pipe available or not. All it needs is its own `gnss_power_on` and `gnss_shutdown` scripts. Feedback from anyone with such hardware is welcome.
+
+*--- Copilot (2026-09-15 01:38:25+00:00)
+Suspending while the GNSS power-on script is in flight jumps directly to `IDLE`. The command may already have enabled GNSS, but entering `IDLE` only releases the chat and closes the UART; it neither runs `gnss_shutdown` nor performs the modem power-off pulse. PM can therefore report the modem suspended while GNSS remains powered. The in-flight script needs to be aborted or completed before routing through the GNSS/modem shutdown sequence.
+
+This issue also appears on line 1421 of the same file.
+
+*--- Copilot (2026-09-15 01:38:26+00:00)
+`PM_DEVICE_STATE_SUSPENDING` is also still powered: `pm_device_runtime_put_async()` sets that state before its delayed suspend callback runs. If the parent is suspended during that window, this check allows the modem to cut power before the child finishes cleanup—the exact case this guard is intended to prevent. Treat both ACTIVE and SUSPENDING children as busy.
+
+*--- Copilot (2026-09-15 01:38:26+00:00)
+The migration note contains the typo “prioriry” and several grammatical errors that obscure the new API requirement. Reword it so out-of-tree driver authors can clearly distinguish the mandatory init and configuration phases.
+
+*--- Copilot (2026-09-15 01:38:26+00:00)
+This help text says the option is enabled whenever GNSS is enabled, but the symbol immediately above has `default n`; selecting `GNSS` alone therefore leaves SARA-R4 GNSS support disabled. Either make the default `y` or remove this claim so users get the documented configuration behavior.
+
+*--- JordanYates (2026-09-15 03:31:38+00:00)
+I don't see the value in splitting `init` into `init` and `configuration`. How much time is this actually saving, given that most modems are simply querying some IDs and enabling CMUX. Furthermore, there seems to be the assumption that configuration options sent in the startup non-CMUX phase are 'sticky' after the CMUX channels are setup, which I don't believe is true.
+
+The ublox modules might be an outlier due to their dedicated GNSS modems internally, but frankly every other modem with integrated GNSS is abysmal from a power consumption perspective, and shouldn't be used in products where power consumption is critical. Any extra energy consumption caused by the GNSS starting slightly later in the boot process is not going to be noticeable.
+
+*--- JordanYates (2026-09-15 03:40:37+00:00)
+I'm not a fan of pulling GNSS API functionality into this driver.
+This commit isn't perfect (hence why I haven't upstreamed it), but this is a more reasonable approach IMO https://github.com/zephyrproject-rtos/zephyr/commit/deadf487633dc49b38d74a5792af9652c02a4ab2.
+
+The key is that the GNSS functionality is a child device of the LTE modem, not part of the modem itself.
+The part missing from my commit is the power dependency between the LTE and GNSS, my commit just fails to start the GNSS if the LTE user pipes aren't available.
+
+*--- JordanYates (2026-09-15 03:43:36+00:00)
+Hard disagree, PM dependencies should be represented through `pm_device_runtime_get`, which make more sense if the GNSS driver is a child device, not integrated into the LTE driver.
+
+*--- JordanYates (2026-09-15 03:46:06+00:00)
+Always turning on GNSS every time the modem boots seems at odds with the `power consumption is critical` part of this PR.
+
+*--- papadkostas (2026-09-15 07:00:58+00:00)
+> General feedback to the approach is that the GNSS functionality should be its own driver, with PM dependencies represented by `pm_device_runtime_get/put`, and some other notification mechanism implemented to communicate a "modem only needed for GNSS, not LTE" requirement.
+
+Thanks for the feedback! As I was writing the description I thought exactly this, having the GNSS scripts exposed to GNSS subsystem would be idea, thus I set this to draft. I'll try to think some way to expose these out.
+
+*--- JordanYates (2026-09-15 07:13:06+00:00)
+> As I was writing the description I thought exactly this, having the GNSS scripts exposed to GNSS subsystem would be idea, thus I set this to draft. I'll try to think some way to expose these out.
+
+Why do they need to be exposed from anywhere? Just write the relevant scripts in the modem specific GNSS driver.
+
+*--- papadkostas (2026-09-15 07:45:28+00:00)
+> > As I was writing the description I thought exactly this, having the GNSS scripts exposed to GNSS subsystem would be idea, thus I set this to draft. I'll try to think some way to expose these out.
+> 
+> Why do they need to be exposed from anywhere? Just write the relevant scripts in the modem specific GNSS driver.
+
+The main issue with doing this entirely from the GNSS driver is that the SARA-R4 variant I am currently working with does not provide a user pipe for GNSS. The GNSS commands therefore have to go through the cellular modem driver's command path.
+
+For modems that provide a dedicated user pipe, implementing GNSS as a separate driver that owns the GNSS communication makes perfect sense. However, I don't think we should make the presence of a user pipe a requirement for the GNSS subsystem, since that would prevent modems without one from using the same subsystem architecture.
+
+I agree with the broader point, though that the GNSS subsystem should ideally have ownership of requesting GNSS functionality, but the modem driver should provide the transport/control mechanism required by the particular modem. I'll look into how we can structure this so that the GNSS subsystem is responsible for enabling/disabling GNSS and the modem-specific implementation can handle cases such as the SARA-R4, where there is no separate GNSS user pipe.
+
+The current implementation came from a somewhat different goal. I was initially focused on enabling GNSS as early as possible during modem startup to achieve the best possible TTFF, rather than designing the GNSS functionality around the subsystem's ownership and PM model. I'm going to rework this PR.
+
+*--- SeppoTakalo (2026-09-15 07:49:57+00:00)
+Let me propose an alternative:
+
+Instead of splitting all the existing scripts and states, you could just alter the existing state machine to stop after connecting CMUX and wait for PPP interface to be requested.
+This would be minimal change to current drivers.
+
+<img width="882" height="1276" alt="image" src="https://github.com/user-attachments/assets/13020b9f-7f28-4dca-801f-e8cd6066b32c" />
+
+
+It would also allow other scenarios, for example someone could run modem specific setup scripts on user pipes.
+
+So if a module needs a modem, it could just do `pm_device_runtime_get(modem)` and then get an event when user pipes are connected.
+
+Then PPP and network would only be requested when application calls `net_iface_up(ppp_iface)`.
+
+Notice the the PPP interface already does `pm_device_runtime_get()` and `pm_device_runtime_put_async()` so modem is automatically woken up by `net_iface_up()` and shutdown by `net_iface_down()` unless someone else is requesting it.
+
+*--- papadkostas (2026-09-15 08:05:54+00:00)
+> Let me propose an alternative:
+> 
+> Instead of splitting all the existing scripts and states, you could just alter the existing state machine to stop after connecting CMUX and wait for PPP interface to be requested. This would be minimal change to current drivers.
+> 
+> <img alt="image" width="882" height="1276" src="https://private-user-images.githubusercontent.com/3104794/652012652-13020b9f-7f28-4dca-801f-e8cd6066b32c.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3ODk0NTk1MTAsIm5iZiI6MTc4OTQ1OTIxMCwicGF0aCI6Ii8zMTA0Nzk0LzY1MjAxMjY1Mi0xMzAyMGI5Zi03ZjI4LTRkY2EtODAxZi1lOGNkNjA2NmIzMmMucG5nP1gtQW16LUFsZ29yaXRobT1BV1M0LUhNQUMtU0hBMjU2JlgtQW16LUNyZWRlbnRpYWw9QUtJQVZDT0RZTFNBNTNQUUs0WkElMkYyMDI2MDkxNSUyRnVzLWVhc3QtMSUyRnMzJTJGYXdzNF9yZXF1ZXN0JlgtQW16LURhdGU9MjAyNjA5MTVUMDgwMDEwWiZYLUFtei1FeHBpcmVzPTMwMCZYLUFtei1TaWduYXR1cmU9MGU4MjQ1ZjQ3MzU3YjQwNGJjNDZhZmQ3Y2MyNzhjYjM4MTUzMTE1OGI3NjZiNmNjYmZhZTI0OGM3MGE4NmE2YSZYLUFtei1TaWduZWRIZWFkZXJzPWhvc3QmcmVzcG9uc2UtY29udGVudC10eXBlPWltYWdlJTJGcG5nIn0.ZTYucwNr3KCr5vigH9IPAllkFNpOZGkhe6DfQ09S5zY">
+> It would also allow other scenarios, for example someone could run modem specific setup scripts on user pipes.
+> 
+> So if a module needs a modem, it could just do `pm_device_runtime_get(modem)` and then get an event when user pipes are connected.
+> 
+> Then PPP and network would only be requested when application calls `net_iface_up(ppp_iface)`.
+> 
+> Notice the the PPP interface already does `pm_device_runtime_get()` and `pm_device_runtime_put_async()` so modem is automatically woken up by `net_iface_up()` and shutdown by `net_iface_down()` unless someone else is requesting it.
+
+This specific cellular module does not provide user pipes.
+
+*--- JordanYates (2026-09-15 08:07:09+00:00)
+> This specific cellular module does not provide user pipes.
+
+Does the modem actually only support 2 DLCI channels, or does the driver just not expose them?
+
+edit: 8f179ce145af5825d355cb10a7835e0c572ae56b implies that there is already a dedicated GNSS pipe on the modem
+
+*--- papadkostas (2026-09-15 08:20:27+00:00)
+> > This specific cellular module does not provide user pipes.
+> 
+> Does the modem actually only support 2 DLCI channels, or does the driver just not expose them?
+> 
+> edit: [8f179ce](https://github.com/zephyrproject-rtos/zephyr/commit/8f179ce145af5825d355cb10a7835e0c572ae56b) implies that there is already a dedicated GNSS pipe on the modem
+
+There is no "user pipe" we call in Zephyr. Thats why I removed it from sara completly.
+We discussed this with Bjarki some time ago [here](https://discordapp.com/channels/720317445772017664/1166079238521233508/1354897476448157836)
+
+*--- SeppoTakalo (2026-09-15 10:35:07+00:00)
+> There is no "user pipe" we call in Zephyr. Thats why I removed it from sara completly. We discussed this with Bjarki some time ago [here](https://discordapp.com/channels/720317445772017664/1166079238521233508/1354897476448157836)
+
+Thanks for the info. So are we talking about Sara-R4?
+
+According to this datasheet that was in the discussion: 
+<img width="1690" height="816" alt="image" src="https://github.com/user-attachments/assets/1397b5d9-011d-4750-855d-652dc5c8fa60" />
+
+DLC channel 3, which would be the first "user pipe", is going to be used by GNSS.
+That is already defined: https://github.com/zephyrproject-rtos/zephyr/blob/main/drivers/modem/vendor_modem_cellular/cellular_u_blox_sara_r4.c#L100
+
+So I would assume something like this would work:
+```c
+
+#define MODEM_NODE    DT_ALIAS(modem)
+
+static struct modem_pipelink *gnss_pipelink = MODEM_PIPELINK_DT_GET(MODEM_NODE, gnss_pipe);
+
+static void open_pipe_work_handler(struct k_work *work);
+static void init_gnss_work_handler(struct k_work *work);
+static void parse_gnss_data_work_handler(struct k_work *work);
+static void pipe_callback(struct modem_pipe *pipe, enum modem_pipe_event event, void *user_data);
+static K_WORK_DEFINE(open_pipe_work, open_pipe_work_handler);
+static K_WORK_DEFINE(init_gnss_work, init_gnss_work_handler);
+static K_WORK_DEFINE(parse_gnss_data_work, parse_gnss_data_work_handler);
+
+/* Get notify when the GNSS pipe is connected or disconnected */
+void gnss_pipelink_callback(struct modem_pipelink *link, enum modem_pipelink_event event,
+			    void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	switch (event) {
+	case MODEM_PIPELINK_EVENT_CONNECTED:
+		LOG_INF("pipe connected");
+		k_work_submit(&open_pipe_work);
+		break;
+
+	case MODEM_PIPELINK_EVENT_DISCONNECTED:
+		LOG_INF("pipe disconnected");
+		break;
+	default:
+		break;
+	}
+}
+
+/* Register pipelink callback, must be called after modem_cellular_init() */
+int gnss_pipe_init(void)
+{
+	modem_pipelink_attach(gnss_pipelink, gnss_pipelink_callback, NULL);
+	return 0;
+}
+SYS_INIT(gnss_pipe_init, APPLICATION, 0);
+
+/* Open the pipe when modem is active */
+static void open_pipe_work_handler(struct k_work *work)
+{
+	struct modem_pipe *pipe = modem_pipelink_get_pipe(gnss_pipelink);
+	modem_pipe_attach(pipe, pipe_callback, NULL);
+	modem_pipe_open_async(pipe);
+}
+
+/* Pipe callback */
+static void pipe_callback(struct modem_pipe *pipe, enum modem_pipe_event event,
+			  void *user_data)
+{
+	static bool pipe_opened;
+	ARG_UNUSED(user_data);
+
+	switch (event) {
+	case MODEM_PIPE_EVENT_OPENED:
+		if (!pipe_opened) {
+			pipe_opened = true;
+			k_work_submit(&init_gnss_work);
+		}
+		break;
+	case MODEM_PIPE_EVENT_CLOSED:
+		if (pipe_opened) {
+			pipe_opened = false;
+		}
+		break;
+	case MODEM_PIPE_EVENT_RECEIVE_READY:
+		k_work_submit(&parse_gnss_data_work);
+		break;
+	case MODEM_PIPE_EVENT_TRANSMIT_IDLE:
+		break;
+	}
+}
+
+/** Start GNSS functionality.
+ * This request modem to wake up which will trigger the GNSS pipe to open.
+ */
+void gnss_start(void)
+{
+	pm_device_runtime_get(DEVICE_DT_GET(MODEM_NODE));
+}
+
+/** Close our GNSS pipe and release the modem.
+ * If PPP is not used, this will put the modem to sleep.
+ */
+void gnss_stop(void)
+{
+	struct modem_pipe *pipe = modem_pipelink_get_pipe(gnss_pipelink);
+	modem_pipe_close_async(pipe);
+	pm_device_runtime_put_async(DEVICE_DT_GET(MODEM_NODE));
+}
+
+/***** actual business logic here *****/
+
+MODEM_CHAT_SCRIPT_CMDS_DEFINE(chat_script_cmds,
+			      MODEM_CHAT_SCRIPT_CMD_RESP("AT%XGPS=1", ok_match));
+
+MODEM_CHAT_SCRIPT_DEFINE(gnss_init_script,
+			 chat_script_cmds, abort_matches,
+			 NULL, 1);
+
+static void init_gnss_work_handler(struct k_work *work)
+{
+	/* This is a hack, and needs a proper API */
+	struct device *dev = DEVICE_DT_GET(MODEM_NODE);
+	struct modem_cellular_data *data = (struct modem_cellular_data *)dev->data;
+	modem_chat_run_script(data->chat, gnss_init_script, NULL);
+}
+
+static void parse_gnss_data_work_handler(struct k_work *work)
+{
+	// TODO
+}
+```
+
+Sorry about a bit too long code example.
+The logic that I'm trying to show here is:
+* When GNSS is needed, it requests a modem with `pm_device_runtime_get()`
+* When pipelink is opened, we know that the modem is active, CMUX is open and we can open the DLC 3.
+* When all pipes are opened, we need to send AT command to modem in `init_gnss_work_handler()`. This is a missing API from the modem driver currently, but I don't see why it would not be supported.
+
+The logic does not depend on the state of the PPP interfaces.
+Modem is powered or unpowered depending on PM runtime state.
+
+*--- papadkostas (2026-09-16 08:19:03+00:00)
+Thank you @SeppoTakalo , but as far as I know this channel does not accept AT commands, its only for the GNSS receiver.
+
+I already got something expiremental on HEAD of this branch and I'm currently testing it which now the PM of the underlying GNSS receiver is handled by the GNSS dev API on demand, it does not power it on automatically during startup of the modem. Instead GNSS API requesting the the modem to run the commands and GNSS driver powers on and off the GNSS like this. The modem cellular driver accepts such requests during AWAIT_REGISTERED/REGISTERED states which the cmd_pipe is availabe. I will be testing it a bit more and come back to this.
+
+*--- zafersn (2026-09-17 20:40:08+00:00)
+@papadkostas  Thanks for working on this. I'm interested in it for a Sierra Wireless HL7800/HL7812. You've chosen a really diffiuct task to work on :) good luck.
+
+As far as I can see, one case I don't see covered in the PR or the discussion so far: modems where GNSS and LTE share the RF path and are mutually exclusive. On the HL78xx, GNSS can only be used when the module is not actively connected on LTE/GSM. In practice the radio has to be off (AT+CFUN=4) or idle (PSM or etc.) before a GNSS start succeeds, and GNSS has to be stopped before LTE can come back.
+
+That makes two things hard to use on this class of modem:
+
+1. Init-time gnss_power_on: it runs while the radio is in CFUN=4, so the start itself works. But the state machine then goes straight to  configuration -> CMUX -> dial, which brings the radio up against the running search. There is no way to hold the modem "up but not attached" until a fix or a timeout.
+2. The reworked approach, where GNSS requests are only accepted in AWAIT_REGISTERED/REGISTERED: those are exactly the states where a shared-RF modem cannot start GNSS. It needs the opposite: the AT channel up, but the modem deliberately not registered.
+
+@JordanYates's "modem only needed for GNSS, not LTE" notification and @SeppoTakalo's proposal (stop after CMUX connect, dial only when the PPP iface is requested) look like they would cover the basic case. What I think is still open is arbitration when both are wanted:
+
+- PPP is up and the GNSS driver requests a search: does the request fail with -EBUSY until the app calls net_if_down(), or does the modem driver tear down LTE on behalf of GNSS?
+- GNSS is running and the app calls net_if_up(): does the modem driver run the GNSS shutdown first, or refuse?
+- Could the vendor config carry a flag (e.g. "GNSS and LTE are exclusive") so the core driver knows whether a GNSS request is legal in REGISTERED or requires the not-registered state?
+
+Is this in scope for the rework, or is it expected to be handled entirely by the application? Happy to test on HL7800/HL7812.
+
+*--- papadkostas (2026-09-17 23:26:52+00:00)
+@zafersn thanks for the detailed look and good context on a case such as for HL7800/HL7812.
+
+HL78xx is architecturally a different case and it already has its own standalone driver in-tree that's built for exactly that. I don't think its a good idea to mix this here :worried:
+
+For CMUX-based modems with integrated GNSS, I'd argue RF path prioritization stays an application concern rather than something the driver arbitrates. The driver already treats GNSS power and network connectivity as two independently controlled things: 
+- on-demand GNSS power on/shutdown or start/stop
+- net up/down (with ON_DEMAND_CONNECT holding the modem "up but not dialed" until the app asks).
+ 
+On shared-RF variants, the app should just bring the interface down, wait for it to settle, then request GNSS, shut GNSS down or just stop, before bringing the interface back up. Baking that sequencing into the driver would mean it silently deciding to preempt one side or the other, which seems like the wrong owner for that call.
+
+What we don't have ye is bringing the interface down parks the modem at AWAIT_DIAL but never touches CFUN and the radio stays fully functional and registered the whole time, so on shared-antenna hardware GNSS still wouldn't get a clear RF path. The missing piece isn't GNSS-aware arbitration in the driver, it's exposing CFUN/low-power control to the application at all. Right now it's hardcoded into the init/dial scripts with no application hook. That would be a small, generic addition, not GNSS-specific, and the app would still own the actual policy, which is where I think it belongs.
+
+*--- JordanYates (2026-09-18 00:35:03+00:00)
+> What we don't have ye is bringing the interface down parks the modem at AWAIT_DIAL but never touches CFUN and the radio stays fully functional and registered the whole time, so on shared-antenna hardware GNSS still wouldn't get a clear RF path. The missing piece isn't GNSS-aware arbitration in the driver, it's exposing CFUN/low-power control to the application at all. Right now it's hardcoded into the init/dial scripts with no application hook. That would be a small, generic addition, not GNSS-specific, and the app would still own the actual policy, which is where I think it belongs.
+
+I think the key 'problem' to solve here is splitting out the modem base functionality (booting, setting up CMUX) from the higher level functionalities (PPP/GNSS). Right now `modem_cellular` is making the assuming that a PM request is a request for PPP connectivity. This is driven from the `modem_ppp` file:
+https://github.com/zephyrproject-rtos/zephyr/blob/52b48529aecc3ad0ef9b159996bdb5d2b3e5b794/subsys/modem/modem_ppp.c#L552-L561
+
+Any solution which can handle GNSS as a mutually exclusive operation will need to break this assumption. `pm_device_runtime_get` should be a necessary pre-condition for the PPP interface, but it shouldn't be the only API call required. Something along the lines of:
+```
+static bool dial_requested;
+
+/* Called once CMUX setup */
+static void on_modem_cmux_active()
+{
+   modem_cellular_dial();
+}
+
+static int modem_ppp_ppp_api_start(const struct device *dev)
+{
+    dial_requested= true;
+    pm_device_runtime_get(modem);
+}
+
+static int modem_ppp_ppp_api_stop(const struct device *dev)
+{
+    modem_cellular_hangup();
+    pm_device_runtime_put(modem);
+}
+```

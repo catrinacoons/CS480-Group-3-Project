@@ -1,0 +1,20 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/115689
+TITLE: soc: ite: Add deep sleep time measurement
+
+*--- opening post by keith-zephyr (2026-08-07 22:29:18+00:00)
+Track the time spent in deep doze / sleep states on ITE EC SoCs (IT8xxx2, IT51xxx) by capturing the 32.768 kHz free-run timer timestamp before entering deep sleep and accumulating elapsed cycles upon waking.
+
+*--- keith-zephyr (2026-08-12 15:45:22+00:00)
+The `riscv_idle()` code indicates that it is called with interrupts locked:
+```
+/* The routine must be called with interrupts locked */
+void riscv_idle(enum chip_pll_mode mode, unsigned int key)
+{
+	/*
+	 * The routine is called with interrupts locked (in kernel/idle()).
+	 * But on kernel/context test_kernel_cpu_idle test, the routine will be
+	 * called without interrupts locked. Hence we disable M-mode external
+	 * interrupt here to protect the below content.
+	 */
+```
+So I think it's okay to capture the sleep ticks from the power management code and not clutter the logic in `riscv_idle()`.

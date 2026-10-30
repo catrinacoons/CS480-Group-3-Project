@@ -1,0 +1,91 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112394
+TITLE: bluetooth: classic: l2cap: add state validation in receive path
+
+*--- opening post by lylezhu2012 (2026-06-30 12:41:42+00:00)
+* bluetooth: classic: l2cap: add state transition for fixed channel
+
+Add proper state management to Bluetooth Classic L2CAP fixed channel connection by setting the channel state to `CONNECTED` before invoking the connected callback.
+
+The change ensures that fixed channels follow the same state transition pattern as other L2CAP channel types. When a fixed channel is connected, the state is now explicitly set to `BT_L2CAP_CONNECTED` before calling the channel's connected callback.
+
+The changes ensure the channel state accurately reflects its lifecycle status.
+
+* bluetooth: classic: l2cap: use chan state to manage fixed channel
+
+Refactor the fixed channel accept functions to use channel state for direct check if the channel is available instead of checking `conn` field of channel. And also refactor the fixed channel accept functions to use connection index for direct lookup instead of iterating through the pool arrays.
+
+The changes affect the L2CAP BR signaling channel, connectionless channel, and SMP BR channel accept functions.
+
+The functions now check if the channel is in the `DISCONNECTED` state before accepting a new connection, returning `-EBUSY` if the channel is not idle. This ensures proper channel state validation and prevents reuse of channels that are still in use.
+
+Additionally, instead of searching through the entire pool to find an available channel context, the code now uses `bt_conn_index()` to directly access the corresponding entry in the pool array.
+
+The L2CAP BR fixed channel connection now also sets the channel state to CONNECTING, ensuring proper state transitions.
+
+* bluetooth: classic: l2cap: add state validation in receive path
+
+Add state validation check in the L2CAP BR/EDR receive path to ensure channels are in a valid connected state before processing incoming data.
+
+The change adds a check after the fixed channel validation to verify that the channel state is at least BT_L2CAP_CONNECTED before proceeding with data reception. If the channel is in an earlier state (CONNECTING or DISCONNECTED), an error is logged and the packet is dropped.
+
+This prevents potential issues from processing data on channels that are not yet fully established or are in the process of being torn down, improving the robustness of the L2CAP receive path.
+
+Fixes: #113698
+
+*--- Copilot (2026-06-30 12:47:48+00:00)
+This new early return drops the packet without releasing the buffer. Every other exit path in `bt_l2cap_br_recv` calls `net_buf_unref(buf)` (e.g. the "Too small L2CAP PDU" and "unknown channel ID" branches above, and the final unref at the end of the function), so returning here leaks one `net_buf` for every dropped PDU. Under a sustained invalid-state condition this exhausts the buffer pool and can stall the stack. Release the buffer before returning.
+
+*--- Copilot (2026-06-30 12:47:48+00:00)
+This state gate applies to every BR/EDR fixed channel routed through `bt_l2cap_br_recv`, but not all fixed channels are updated to maintain the L2CAP state. The BR/EDR SMP fixed channel (registered via `BT_L2CAP_BR_CHANNEL_DEFINE(smp_br_fixed_chan, BT_L2CAP_CID_BR_SMP, bt_smp_br_accept)` in subsys/bluetooth/host/smp.c) never calls `bt_l2cap_br_chan_set_state()` — `bt_smp_br_accept`/`bt_smp_br_connected` only manage `SMP_FLAG_BR_CONNECTED`, so its channel `state` stays `BT_L2CAP_DISCONNECTED`. As a result this check will drop all inbound SMP-over-BR/EDR PDUs, breaking BR/EDR Secure Connections / cross-transport key derivation. The SMP BR accept/connected/released callbacks need to set the channel state (CONNECTING/CONNECTED/DISCONNECTED) the same way the signaling and connectionless channels now do.
+
+*--- Copilot (2026-06-30 12:47:48+00:00)
+Typo in the error message: "Connectless" should be "Connectionless" to match the terminology used elsewhere in this file (e.g. the "connectionless data" log in `l2cap_br_conless_recv`).
+
+*--- chengkai15 (2026-07-02 04:07:38+00:00)
+```suggestion
+	if (BR_CHAN(chan)->state != BT_L2CAP_CONNECTED) {
+```
+
+*--- chengkai15 (2026-07-02 04:08:29+00:00)
+```suggestion
+		LOG_ERR("Connectionless chan %p is not idle (state %u)", br_chan, br_chan->state);
+```
+
+*--- chengkai15 (2026-07-02 04:10:12+00:00)
+bt_l2cap_br_recv is the top-level RX entry for all BR/EDR fixed channels. The BR/EDR SMP channel is registered via BT_L2CAP_BR_CHANNEL_DEFINE(smp_br_fixed_chan, BT_L2CAP_CID_BR_SMP, bt_smp_br_accept) .bt_smp_br_connected only sets SMP_FLAG_BR_CONNECTED and never calls bt_l2cap_br_chan_set_state(), so the SMP channel state stays BT_L2CAP_DISCONNECTED (0). 
+
+The new state < BT_L2CAP_CONNECTED check therefore drops every inbound BR/EDR SMP PDU, breaking BR/EDR Secure Connections / cross-transport key derivation.
+
+*--- chengkai15 (2026-07-02 04:10:57+00:00)
+drops the packet without releasing buf.
+
+*--- lylezhu2012 (2026-07-02 05:47:05+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-07-02 07:37:14+00:00)
+The current change addresses the issue of receiving data before the channel has been successfully established.
+
+In my view, until the state transitions to "disconnected," any data received should likely be delivered to that channel—for instance, in a scenario where a channel has sent a disconnect request, but the peer happens to send data to that same channel at that exact moment.
+
+Additionally, no issues involving `BR_CHAN(chan)->state > BT_L2CAP_CONNECTED` have been observed so far, so I am inclined to maintain the condition `BR_CHAN(chan)->state < BT_L2CAP_CONNECTED`.
+
+*--- lylezhu2012 (2026-07-02 07:41:51+00:00)
+Updated.
+
+*--- lylezhu2012 (2026-07-02 07:45:29+00:00)
+updated.
+
+*--- Copilot (2026-07-02 07:52:23+00:00)
+The PR description only mentions adding a state-validation check in the L2CAP BR/EDR receive path, but this PR also makes substantial changes that aren't reflected in the description. In particular, `bt_smp_br_accept()` here (and `l2cap_br_accept()` in `l2cap_br.c`) are refactored from a free-slot search to `bt_conn_index()`-based allocation with an `-EBUSY` idle check, new `BT_L2CAP_CONNECTING`/`BT_L2CAP_CONNECTED` state transitions are introduced for fixed channels, and the connectionless accept's `__ASSERT` is corrected to reference `bt_l2cap_br_connless_pool`. Consider expanding the description to cover these changes (especially the allocation-strategy change) so reviewers understand the full scope of the PR.
+
+*--- lylezhu2012 (2026-07-03 08:40:49+00:00)
+Fixed
+
+*--- lylezhu2012 (2026-07-03 08:41:13+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-07-03 08:41:22+00:00)
+Fixed.
+
+*--- lylezhu2012 (2026-07-07 06:34:23+00:00)
+Updated PR description.

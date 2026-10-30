@@ -1,0 +1,32 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111043
+TITLE: Wireguard fixes
+
+*--- opening post by jukkar (2026-06-11 09:42:54+00:00)
+Couple of issues in WireGuard replay protection and keepalive handling.
+Added also tests for these fixes.
+
+Fixes ##111056
+
+*--- rlubos (2026-06-11 10:41:15+00:00)
+This seems wrong, there's no difference between these two test variants? I'd just execute the same testsuite twice.
+
+*--- Copilot (2026-06-11 10:52:04+00:00)
+`diff` is stored in a `uint32_t`, but sequence numbers and `replay_counter` are 64-bit. Truncating the subtraction can mis-handle large sequence jumps (e.g. > 2^32), keeping stale bits in the replay window and causing incorrect accept/reject decisions. Use a 64-bit `diff` to preserve the full delta before comparing it to the replay window size.
+
+*--- Copilot (2026-06-11 10:52:04+00:00)
+Zephyr's CMake style guide asks for lowercase CMake commands; use `file(...)` instead of `FILE(...)` for consistency (see doc/contribute/style/cmake.rst).
+
+*--- Copilot (2026-06-11 10:52:04+00:00)
+`wg_replay_check()` increments `seq` internally (to adapt the RFC2401 algorithm), so `replay_counter` tracks the greatest observed `seq + 1`, not the greatest raw packet counter value. Clarifying this in the parameter docs will avoid confusion for future tests.
+
+*--- jukkar (2026-06-11 11:01:03+00:00)
+Indeed, will fix.
+
+*--- jukkar (2026-06-11 11:23:17+00:00)
+This was actually an earlier issue so I created a separate commit for the fix and the tests.
+
+*--- jukkar (2026-06-11 11:26:44+00:00)
+At least the network tests are 99% using `FILE` so I am doing the same here. If needed, a separate cleanup commit can be created later.
+
+*--- jukkar (2026-06-11 11:29:56+00:00)
+Fixed

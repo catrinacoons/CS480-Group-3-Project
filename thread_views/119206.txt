@@ -1,0 +1,24 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/119206
+TITLE: Bluetooth: Host: Fix bt_addr_le_is_resolved() matching non-identity types
+
+*--- opening post by jhedberg (2026-09-15 18:28:17+00:00)
+`bt_addr_le_is_resolved()` tests bit 1 of the HCI address type, which is also set for the anonymous advertiser (0xff) and unresolved directed address (0xfe) sentinels of the LE Extended Advertising Report event. Since the helper replaced the explicit identity-type comparison in `le_adv_recv()` (commit baad0c300fc0, 2023), the anonymous branch there has been unreachable: reports from anonymous advertisers reach scan callbacks with an address of type 0xfd instead of `BT_ADDR_LE_ANY`, which is what `bt_le_scan_recv_info` documents.
+
+The fix compares against the two identity types explicitly. A ZTEST suite for `bt_addr_le_is_resolved()` and `bt_addr_le_copy_resolved()` is added to `tests/bluetooth/addr`.
+
+Found while reviewing the resolved-address log annotation in #110687. That PR's `scan.c` log site does the same explicit comparison for now and can go back to the helper once this is merged. Both PRs add a source file to `tests/bluetooth/addr/CMakeLists.txt`, so whichever merges second needs a trivial rebase.
+
+Verification: `tests/bluetooth/addr` on native_sim, 36/36 pass. No reproducer on hardware or bsim for the anonymous-advertiser path.
+
+*--- Copilot (2026-09-16 21:30:30+00:00)
+The internal contract in `subsys/bluetooth/host/addr_internal.h:21-25` still says this helper “only checks that bit,” and its `false` documentation only covers failed/disabled resolution. That now directly contradicts this exact-value check, especially for the two sentinel values this change intentionally rejects. Please update that documentation to state that only `BT_ADDR_LE_PUBLIC_ID` and `BT_ADDR_LE_RANDOM_ID` return true and that the unresolved/anonymous sentinels return false.
+
+*--- jhedberg (2026-09-17 06:10:18+00:00)
+> Please update that documentation to state that only `BT_ADDR_LE_PUBLIC_ID` and `BT_ADDR_LE_RANDOM_ID` return true and that the unresolved/anonymous sentinels return false.
+
+Done, folded into the fix commit.
+
+*--- jhedberg (2026-09-17 06:10:23+00:00)
+Pushed v2: the `bt_addr_le_is_resolved()` contract in addr_internal.h now states that only the two identity types return true and that the sentinels return false. Doc-only change, folded into the fix commit, rebased on current main.
+
+@hermabe the push dismissed your approval; the only change since is that doc comment.

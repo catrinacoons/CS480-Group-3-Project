@@ -1,0 +1,93 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/issues/115244
+TITLE: toolchain: zephyr_stdint.h: unconditional 64-bit type override breaks aarch64 GCC 14 builds (arm_acle.h)
+
+*--- opening post by rerickson1 (2026-08-03 19:47:41+00:00)
+### Summary
+
+`include/zephyr/toolchain/zephyr_stdint.h` unconditionally redefines `__INT64_TYPE__` / `__UINT64_TYPE__` (and the `FAST` / `LEAST` variants) to `long long int` / `unsigned long long int`. On LP64 targets (aarch64), the Zephyr SDK GCC's native `__UINT64_TYPE__` is `long unsigned int`, and headers shipped with GCC (e.g. `arm_acle.h`) call built-ins whose parameter types were resolved against the compiler-native `uint64_t`. The Zephyr override desynchronises those two views, and with GCC 14 promoting `-Wincompatible-pointer-types` to an error by default, any TU that transitively includes `<arm_acle.h>` fails to build.
+
+### To Reproduce
+
+* Zephyr SDK 1.0.1 (`aarch64-zephyr-elf-gcc` 14.3.0)
+* Any aarch64 build that pulls in liblc3 (e.g. `samples/bluetooth/audio/tmap_peripheral` on an aarch64 board with `CONFIG_LIBLC3=y`) — liblc3's `src/common.h` includes `<arm_acle.h>`.
+
+Error:
+
+```
+.../aarch64-zephyr-elf/14.3.0/include/arm_acle.h:276:34: error:
+  passing argument 1 of '__builtin_aarch64_rndr' from incompatible
+  pointer type [-Wincompatible-pointer-types]
+  276 |   return __builtin_aarch64_rndr (__res);
+note: expected 'long unsigned int *' but argument is of type
+      'uint64_t *' {aka 'long long unsigned int *'}
+```
+
+Minimal repro (any aarch64 Zephyr TU):
+
+```c
+#include <arm_acle.h>
+```
+
+### Expected behavior
+
+The build succeeds. `uint64_t` on LP64 targets should match the compiler-native 64-bit type so that intrinsics shipped in the toolchain's own headers compile correctly.
+
+### Impact
+
+Blocks any aarch64 application that (directly or transitively) includes `<arm_acle.h>`, including LE Audio samples that enable liblc3.
+
+### Environment
+
+* OS: macOS / Linux (any host)
+* Toolchain: Zephyr SDK 1.0.1, `aarch64-zephyr-elf-gcc` 14.3.0
+* Zephyr: `main` (behavior present since the header was introduced; not new)
+
+### Root cause
+
+`__UINT64_TYPE__` on `aarch64-zephyr-elf` is compiler-native `long unsigned int`. `zephyr_stdint.h` overrides it to `unsigned long long int`. Both are 64 bits but they are distinct C types, so `uint64_t *` is no longer compatible with the built-in's `unsigned long *`.
+
+Confirmed by dropping `-imacros .../zephyr_stdint.h` from the failing compile command — the same source builds clean with no other change.
+
+The 32-bit override introduced in 51b30a5694e is still needed (SDK GCC declares `__INT32_TYPE__` as `long int` on some targets, which breaks printf format checks and `uint32_t*` compatibility). The 64-bit override, however, is only necessary when `sizeof(long) == 4`; on LP64 the compiler-native types already meet Zephyr's expectations.
+
+### Proposed fix
+
+Gate the 64-bit-type overrides on `__SIZEOF_LONG__ == 4`:
+
+```c
+#if __SIZEOF_LONG__ == 4
+#undef __INT64_TYPE__
+#undef __UINT64_TYPE__
+#undef __INT_FAST64_TYPE__
+#undef __UINT_FAST64_TYPE__
+#undef __INT_LEAST64_TYPE__
+#undef __UINT_LEAST64_TYPE__
+
+#define __INT64_TYPE__ long long int
+#define __UINT64_TYPE__ unsigned long long int
+#define __INT_FAST64_TYPE__ __INT64_TYPE__
+#define __UINT_FAST64_TYPE__ __UINT64_TYPE__
+#define __INT_LEAST64_TYPE__ __INT64_TYPE__
+#define __UINT_LEAST64_TYPE__ __UINT64_TYPE__
+#endif
+```
+
+Preserves current behavior on 32-bit targets; on aarch64/LP64 `uint64_t` stays `long unsigned int`, matching `arm_acle.h` and other builtins.
+
+Happy to open a PR with this change.
+
+Assisted-by: Assisted-by: Claude:claude-opus-4.7
+
+*--- rerickson1 (2026-08-07 15:32:10+00:00)
+I believe this needs to be fixed in the toolchain, not the Zephyr tree.
+
+Line 274 of `arm_acle.h`:
+
+```
+__rndr (uint64_t *__res)
+{
+  return __builtin_aarch64_rndr (__res);   // built-in wants unsigned long *
+}
+```
+
+The declaration uses uint64_t*, the body calls a built-in that wants unsigned long*. With Zephyr's override in effect, uint64_t == unsigned long long int, so LP64 aarch64 sees unsigned long long* vs unsigned long* → same width, different types → error under GCC 14.

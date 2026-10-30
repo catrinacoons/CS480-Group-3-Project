@@ -1,0 +1,153 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/89293
+TITLE: drivers: dac: add dac driver support for samd5x/e5x family
+
+*--- opening post by aldluna (2025-04-30 01:49:39+00:00)
+Add driver to support dac peripheral for samd5x/e5x family.
+
+*--- pdgendt (2025-04-30 06:19:03+00:00)
+Use device API wrapper macro
+
+```suggestion
+static DEVICE_API(dac, dac_samd5x_driver_api) = {
+```
+
+*--- pdgendt (2025-04-30 06:19:21+00:00)
+Fix indentation
+
+*--- pdgendt (2025-04-30 06:19:47+00:00)
+It's 2025
+
+*--- martinjaeger (2025-04-30 12:29:16+00:00)
+```suggestion
+      Enables the Atmel SAMD5x MCU Family Digital-to-Analog Converter (DAC) driver.
+```
+
+*--- martinjaeger (2025-04-30 13:00:19+00:00)
+Dithering will effectively make a 16-bit DAC out of the 12-bit DAC, right? Should we not enable this in `dac_channel_setup` depending on the desired resolution?
+
+*--- martinjaeger (2025-04-30 13:04:25+00:00)
+What does this mean, exactly? How can an external filter be configured in Zephyr. If it's not possible, the option should not be configurable.
+
+*--- martinjaeger (2025-04-30 13:07:17+00:00)
+Is it relevant for the user of the DAC API if the bits are left- or right-adjusted? Maybe just always use left-adjusted data, as this would have the MSBs in the same location independent of the dithering setting, correct?
+
+*--- martinjaeger (2025-04-30 13:08:44+00:00)
+Why would we want to define a channel in device tree, but disable it statically? I don't think we need this flag. If a channel is defined in devicetree (and the DAC status is set to "okay"), it should also be enabled.
+
+*--- martinjaeger (2025-04-30 13:10:36+00:00)
+Let's use child nodes with named properties (one child for every DAC channel) instead of the array. The array parameters will look like lots of magic numbers in the board devicetree file.
+
+*--- martinjaeger (2025-04-30 13:12:02+00:00)
+This function should at least check if the desired resolution for the given channel is valid.
+
+*--- aldluna (2025-05-06 01:17:22+00:00)
+Thanks, I copy and paste it and didn´t saw it.
+
+*--- aldluna (2025-05-06 01:18:58+00:00)
+Sure, I think that's a better approach
+
+*--- aldluna (2025-05-06 01:21:31+00:00)
+Sounds good, then I'll leave as left adjusted
+
+*--- aldluna (2025-05-06 01:23:59+00:00)
+Sorry, didn´t think on how to correctly use the set-up channel function before, I'll delete this field in the next commit.
+
+*--- aldluna (2025-05-06 01:41:05+00:00)
+Sorry I got confused there, it is a bit that enables the SINC filter to be used as a standalone filter. I think it is out of scope when building the core analog output functionality of the DAC driver, so I I’ll take it away for the moment.
+
+*--- pdgendt (2025-05-06 06:24:57+00:00)
+Indent using tabs, and the help description with a single tab and two spaces.
+
+*--- pdgendt (2025-05-06 06:25:33+00:00)
+Add a newline at the end of the file.
+
+*--- Copilot (2025-05-06 12:30:58+00:00)
+Validate the channel index at the start of dac_samd5x_write_value() to prevent potential out-of-bounds access before accessing data->resolution.
+
+*--- Copilot (2025-05-06 12:30:58+00:00)
+[nitpick] The expression '((0) << DAC_CTRLA_ENABLE_Pos)' is unnecessarily complex; consider replacing it with 0 for improved clarity.
+```suggestion
+	regs->CTRLA.reg = 0;
+```
+
+*--- aldluna (2025-05-07 02:33:30+00:00)
+will do, thanks!
+
+*--- pdgendt (2025-05-08 05:26:48+00:00)
+Please squash your commits and force push.
+
+*--- nandojve (2025-05-12 14:07:53+00:00)
+Why is this not in `dts/arm/atmel/samd5x.dtsi` ?
+
+*--- aldluna (2025-05-12 14:19:00+00:00)
+I was trying to follow the same structure dac_sam0.c use to build its dac node between the boards its included but now that you mention it, they may have a good reason to do it that way, while my clock definition will not change between samd5x or samde5x. So, I'll move it samd5x.dtsi.
+
+*--- nandojve (2025-05-12 14:34:31+00:00)
+> I was trying to follow the same structure dac_sam0.c use to build its dac node between the boards its included but now that you mention it, they may have a good reason to do it that way, while my clock definition will not change between samd5x or samde5x. So, I'll move it samd5x.dtsi.
+
+Correct, you need to follow that structure when clocks are different between devices like SAMD, SAML, SAMC etc otherwise there is no needed for it.
+
+*--- nandojve (2025-05-12 15:08:40+00:00)
+```diff
+		dac0: dac@43002400{
+			compatible = "atmel,samd5x-dac";
+			reg = <0x43002400 0x20>;
+-			status = "disabled";
+-
+			clocks = <&gclk 42>,<&mclk 0x20 9>;
+			clock-names = "GCLK", "MCLK";
+			atmel,assigned-clocks=<&gclk 0>;
+			atmel,assigned-clock-names="GCLK";
++			status = "disabled";
+
+			#io-channel-cells = <1>;
+		};
+```
+
+*--- nandojve (2025-05-12 16:54:02+00:00)
+Hi @aldluna,
+
+Make sure you fix Compliance Checks.
+
+*--- martinjaeger (2025-05-20 10:02:33+00:00)
+```suggestion
+	  Enables the Atmel SAMD5x MCU Family Digital-to-Analog Converter (DAC) driver.
+```
+
+*--- aldluna (2025-05-26 14:05:28+00:00)
+Sure, thanks!
+
+*--- aldluna (2025-06-23 23:46:29+00:00)
+Hello @martinjaeger @nandojve @pdgendt, Sorry I forgot about this for a while, I think the last change I pushed comply with your previous comments. Please let me know if there is anything missing.
+
+*--- martinjaeger (2025-06-24 08:45:00+00:00)
+Please use the section below with the same configuration (starting with `CONFIG_BOARD_TWR_KE18F`) instead of creating a new one.
+
+*--- martinjaeger (2025-06-24 08:46:22+00:00)
+Style inconsistency:
+
+```suggestion
+			atmel,assigned-clocks = <&gclk 0>;
+			atmel,assigned-clock-names = "GCLK";
+```
+
+*--- aldluna (2025-07-04 19:50:43+00:00)
+Thanks, I just push the fix, please let me know if you run into any other issue.
+
+*--- aldluna (2025-07-10 20:40:40+00:00)
+Hello @martinjaeger, let me know if you need anything else from my side.
+
+*--- aldluna (2025-07-12 02:05:06+00:00)
+@nandojve @pdgendt do you see anything else that should be tackle? Please let me know if needed.
+
+*--- aldluna (2025-07-16 16:45:07+00:00)
+Hello @pdgendt, please let me know if anything else is needed.
+Thanks!
+
+*--- pdgendt (2025-07-16 19:16:44+00:00)
+> Hello @pdgendt, please let me know if anything else is needed. Thanks!
+
+Nope, but there's currently a feature freeze (for the release on July 18th), it'll have to wait a bit.
+
+*--- martinjaeger (2025-07-16 20:57:51+00:00)
+@pdgendt If you don't have any change requests anymore, you could already turn your previous -1 into an approval so that it can be merged immediately after the release?

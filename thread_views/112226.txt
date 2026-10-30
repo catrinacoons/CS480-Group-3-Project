@@ -1,0 +1,89 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112226
+TITLE: samples: bluetooth: bound TMAP originate URI
+
+*--- opening post by Old-Ding (2026-06-28 17:11:04+00:00)
+## Summary
+
+This updates the TMAP peripheral sample to bound the URI used by `ccp_originate_call()`.
+
+The sample reads a list of remote URI schemes and later originates a call to `friend`. `CONFIG_BT_TBS_MAX_URI_LENGTH` is defined as the maximum URI length without the NULL terminator, so the sample needs one byte for termination and must validate the final composed URI length before storing it.
+
+## Changes
+
+- Size the stored remote URI as `CONFIG_BT_TBS_MAX_URI_LENGTH + 1`.
+- Walk the URI schemes list and select the first non-empty scheme that can fit `scheme:friend`.
+- Build the full originate URI in `read_uri_schemes_string_cb()` after the length check, using `strcat()` only on the validated fixed-size buffer.
+- Pass the stored URI directly to `bt_tbs_client_originate_call()`.
+- Keep the change limited to the TMAP peripheral sample.
+
+## Testing
+
+- `git fetch origin main`
+- `git rebase origin/main`
+- `git diff --check origin/main...HEAD -- samples/bluetooth/audio/tmap_peripheral/src/ccp_call_ctrl.c`
+- `git show --check --stat --oneline HEAD`
+- `rg -n "snprintk|strcat|uri_scheme_len == 0U|remote_uri\[uri_scheme_len\]" samples/bluetooth/audio/tmap_peripheral/src/ccp_call_ctrl.c`
+
+Build not run locally: this Windows checkout does not have `west`, `cmake`, or `ninja` installed, and this sparse checkout does not include Zephyr's `scripts/` directory.
+
+*--- Copilot (2026-06-29 21:59:22+00:00)
+This file now uses `-EINVAL`, but it relies on `<errno.h>` being pulled in transitively via `<zephyr/kernel.h>` rather than including it directly. The sibling files in this same sample include `<errno.h>` explicitly when they use `-EINVAL` (`samples/bluetooth/tmap_peripheral/src/mcp_ctlr.c:10` and `samples/bluetooth/tmap_peripheral/src/bap_unicast_sr.c:11`). For consistency and include-what-you-use, consider adding `#include <errno.h>` to the include block at the top of the file.
+
+*--- Thalley (2026-07-01 07:38:31+00:00)
+I know you didn't write this part, but it's actually somewhat misleading, isn't it? 
+
+`uri` points to an URI _scheme_, and the `scheme:CALLER_ID` is the URI. At the moment the sample creates the URI in `ccp_originate_call`, but given that we have all the information here (URI scheme + separator + CALL_ID), we could construct the URI here, and avoid the `strcat` in `ccp_originate_call`
+
+*--- Thalley (2026-07-01 07:39:34+00:00)
+Please keep the comment to help provide information on what we are doing here :)
+
+*--- Thalley (2026-07-01 07:40:36+00:00)
+This is fine, but we do also have `strtok` available if you prefer that
+
+*--- Thalley (2026-07-01 07:41:05+00:00)
+The `value` is a list of URI _schemes_. Suggest to update the names of the variables to reflect that
+
+*--- Thalley (2026-07-01 07:42:10+00:00)
+Shouldn't this terminate if `uri >= value + strlen(value)`? Looks like we may end up going past the values in `value` if we don't find any suitable URI scheme
+
+*--- Copilot (2026-07-01 07:45:18+00:00)
+The PR description states two changes that are not present in this diff: building the originate URI with `snprintk()` "instead of `strcpy()` and `strcat()`", and returning `-EINVAL` when the composed URI would exceed `CONFIG_BT_TBS_MAX_URI_LENGTH`. In the actual code, `ccp_originate_call()` still uses `strcpy()`/`strcat()` (lines 169-171), and no `-EINVAL` is returned anywhere — the length validation instead lives in `read_uri_schemes_string_cb()`, which only `printk()`s and returns `void`. The bounding itself is achieved safely by the `+1` buffer sizing and the scheme-selection check, but the description does not match the implementation. Please either update the description to reflect the strcpy/strcat + callback-side validation that was actually implemented, or apply the described `snprintk()`/`-EINVAL` changes.
+
+*--- Thalley (2026-07-01 12:27:58+00:00)
+Using `strcat` would probably be better than `snprintk` as we avoid having a dependency on `CONFIG_PRINTK` which `strcat` does not
+
+*--- Thalley (2026-07-01 12:28:35+00:00)
+We need to check for `uri_scheme_len == 0` I think, right?
+
+*--- Old-Ding (2026-07-01 13:03:17+00:00)
+Updated this PR for the latest review feedback:
+
+- rebased onto current `origin/main`
+- skip empty URI schemes before considering a scheme usable
+- replaced `snprintk()` with copying the selected scheme into the validated fixed-size buffer, then appending the fixed separator and caller ID with `strcat()`
+- updated the PR description so it no longer describes the old `snprintk()` implementation
+
+Local patch checks passed: `git diff --check origin/main...HEAD -- samples/bluetooth/audio/tmap_peripheral/src/ccp_call_ctrl.c` and `git show --check --stat --oneline HEAD`.
+
+*--- Thalley (2026-07-01 15:32:18+00:00)
+```suggestion
+	(void)memcpy(remote_uri, uri_scheme, uri_scheme_len);
+	remote_uri[uri_scheme_len] = '\0';
+	(void)strcat(remote_uri, URI_SEPARATOR);
+	(void)strcat(remote_uri, CALLER_ID);
+```
+
+We have a coding guideline that return values shall either be used or explicitly dropped :)
+
+*--- Old-Ding (2026-07-02 03:41:11+00:00)
+Addressed the remaining minor request in the latest push (`b6f6db0`): the `memcpy()` and `strcat()` return values are now explicitly discarded with `(void)`.
+
+Current checks are green, including Manifest, Pull Request/Issue Assignment, and SonarCloud. Could you please re-review when you have time?
+
+*--- Old-Ding (2026-07-07 02:00:38+00:00)
+Follow-up: the checks are green and I addressed the previous feedback in the latest update. There is one approval, but GitHub still shows review required. Could a maintainer let me know if another owner review or action is needed before merge?
+
+*--- Thalley (2026-07-07 06:04:41+00:00)
+> Follow-up: the checks are green and I addressed the previous feedback in the latest update. There is one approval, but GitHub still shows review required. Could a maintainer let me know if another owner review or action is needed before merge?
+
+PRs needs at least 2 approvals before they can get merged :) I'll bring this PR to the attention of others at a meeting today, so hopefully we can get another review

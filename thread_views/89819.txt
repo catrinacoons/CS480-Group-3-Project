@@ -1,0 +1,12 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/89819
+TITLE: Bluetooth: Controller: Fix MIC failure when 2 CISes in Peripheral
+
+*--- opening post by cvinayak (2025-05-12 11:12:03+00:00)
+Fix MIC failure when 2 or more CISes in Peripheral is active and any CIS before the last CIS does not have reception that lead to the event count and payload count being incorrect. Add the missing flush implementation when switching between CISes in the CIG event.
+
+*--- Copilot (2025-05-13 06:39:12+00:00)
+Consider adding an inline comment to explain the purpose of the flush/update call here, emphasizing its role in fixing the MIC failure issue. This will aid future maintainers in understanding why this call is necessary.
+```suggestion
+
+	/* Ensure proper payload count handling to address MIC failure issues. */
+```

@@ -1,0 +1,15 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118653
+TITLE: kernel: skip redundant runtime usage stop locking
+
+*--- opening post by wizard97 (2026-09-10 00:11:52+00:00)
+Return before taking usage_lock when the current CPU's accounting window is already stopped. This avoids a redundant global-lock acquisition when architecture IRQ-entry accounting precedes scheduler IRQ-exit accounting.
+
+The hook already requires local interrupts to be masked, and only the local CPU writes usage0. Keep the existing lock for every shared-counter update and preserve runtime-statistics behavior.
+
+Microbenchmarks on a quad-core ARMv8 SMP platform with runtime statistics enabled showed 2.5-4.4% lower latency and up to 12.8% higher throughput.
+
+Assisted-by: Codex:GPT-5
+
+*--- malto101 (2026-09-11 22:58:22+00:00)
+nitpick
+I dont think we need all these explanations as the change here is quite direct

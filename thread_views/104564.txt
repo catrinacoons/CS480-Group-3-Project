@@ -1,0 +1,9 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/104564
+TITLE: drivers: i3c: fix multiple bugs in I3C common code
+
+*--- opening post by XenuIsWatching (2026-02-26 07:08:55+00:00)
+Had claude examine these files and found some valid issues
+
+- Fix `i3c_bus_setmrl` not setting `mrl_cmd.ibi_len` before sending SETMRL CCC, resulting in uninitialized stack data on the wire
+- Fix dangling stack pointer in `i3c_sec_get_basic_info` when early returns leave `temp_desc` attached to the device linked list
+- Add `I3C_BUS_FOR_EACH_I3CDEV_SAFE` / `I3C_BUS_FOR_EACH_I2CDEV_SAFE` macros and use them in `i3c_sec_bus_reset` to avoid memory corruption when detaching devices during list iteration

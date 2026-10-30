@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112720
+TITLE: final cleanup of testcase.yaml / add compliance check
+
+*--- opening post by nashif (2026-07-04 00:01:10+00:00)
+- **samples: subsys: testsuite: rename testcase.yaml to tests.yaml**
+- **tests: benchmarks: rename testcase.yaml to tests.yaml**
+- **tests: bsim: rename testcase.yaml to tests.yaml**
+- **tests: drivers: rename testcase.yaml to tests.yaml**
+- **scripts: ci: check_compliance: reject legacy test metadata filenames**
+- **ci: scripts: remove remaining testcase.yaml occurances**

@@ -1,0 +1,62 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/111721
+TITLE: serial: Add framing-error-reporting property
+
+*--- opening post by DaAwesomeP (2026-06-20 23:45:03+00:00)
+This PR adds property `framing-error-reporting` to UART drivers. This property allows a driver to expect how to actively handle a framing error if the next byte after a framing error needs to be read (for protocols like DMX512).
+
+I am working on a DMX driver for Zephyr. DMX signals the start of a packet with a "Mark After Break" signal, which is interpreted as a framing error or break error on a UART. The next byte after the error is valid data that is a part of the packet. Normally, a line error would probably mean throwing away the data immediately before and after, but here I need to keep the data following the error. I have this working with Zephyr APIs on a bunch of platforms, but it is impossible for the driver to handle UART error handling type without knowing at compile time/runtime.
+
+Assisted-by: Claude:claude-opus-4.7
+
+*--- nandojve (2026-07-24 15:35:26+00:00)
+ping @dcpleung
+
+*--- sylvioalves (2026-07-24 15:38:01+00:00)
+No uart API integration needed?
+
+*--- DaAwesomeP (2026-07-24 17:36:53+00:00)
+> No uart API integration needed?
+
+It's a purely informational flag + enum for downstream drivers to use. How you actually want to handle the byte following the error really depends on the protocol. In some cases you want to keep the byte right after the error and in other cases you want to explicitly discard it (or multiple bytes). Example in this PR:
+https://github.com/mitmedialab/zephyr/blob/49f3300c9c39af12fea3b035747d4c6433945e80/subsys/dmx/dmx_uart_isr.c#L79-L125
+
+I'm also figuring out how to do this for async UART, but that will be more complicated and actually require API changes (mainly adding an event type). I have something working for that but will probably hold off on sending that until #112751 has some progress.
+
+*--- sylvioalves (2026-07-24 19:24:53+00:00)
+> > No uart API integration needed?
+> 
+> It's a purely informational flag + enum for downstream drivers to use. How you actually want to handle the byte following the error really depends on the protocol. In some cases you want to keep the byte right after the error and in other cases you want to explicitly discard it (or multiple bytes). Example in this PR: https://github.com/mitmedialab/zephyr/blob/49f3300c9c39af12fea3b035747d4c6433945e80/subsys/dmx/dmx_uart_isr.c#L79-L125
+> 
+
+Well, there's no in-tree consumer, so all the vendor's defaults are unvalidated. I also spot some needed changes.. But before doind that, a binding property and its enum-string values become source-compatibility commitments the moment they land (check https://github.com/zephyrproject-rtos/zephyr/blob/main/doc/build/dts/bindings-upstream.rst) so shipping wrong-but-contractual values is the concrete risk.
+Every other serial DT property in the tree is consumed by driver code and there's no precedent for a declared-but-unread one. @dcpleung I see you approved already. Please evaluate if the observation is valid.
+
+*--- DaAwesomeP (2026-07-24 19:44:51+00:00)
+> Every other serial DT property in the tree is consumed by driver code and there's no precedent for a declared-but-unread one.
+
+I see, that makes sense. The DMX subsystem would be a consumer, so we could wait for that to get more traction and then consider this (please consider leaving a review in that PR!). Regardless this would need to be in its own PR separate from that subsystem.
+
+I'll think about a way to abstract the read/discard bytes logic into an API that lives in the UART driver instead of each downstream driver.
+
+*--- dcpleung (2026-07-24 22:32:14+00:00)
+From my perspective, properties in device tree are also there to describe the device and they can be consumed by children nodes. I am not totally sure on the devicetree standard regarding this. If this is not acceptable, this will need to be declared with the DMX driver using overlay.
+
+*--- DaAwesomeP (2026-07-28 19:04:20+00:00)
+@sylvioalves thanks for pushing me on this. I am working on a `fifo_read_flagged()` which would be implemented in each driver. This removes the need to drain the buffer the way that the DMX RFC currently does. The downside is that if a driver is missing the implementation, a user can no longer simply define `framing-error-reporting` in DT to get it to work. But it does remove the drain solution I have now (which is less explicit).
+
+To my knowledge the only common protocols that use breaks are DMX and LIN. If there are others that come to mind, please let me know and I will try to incorporate the requirements into my proposed solution (so that those could be contributed later).
+
+Setting this to draft for the moment and will reopen once I confirm the other in-progress solution works/does not work.
+
+*--- sylvioalves (2026-07-29 18:03:05+00:00)
+> @sylvioalves thanks for pushing me on this. I am working on a `fifo_read_flagged()` which would be implemented in each driver. This removes the need to drain the buffer the way that the DMX RFC currently does. The downside is that if a driver is missing the implementation, a user can no longer simply define `framing-error-reporting` in DT to get it to work. But it does remove the drain solution I have now (which is less explicit).
+> 
+> To my knowledge the only common protocols that use breaks are DMX and LIN. If there are others that come to mind, please let me know and I will try to incorporate the requirements into my proposed solution (so that those could be contributed later).
+> 
+> Setting this to draft for the moment and will reopen once I confirm the other in-progress solution works/does not work.
+
+Sounds fine. Anyway, @dcpleung has a point and it depends on devicetree guidelines.
+@JarmouniA @mbolivar @maass-hamburg would you take a look? Thanks!
+
+*--- DaAwesomeP (2026-09-02 14:31:30+00:00)
+Not stale; still working on alternate serial method for comparison.

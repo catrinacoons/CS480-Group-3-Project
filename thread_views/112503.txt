@@ -1,0 +1,115 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112503
+TITLE: drivers: udc: rpi_pico: avoid unaligned USB DPRAM access on M33
+
+*--- opening post by apr-mcnetic (2026-07-01 12:42:17+00:00)
+Supersedes #111791, which was accidentally closed. This PR carries the same fix, with the revised commit message and code comment from the review discussion.
+
+Fixes #111789.
+
+*--- tmon-nordic (2026-07-08 12:31:17+00:00)
+`i - len` here can only be 0, 1, 2 or 3. If it is 2 or 3, we have do read 16-bit value from memory and write it using `sys_write16()` and increase i by 2. Then if we are left `i < len`, the difference is guaranteed to be 1, so we just do `sys_write8()`.
+
+I would prefer such explicit writes instead of relying on "writing past buffer considered harmless".
+
+*--- apr-mcnetic (2026-07-09 07:43:51+00:00)
+It’s absolutely right and understandable to play it safe. However, accessing the USB buffer is safe in this case. The downside would be poorer performance. As we know, every microsecond counts with USB.
+It’s no coincidence that the `memcpy` function in question here has a read pattern of 4-4-4-1-2. It’s simply optimized code.
+
+*--- apr-mcnetic (2026-08-02 11:01:50+00:00)
+Hi Johann, could you please do a review of this issue/PR? Thanks alot!
+
+*--- jfischer-no (2026-08-02 17:58:09+00:00)
+There are no reasons to use sys_read or sys_write. This should be just a `memcpy() + bytecpy()` for both DPRAM read and write.
+
+```c
+static inline void dpram_memcpy(void *dst, const void *src, const size_t len)
+{
+	const size_t m_len = ROUND_DOWN(len, sizeof(uint32_t));
+ 
+	(void)memcpy(dst, src, m_len);
+	/* Copy the unaligned remainder byte by byte */
+	bytecpy((uint8_t *)dst + m_len, (const uint8_t *)src + m_len, len - m_len);
+}
+```
+
+*--- jfischer-no (2026-08-02 17:58:15+00:00)
+Stray variable definition.
+
+```c
+	len = read_buf_ctrl_reg(dev, ep) & USB_BUF_CTRL_LEN_MASK;
+	copy_len = MIN(len, net_buf_tailroom(buf));
+	dpram_memcpy(net_buf_add(buf, copy_len), ep_data->buf, copy_len);
+```
+
+*--- apr-mcnetic (2026-08-12 10:00:11+00:00)
+Thanks — I'll take both points, the stray definition and the `memcpy() + bytecpy()` shape. It also resolves @tmon-nordic's concern from the earlier round, since the remainder is now written byte-exact instead of rounding the last word up.
+
+One thing I'd like to settle before I push, though. `memcpy()` gives no guarantee about the access widths it uses, so it is only safe against the DPRAM while **both** pointers are word-aligned:
+
+- **Write path** (`dst` = DPRAM, word-aligned): the implementation aligns `dst` first, so every store stays naturally aligned, and unaligned loads only ever hit the RAM side, which is Normal memory. Fine.
+- **Read path** (`src` = DPRAM, `dst` = RAM): if the RAM destination is *not* word-aligned, a typical implementation byte-aligns `dst` first and then word-loads from a `src` that has thereby become unaligned — i.e. unaligned reads straight back at the DPRAM. That is exactly the fault this patch is meant to remove.
+
+I could not construct a case in mainline that actually hits it: UDC buffers are `UDC_BUF_ALIGN`-aligned and OUT continuations append full-mps chunks, so `net_buf_add()` stays word-aligned. But nothing in the driver or in the UDC buffer API enforces that, and the failure mode is a hard UsageFault rather than a slow path.
+
+Would this work for you as a compromise? It keeps your shape and the optimized copy on the path that is actually taken, and only makes the precondition explicit:
+
+```c
+/*
+ * The USB DPRAM is Device memory: an unaligned half-word or word access faults
+ * regardless of CCR.UNALIGN_TRP. memcpy() does not guarantee access widths, so
+ * use it only while both pointers are word-aligned -- then copying the
+ * word-multiple part cannot produce an unaligned DPRAM access. Anything else is
+ * copied byte by byte, which Device memory always allows.
+ */
+static inline void dpram_memcpy(void *dst, const void *src, const size_t len)
+{
+	const size_t m_len = ROUND_DOWN(len, sizeof(uint32_t));
+
+	if (!IS_ALIGNED(dst, sizeof(uint32_t)) || !IS_ALIGNED(src, sizeof(uint32_t))) {
+		bytecpy(dst, src, len);
+		return;
+	}
+
+	(void)memcpy(dst, src, m_len);
+	/* Copy the unaligned remainder byte by byte */
+	bytecpy((uint8_t *)dst + m_len, (const uint8_t *)src + m_len, len - m_len);
+}
+```
+
+If you consider the branch over-engineered, I'm equally happy with your unconditional version plus the precondition documented and checked in debug builds:
+
+```c
+	__ASSERT_NO_MSG(IS_ALIGNED(dst, sizeof(uint32_t)) && IS_ALIGNED(src, sizeof(uint32_t)));
+```
+
+Just tell me which one you prefer and I'll push that.
+
+*--- apr-mcnetic (2026-08-12 10:00:59+00:00)
+Agreed, moved up to the declarations.
+
+*--- jfischer-no (2026-08-12 11:23:45+00:00)
+>If you consider the branch over-engineered, I'm equally happy with your unconditional version plus the precondition documented and checked in debug builds:
+
+Yes, it is over-engineered. ASSERTs could be more precise.
+```c
+	__ASSERT(IS_ALIGNED(dst, sizeof(uint32_t), "Destination is not aligned");
+	__ASSERT(IS_ALIGNED(src, sizeof(uint32_t), "Source is not aligned");
+```
+
+>Just tell me which one you prefer and I'll push that.
+
+Please advise your LLM agent to be very concise and not to add unnecessary comments.
+
+*--- apr-mcnetic (2026-08-12 11:50:06+00:00)
+You're absolutely right—using AI is both a blessing and a curse. Still, even with 35 years of professional experience, I'm a fan and use these tools. Mainly because my English isn't great ;)
+I understand that you prefer Option 2—going straight ahead with ASSERTs. I'll adjust it accordingly.
+
+*--- apr-mcnetic (2026-08-12 12:19:22+00:00)
+Pushed the requested version: unconditional `memcpy() + bytecpy()` with the two alignment asserts, `copy_len` moved up to the declarations, and rebased on current main.
+
+@jfischer-no @tmon-nordic please take another look when you get a chance.
+
+*--- lynt-smitka (2026-08-23 18:30:13+00:00)
+I ran into what looks like the same crash on a Fruit Jam (RP2350) - the cdc_acm sample with `CONFIG_SPEED_OPTIMIZATIONS=y` would UsageFault right after enumeration, every boot. Applied this patch and it's gone. USB has been stable under sustained traffic since. Thanks for the fix.
+
+One small thing from my crash log, in case it's useful: the faulting memcpy had its *source* at an odd address (r1 = 0x2000437d), so I think the `__ASSERT` on `src` alignment in `dpram_memcpy()` could trip on builds with asserts enabled.

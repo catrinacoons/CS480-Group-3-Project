@@ -1,0 +1,118 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107989
+TITLE: Bluetooth: BAP: Require BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 19
+
+*--- opening post by Thalley (2026-04-27 07:50:41+00:00)
+Change the BAP roles to require
+BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE to be at least 19.
+This is the minimal amount of cfg data required to support LC3,
+which is mandated by BAP.
+
+Adding this requirement should not really affect any existing
+applications, given that it was the default.
+
+Adding this requirement allows us to remove a bunch of guards
+since we can rely on Kconfig to ensure it's non-0.
+
+BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE may still be set to a lower value
+in case the audio API is used without BAP.
+
+*--- Copilot (2026-04-27 07:58:33+00:00)
+`struct bt_audio_codec_cfg` only contains `data_len`/`data[]` when `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` (see include/zephyr/bluetooth/audio/audio.h). Removing the `#if` here makes `bt_audio_valid_codec_cfg()` fail to compile when `CONFIG_BT_BAP_STREAM` is enabled (e.g., via `CONFIG_BT_ASCS=y`) but `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0`. Either restore the compile-time guard around the codec data validation or add Kconfig dependencies (e.g., `BT_ASCS`/`BT_BAP_STREAM`) to require `BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE >= 19` (or at least `> 0`).
+
+*--- Copilot (2026-04-27 07:58:33+00:00)
+`struct bt_audio_broadcast_stream_data` and `bt_bap_broadcast_source::stream_data` now unconditionally declare arrays sized by `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE` / `BROADCAST_STREAM_CNT`. If `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0` or `CONFIG_BT_BAP_BROADCAST_SOURCE` is disabled (making `BROADCAST_STREAM_CNT=0`), this introduces zero-length arrays that can fail to compile on some supported toolchains. Consider restoring the `#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` guard and/or wrapping these broadcast-source-only types/members in `#if defined(CONFIG_BT_BAP_BROADCAST_SOURCE)`.
+
+*--- Thalley (2026-04-27 08:19:24+00:00)
+This is an internal header file used by BAP, so this is or should be safe
+
+*--- Copilot (2026-04-27 08:27:54+00:00)
+`BT_BAP_STREAM` no longer defaults to `y` when `CONFIG_BT_ASCS=y`. `ascs.c` unconditionally calls multiple `bt_bap_stream_*` functions implemented in `bap_stream.c` (built under `CONFIG_BT_BAP_STREAM`), so enabling ASCS without any BAP role will now lead to missing symbols at link time. Consider restoring `BT_ASCS` in the `def_bool` expression (or have `BT_ASCS` select `BT_BAP_STREAM`) and, since BAP stream code now assumes codec cfg data is present, also ensure `BT_BAP_STREAM`/`BT_ASCS` depends on `BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE >= 19` to prevent invalid configurations.
+```suggestion
+	def_bool BT_ASCS || BT_BAP_UNICAST || BT_BAP_BROADCAST_SOURCE || BT_BAP_BROADCAST_SINK
+	depends on BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE >= 19
+```
+
+*--- Copilot (2026-04-27 08:27:55+00:00)
+`print_codec_cfg()` now unconditionally accesses `codec_cfg->data_len` and `codec_cfg->data[]`, but these members are compiled out of `struct bt_audio_codec_cfg` when `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0` (see `include/zephyr/bluetooth/audio/audio.h`). Any shell module that includes this header in a configuration with `BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0` will fail to build (e.g. `CONFIG_BT_CAP_COMMANDER` does not depend on BAP roles). Please restore the `#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` guard (or provide a stub implementation for the 0-size case), or add an appropriate Kconfig dependency so this header is only used when codec cfg data support is enabled.
+
+*--- Thalley (2026-04-27 09:04:52+00:00)
+This is a BAP shell; can never happen :)
+
+*--- Copilot (2026-04-27 09:11:32+00:00)
+Removing the `#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` guard makes `struct bt_audio_broadcast_stream_data` (and `bt_bap_broadcast_source::stream_data`) unconditionally declare `uint8_t data[CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE]`. If `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0`, this becomes a zero-length array and can fail to compile; `bap_endpoint.h` is included by code built under `CONFIG_BT_ASCS` (not only broadcast source), so this is a real build configuration. Please either restore the `> 0` guard, or enforce `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` (or >= 19) via Kconfig for every configuration that can include/compile code including this header.
+```suggestion
+	size_t data_len;
+#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0
+	/** Codec Specific Data */
+	uint8_t data[CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE];
+#endif /* CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0 */
+```
+
+*--- Copilot (2026-04-27 09:11:32+00:00)
+`ascs_ep_get_status_enable()` appends `ep->codec_cfg.meta_len`/`meta` under `CONFIG_BT_AUDIO_CODEC_CAP_MAX_METADATA_SIZE > 0`, but the `meta_len`/`meta` members on `struct bt_audio_codec_cfg` are controlled by `CONFIG_BT_AUDIO_CODEC_CFG_MAX_METADATA_SIZE`. With the current guard, builds where `CFG_MAX_METADATA_SIZE=0` (but `CAP_MAX_METADATA_SIZE` keeps its default > 0) will fail because `codec_cfg.meta_len/meta` are not present. Guard this block with `CONFIG_BT_AUDIO_CODEC_CFG_MAX_METADATA_SIZE > 0` instead (and consider explicitly setting `enable->metadata_len = 0` in the `#else` case if the field must be present on the wire).
+```suggestion
+#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_METADATA_SIZE > 0
+	enable->metadata_len = ep->codec_cfg.meta_len;
+	net_buf_simple_add_mem(buf, ep->codec_cfg.meta, ep->codec_cfg.meta_len);
+#else
+	enable->metadata_len = 0U;
+#endif /* CONFIG_BT_AUDIO_CODEC_CFG_MAX_METADATA_SIZE > 0 */
+```
+
+*--- Copilot (2026-04-27 09:11:33+00:00)
+`ascs_ep_set_codec()` uses `#if CONFIG_BT_AUDIO_CODEC_CAP_MAX_DATA_SIZE > 0` to guard writes to `codec_cfg->data_len` and `codec_cfg->data`, but these members are controlled by `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE` in `struct bt_audio_codec_cfg`. As written, a configuration with `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0` (allowed by Kconfig) will fail to compile because `codec_cfg->data_len/data` are not present while the CAP symbol is still > 0 by default. Switch this guard to `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` (and ensure `len` is handled appropriately when the field is compiled out).
+```suggestion
+#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0
+	codec_cfg->data_len = len;
+	(void)memcpy(codec_cfg->data, cc, len);
+#else
+	ARG_UNUSED(cc);
+#endif /* CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0 */
+```
+
+*--- Thalley (2026-04-27 09:14:20+00:00)
+This is internally to BAP where this is always true
+
+*--- Copilot (2026-04-27 13:14:15+00:00)
+`ascs_ep_get_status_config()` now only sets `cfg->cc_len` when `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0`. Since `cc_len` is always part of `struct bt_ascs_ase_status_config`, this leaves the field uninitialized (and the on-air response malformed) when the config size is 0. Set `cc_len` unconditionally (e.g., to 0 when codec cfg storage is disabled), and only guard the buffer append of the codec cfg bytes.
+
+*--- Copilot (2026-04-27 13:14:15+00:00)
+`struct bt_audio_broadcast_stream_data` now unconditionally declares `uint8_t data[CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE]`. If `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0` (which is still permitted when BAP roles are not enabled), this becomes a zero-length array (non-standard and rejected by some toolchains). This is especially relevant because `bap_endpoint.h` is included by `ascs.c` when `CONFIG_BT_ASCS=y`, and `BT_ASCS` does not currently depend on `BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE >= 19` (Kconfig.ascs). Consider restoring the `#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` guard here (and on the `stream_data` member) and/or enforcing the >=19 dependency for any config that builds code including this header (e.g., `BT_ASCS`).
+
+*--- Copilot (2026-04-28 08:32:07+00:00)
+`ascs_ep_get_status_enable()` always allocates `struct bt_ascs_ase_status_enable` (which includes `metadata_len`), but when `CONFIG_BT_AUDIO_CODEC_CFG_MAX_METADATA_SIZE=0` this code now skips setting `enable->metadata_len`. That leaves an uninitialized length byte in the status PDU (and can make the receiver treat the metadata as malformed). Always set `enable->metadata_len` (0 when metadata is not supported), and only append metadata bytes when metadata support is enabled and `meta_len > 0`.
+```suggestion
+
+	if (ep->codec_cfg.meta_len > 0U) {
+		net_buf_simple_add_mem(buf, ep->codec_cfg.meta, ep->codec_cfg.meta_len);
+	}
+#else
+	enable->metadata_len = 0U;
+```
+
+*--- Copilot (2026-04-28 08:32:07+00:00)
+This function now unconditionally uses `codec_cfg->data_len` and `codec_cfg->data`, but those fields are not present in `struct bt_audio_codec_cfg` when `CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE=0` (`include/zephyr/bluetooth/audio/audio.h`). While BAP roles/ASCS now depend on `>= 19`, `CONFIG_BT_BAP_STREAM` can still be enabled independently (and it controls compilation of `bap_stream.c` and the BAP shell), which would make this file fail to compile with a 0-size codec cfg. Consider either restoring the `#if CONFIG_BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE > 0` guard here, or adding a matching Kconfig dependency to `BT_BAP_STREAM` so the type always contains these members when this file is built.
+
+*--- Copilot (2026-04-28 08:32:07+00:00)
+The new `depends on BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE >= 19` constraints cover the public BAP roles, but `BT_BAP_STREAM` (the hidden symbol that gates compilation of `bap_stream.c` and the BAP shell) still has no such dependency. Since `BT_BAP_STREAM` can be enabled independently in prj.conf, code now assumes `struct bt_audio_codec_cfg` always has `data_len/data[]` and will fail to build if `BT_AUDIO_CODEC_CFG_MAX_DATA_SIZE` is 0 or < 19. Consider adding the same `>= 19` dependency to `config BT_BAP_STREAM` as well (or otherwise preventing `BT_BAP_STREAM=y` when codec cfg data support is disabled).
+
+*--- Thalley (2026-04-28 08:46:35+00:00)
+All the ways to enable `BT_BAP_STREAM` has this requirement
+
+*--- Copilot (2026-04-28 08:54:05+00:00)
+The text says 'All BAP roles' but the affected list includes `CONFIG_BT_ASCS`, which is not itself a BAP role. To avoid confusion for users, adjust the wording (e.g., 'All BAP roles (and ASCS) ...' or 'All BAP roles and the ASCS dependency chain ...'), or remove `BT_ASCS` from the list if it is not intended to be covered by this statement.
+
+*--- Copilot (2026-04-28 08:54:05+00:00)
+The same magic-number constraint (`>= 19`) is duplicated across many Kconfig entries. If this minimum is spec-driven (LC3), consider introducing a dedicated Kconfig symbol (e.g., an int like `BT_AUDIO_CODEC_CFG_BAP_MIN_DATA_SIZE` default 19) or a boolean helper that captures 'BAP requires LC3 minimum', and depend on that instead. This reduces duplication and makes future updates less error-prone.
+
+*--- Copilot (2026-04-28 08:54:05+00:00)
+The same magic-number constraint (`>= 19`) is duplicated across many Kconfig entries. If this minimum is spec-driven (LC3), consider introducing a dedicated Kconfig symbol (e.g., an int like `BT_AUDIO_CODEC_CFG_BAP_MIN_DATA_SIZE` default 19) or a boolean helper that captures 'BAP requires LC3 minimum', and depend on that instead. This reduces duplication and makes future updates less error-prone.
+
+*--- Copilot (2026-04-28 08:54:06+00:00)
+The same magic-number constraint (`>= 19`) is duplicated across many Kconfig entries. If this minimum is spec-driven (LC3), consider introducing a dedicated Kconfig symbol (e.g., an int like `BT_AUDIO_CODEC_CFG_BAP_MIN_DATA_SIZE` default 19) or a boolean helper that captures 'BAP requires LC3 minimum', and depend on that instead. This reduces duplication and makes future updates less error-prone.
+
+*--- Copilot (2026-04-28 08:54:06+00:00)
+The same magic-number constraint (`>= 19`) is duplicated across many Kconfig entries. If this minimum is spec-driven (LC3), consider introducing a dedicated Kconfig symbol (e.g., an int like `BT_AUDIO_CODEC_CFG_BAP_MIN_DATA_SIZE` default 19) or a boolean helper that captures 'BAP requires LC3 minimum', and depend on that instead. This reduces duplication and makes future updates less error-prone.
+
+*--- Copilot (2026-04-28 08:54:06+00:00)
+The same magic-number constraint (`>= 19`) is duplicated across many Kconfig entries. If this minimum is spec-driven (LC3), consider introducing a dedicated Kconfig symbol (e.g., an int like `BT_AUDIO_CODEC_CFG_BAP_MIN_DATA_SIZE` default 19) or a boolean helper that captures 'BAP requires LC3 minimum', and depend on that instead. This reduces duplication and makes future updates less error-prone.

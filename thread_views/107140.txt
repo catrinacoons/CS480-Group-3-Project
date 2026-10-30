@@ -1,0 +1,8 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/107140
+TITLE: kernel: fix various tracing macro placements
+
+*--- opening post by nashif (2026-04-11 11:39:31+00:00)
+- **kernel: queue: remove spurious BLOCKING trace in queue_insert**
+- **kernel: mailbox: emit tracing EXIT on async-send matched-receiver path**
+- **kernel: heap: add BLOCKING trace and fix EXIT ordering in k_heap_realloc**
+- **kernel: stack: move BLOCKING trace to after K_NO_WAIT check in k_stack_pop**

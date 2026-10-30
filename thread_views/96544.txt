@@ -1,0 +1,52 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/96544
+TITLE: drivers: rtc: add nxp,pcf85063a driver
+
+*--- opening post by faxe1008 (2025-09-25 08:25:29+00:00)
+Adds nxp,pcf85063a driver
+
+*--- faxe1008 (2025-09-29 07:43:48+00:00)
+@bjarki-andreasen ah did not know there was a test suite. Neat. Will do so, and add DNM for time being :^)
+
+*--- bjarki-andreasen (2025-09-29 07:45:51+00:00)
+> @bjarki-andreasen ah did not know there was a test suite. Neat. Will do so, and add DNM for time being :^)
+
+cool, there is a `HW Test` label you can use which does the same
+
+*--- faxe1008 (2025-09-30 10:27:12+00:00)
+@bjarki-andreasen Ran the test suite, had to do some fixes around the y2k test. Now passing:
+<img width="1038" height="785" alt="image" src="https://github.com/user-attachments/assets/e8c3e247-5856-4234-b88b-1a2ee85cc471" />
+
+*--- Copilot (2025-10-07 07:48:00+00:00)
+The description incorrectly refers to 'PCF8563' but should be 'PCF85063A' to match the actual device being described.
+```suggestion
+description: NXP PCF85063A RTC
+```
+
+*--- Copilot (2025-10-07 07:48:01+00:00)
+Incorrect field assignment in alarm get function. The seconds register (regs[0]) is being assigned to tm_min instead of tm_sec, and the mask should be RTC_ALARM_TIME_MASK_SECOND.
+```suggestion
+		timeptr->tm_sec = bcd2bin(regs[0] & PCF85063A_SECONDS_MASK);
+		*mask |= RTC_ALARM_TIME_MASK_SECOND;
+```
+
+*--- Copilot (2025-10-07 07:48:01+00:00)
+Incorrect field assignment in alarm get function. The minutes register (regs[1]) is being assigned to tm_hour instead of tm_min, and the mask should be RTC_ALARM_TIME_MASK_MINUTE.
+
+*--- Copilot (2025-10-07 07:48:01+00:00)
+Incorrect field assignment in alarm get function. The hours register (regs[2]) is being assigned to tm_mday instead of tm_hour, and the mask should be RTC_ALARM_TIME_MASK_HOUR.
+
+*--- Copilot (2025-10-07 07:48:02+00:00)
+Incorrect field assignment in alarm get function. The days register (regs[3]) is being assigned to tm_wday instead of tm_mday, and the mask should be RTC_ALARM_TIME_MASK_MONTHDAY.
+
+*--- Copilot (2025-10-07 07:48:02+00:00)
+Array size mismatch: regs is declared as uint8_t regs[4] but PCF85063A alarm registers span 5 bytes (seconds, minutes, hours, day, weekday). This will miss reading the weekday alarm register.
+
+*--- Copilot (2025-10-07 07:48:02+00:00)
+Weekday values should not be BCD encoded. The tm_wday field represents a raw integer value (0-6) and should be stored directly without BCD conversion.
+```suggestion
+		regs[4] = timeptr->tm_wday & PCF85063A_WEEKDAYS_MASK;
+```
+
+*--- faxe1008 (2025-10-07 08:31:23+00:00)
+Section 7.5.5 Register Weekday_alarm
+states that the register value shall be BCD encoded.

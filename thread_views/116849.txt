@@ -1,0 +1,52 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/116849
+TITLE: dts: Add DT_BINDING_COMPAT_*
+
+*--- opening post by DaAwesomeP (2026-08-19 18:36:44+00:00)
+Add `DT_BINDING_COMPAT`, which allows for getting a node's compatible string at compile time.
+
+This is required for #110787, which requires selecting a driver backend at compile time. This string can then be concatenated onto a function name (instead of using function overrides) to allow for multiple backends to provide distinct functions available at compile time. Please see #110787 for context; the compile time selection is a requirement of that PR.
+
+Assisted-by: Claude:claude-opus-5
+
+*--- soburi (2026-08-19 20:33:34+00:00)
+I think it would be better to support variants of TOKEN, UPPER_TOKEN, and UNQUOTED as well.
+
+*--- DaAwesomeP (2026-08-19 20:45:45+00:00)
+I see, so `DT_BINDING_COMPAT` should become `DT_BINDING_COMPAT_TOKEN` and I should add `DT_BINDING_COMPAT_UPPER_TOKEN` and `DT_BINDING_COMPAT_UNQUOTED`?
+
+*--- DaAwesomeP (2026-08-19 20:58:44+00:00)
+Updated, let me know what you think.
+
+*--- soburi (2026-08-19 21:20:11+00:00)
+Perfect!
+
+*--- pdgendt (2026-08-20 08:28:18+00:00)
+Use `zexpect_` instead here. Also no need for the empty `""`.
+
+```suggestion
+	zexpect_str_equal(token, "vnd_gpio_device");
+```
+
+*--- DaAwesomeP (2026-08-20 14:38:27+00:00)
+> preferably split into smaller commits
+
+@pdgendt Would you like me to split by each macro? Or by macro/tests?
+
+*--- DaAwesomeP (2026-08-20 14:38:35+00:00)
+Fixed!
+
+*--- pdgendt (2026-08-20 14:41:36+00:00)
+> > preferably split into smaller commits
+> 
+> @pdgendt Would you like me to split by each macro? Or by macro/tests?
+
+Not each macro, I would split:
+- script change + bnf
+- macros
+- tests
+
+*--- DaAwesomeP (2026-08-20 15:00:50+00:00)
+@pdgendt OK, pushed the split! Thanks!
+
+*--- maass-hamburg (2026-08-25 11:54:10+00:00)
+Reassigned to new Devicetree maintainer

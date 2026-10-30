@@ -1,0 +1,12 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109213
+TITLE: wip: add DUT channel abstraction
+
+*--- opening post by luqasn (2026-05-15 11:28:44+00:00)
+Written by Claude, pending human rework by me, prompt:
+
+> scripts/pylib/twister/twisterlib.py contains a `serial_pty` feature that allows to replace the normal serial communication with a DUT (device under test) with       
+  communication through an external program's stdin/stdout. It achieves this through creating a virtual serial device and attaching that to the process'               
+  input/output. Please outline a plan to change this to introduce or reuse an abstraction to communicate with the DUT _either_ via serial _or_ via a process, but
+  without wrapping one in the other. Please be brief and think hard.
+
+Creating PR to see what the tests say about this change.

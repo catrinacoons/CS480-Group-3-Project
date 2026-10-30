@@ -1,0 +1,111 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/104279
+TITLE: Add support for ICLegend S3KM1110 mmWave sensor
+
+*--- opening post by kartben (2026-02-19 17:59:36+00:00)
+This adds support for UART-based mmWave sensor from ICLegend S3KM1110.
+
+The sensor is pretty configurable so a follow-up PR might introduce support for some custom attributes (e.g. to set the various "detection gates") but for an initial implementation the current version of the driver should be fine since the experience is already quite great out-of-the-box with default settings.
+
+Also adds a new sample and a shield featuring the sensor.
+
+- [Sensor driver extended API doc](https://builds.zephyrproject.io/zephyr/pr/104279/docs/doxygen/html/group__s3km1110__interface.html)
+- [Shield doc](https://builds.zephyrproject.io/zephyr/pr/104279/docs/boards/shields/seeed_xiao_hsp24/doc/index.html)
+- [Code sample doc](https://builds.zephyrproject.io/zephyr/pr/104279/docs/samples/sensor/s3km1110/README.html)
+
+*--- Copilot (2026-02-19 21:10:57+00:00)
+The capitalization "ICLegend" is inconsistent with the vendor name. The vendor name in dts/bindings/vendor-prefixes.txt is "Iclegend Microelectronics Co., Ltd." This should be standardized to "Iclegend" (not "ICLegend") for consistency with the official company name.
+
+*--- Copilot (2026-02-19 21:10:57+00:00)
+The capitalization "Iclegend" is inconsistent with the header file and vendor prefix. The vendor name in dts/bindings/vendor-prefixes.txt is "Iclegend Microelectronics Co., Ltd.", but the header file uses "ICLegend" (with capital 'C' and 'L'). This should be standardized to match the official company name "Iclegend" as registered in the vendor prefixes file for consistency across the codebase.
+
+*--- fabiobaltieri (2026-02-20 12:56:12+00:00)
+I'd suggest initializing these in runtime, should save a bit of flash
+
+*--- fabiobaltieri (2026-02-20 12:57:19+00:00)
+log `config->uart_dev->name`? even better I think we should standardize to something like `"%s is not ready", dev->name`
+
+*--- fabiobaltieri (2026-02-20 13:02:14+00:00)
+this is a bit cryptic, maybe have its own function? like `is_message_valid` or whatever this check means
+
+the two magic I suppose are just that, could they use a define?
+
+*--- fabiobaltieri (2026-02-20 13:03:37+00:00)
+could this use `sys_timepoint_expired` instead?
+
+*--- fabiobaltieri (2026-02-20 13:05:18+00:00)
+have you considered using the interrupt apis? polling uart is risky, I mean as soon as your system is going to get somewhat busy you'll lose data
+
+*--- Copilot (2026-03-03 10:08:46+00:00)
+The build command example uses `:board: xiao_ble`, but this sample’s `sample.yaml` is configured to build/test on `xiao_esp32c6/esp32c6/hpcore` with the `seeed_xiao_hsp24` shield. To avoid confusing users and to match CI, consider updating the README’s example to the same board/shield combination used by `sample.yaml` (or broaden `sample.yaml` if multiple boards are intended).
+```suggestion
+Build for a Seeed XIAO ESP32C6 board with the :ref:`seeed_xiao_hsp24`:
+
+.. zephyr-app-commands::
+   :zephyr-app: samples/sensor/s3km1110
+   :board: xiao_esp32c6
+```
+
+*--- Copilot (2026-03-03 10:08:46+00:00)
+In `s3km1110_init()`, the readiness check is for `config->uart_dev`, but the error log prints `dev->name` (the sensor device), which makes debugging confusing. Log the UART device name instead (and/or mention both).
+```suggestion
+		LOG_ERR("UART device %s for sensor %s is not ready",
+			config->uart_dev->name, dev->name);
+```
+
+*--- Copilot (2026-03-03 10:08:47+00:00)
+`k_sem_take()` can fail for reasons other than a timeout (e.g. being interrupted). The current code maps any non-zero return to `-ETIMEDOUT`, which can mask the real error. Consider translating only the timeout case (typically `-EAGAIN`) to `-ETIMEDOUT`, and otherwise return the original error code.
+```suggestion
+
+		if (rc == -EAGAIN) {
+			LOG_DBG("Did not receive a complete frame after %d ms",
+				CONFIG_S3KM1110_UART_TIMEOUT_MS);
+			rc = -ETIMEDOUT;
+		} else {
+			LOG_DBG("k_sem_take failed with error: %d", rc);
+		}
+
+		k_mutex_unlock(&data->lock);
+		return rc;
+```
+
+*--- Copilot (2026-03-03 10:08:47+00:00)
+The driver disables RX interrupts after receiving a single frame and only flushes the UART FIFO once during init. If the sensor streams frames continuously (no request/response is sent here), bytes can accumulate in the UART FIFO between `sensor_sample_fetch()` calls and overflow or leave the next fetch starting mid-stream. Consider either keeping RX enabled and continuously parsing frames in the ISR (storing the latest complete report), or flushing/discarding pending FIFO data right before enabling RX for a new fetch.
+
+*--- Copilot (2026-03-03 10:08:47+00:00)
+`<string.h>` and `<zephyr/sys/util.h>` appear unused in this file. Dropping unused includes avoids accidental dependency creep and reduces compile time slightly.
+
+*--- Copilot (2026-03-03 10:08:47+00:00)
+`S3KM1110_MAX_PAYLOAD_BYTES` controls the size of the UART receive buffer in the S3KM1110 driver, but this option has no lower bound, even though the driver assumes the buffer is large enough to hold at least the frame length header and base report payload. If a board configuration sets this value too small (e.g. 1), incoming UART frames can trigger out-of-bounds writes in the driver, corrupting adjacent kernel memory and allowing a malicious or compromised sensor module to crash the system or potentially gain code execution. Add a strict minimum (via a Kconfig `range` or equivalent compile-time check) so `S3KM1110_MAX_PAYLOAD_BYTES` cannot be configured below the minimum number of bytes required by the wire protocol.
+```suggestion
+	depends on S3KM1110
+	range 8 65535
+	help
+	  Maximum payload size accepted from the radar report protocol.
+	  Must be at least large enough to hold the frame header and the
+	  smallest valid report payload.
+```
+
+*--- fabiobaltieri (2026-03-03 11:33:25+00:00)
+you could have a `if S3KM1110` since there's more than one options
+
+*--- fabiobaltieri (2026-03-03 11:34:15+00:00)
+why does this have to be configurable? (discard the comment above if it's gone)
+
+*--- fabiobaltieri (2026-03-03 11:42:14+00:00)
+I'd suggest converting this to a semaphore as well, the mutex just add priority inheritance which you don't really care about and brings in the mutex code in the application even if nothing else uses it, just put a semaphore, initialize as 1 max value 1 and that's it
+
+*--- kartben (2026-03-03 12:43:07+00:00)
+Thanks @fabiobaltieri! ❤️ Hopefully better now, including fixes reported by Sonarqube.
+
+*--- kartben (2026-03-12 15:33:46+00:00)
+> Agree with @fabiobaltieri 's suggestions. Aside from that, looks nice
+
+@MaureenHelm still looking nice? 😊
+
+*--- kartben (2026-03-13 14:58:24+00:00)
+> Just one nit, can you add the new sensor to `tests/drivers/build_all/sensor`?
+
+Sure! I am pretty sure I initially did but might have dropped it later as the driver was exercised in the sample, but 100% agree it should have a dedicated test. Thanks!
+
+*--- VynDragon (2026-03-24 20:47:43+00:00)
+I just realized this has been spawned into existence, @kartben do you know where to find or have any infos that would help extending or adding S3KM111L to this ? I haven't been able to get any necessary infos for this other chip

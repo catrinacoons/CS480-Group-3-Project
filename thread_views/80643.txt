@@ -1,0 +1,55 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/80643
+TITLE: issue #20654
+
+*--- opening post by Ankush1oo8 (2024-10-30 17:18:55+00:00)
+Resolve issue #20654 and made a documentaion for flash simulator
+if ihave made any mistakes please feel free to correct me
+
+*--- nashif (2024-10-30 17:21:57+00:00)
+please use a more descpretive title
+
+*--- Ankush1oo8 (2024-10-30 17:24:02+00:00)
+Like how
+What is Flash simulator?
+
+*--- Ankush1oo8 (2024-10-30 17:26:24+00:00)
+if possible can you edit
+
+> please use a more descpretive title
+
+Cann you help with that please
+if posible can you change it
+
+*--- Ankush1oo8 (2024-10-30 17:49:00+00:00)
+> Some questions:
+> 
+> * How much of this did you personally write yourself?
+> * How familiar are you with the flash simulator driver?
+> * How accurate is the text in the PR?
+
+Actually I am linux user and often in my college project i use the it for testing pupose
+The text about is wrten by me and i have taken help of ai in some sections
+
+*--- kartben (2024-10-30 17:49:37+00:00)
+Hi @Ankush1oo8 
+
+Thanks very much for the PR -- it is always nice to see people trying to help tackle some of the issues that have been open for a very long time. However, in this particular situation, I don't think just asking ChatGPT to document flash_simulator.c is getting us to the level of detail that is really helpful for someone to really learn about the capabilities of the simulator.
+
+As a thought, you may want to consider writing a new code sample that exercises `zephyr,sim-flash` and helps users understand some of the key features such as statistics collection, etc.
+
+Would you be interested in doing that?
+
+In any case you may want to have a look at our contribution guidelines and documentation writing guidelines (for example, the page you're proposing to add is not even "mounted" in the documentation's table of contents at the moment)
+
+Thanks!
+
+*--- kartben (2024-10-30 18:06:50+00:00)
+@Ankush1oo8 so I take it that you are not interested in iterating on this and possibly contributing a code sample (or an improved doc page?)
+
+*--- Ankush1oo8 (2024-10-30 18:09:29+00:00)
+I want to contribute but i dont know how can i do that
+
+*--- kartben (2024-10-30 18:32:49+00:00)
+> I want to contribute but i dont know how can i do that
+
+I think I gave you some pointers/ideas above but let me know if you have specific questions

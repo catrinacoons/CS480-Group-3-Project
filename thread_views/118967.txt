@@ -1,0 +1,79 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/118967
+TITLE: scripts: west: add openFPGALoader runner
+
+*--- opening post by soburi (2026-09-13 21:31:05+00:00)
+Add initial support for openFPGALoader to flash FPGA boards. This is flash support only, no debug support.
+
+*--- Copilot (2026-09-13 21:35:34+00:00)
+This runner exposes a tool-specific `--offset`, so it can write an image at an arbitrary address, but leaving `flash_addr` false suppresses west's shared `--dt-flash` option (see `core.py:627-634`). A build whose code partition/load offset is non-zero is therefore sent without that offset unless the user manually duplicates the build configuration. Advertise `flash_addr=True` and translate `--dt-flash` into the openFPGALoader offset, with a defined precedence for an explicit `--offset`.
+
+*--- soburi (2026-09-13 21:39:28+00:00)
+For the time being, it will be implemented as a simple command-based open-end funnel.
+
+*--- pdgendt (2026-09-14 06:25:46+00:00)
+Turn this into a constant, so you can replace all occurrences
+
+```python
+_OPENFPGALOADER = "openFPGALoader"
+```
+
+```suggestion
+        return _OPENFPGALOADER.lower()
+```
+
+*--- pdgendt (2026-09-14 06:27:37+00:00)
+Prefer `argparse.OptionalBooleanAction` over `"store_true"`.
+
+*--- soburi (2026-09-14 12:06:34+00:00)
+All the runners were hardcoding the literals.
+I think it would be best to keep this consistent; if we are going to fix it, we should do so comprehensively.
+
+*--- soburi (2026-09-14 12:55:24+00:00)
+Fixed. Thank you for your review.
+
+*--- marc-hb (2026-09-14 14:28:08+00:00)
+I don't think consistency matters for something that small. If @pdgendt suggestion is better in "isolation" then it should start being used. Either way is fine.
+
+*--- pdgendt (2026-09-15 06:13:10+00:00)
+@soburi there's a compliance issue with the patch now:
+
+```
+Error: Check python files with ruff.
+
+ Python lint error (I001) see https://docs.astral.sh/ruff/rules/unsorted-imports :Import block is un-sorted or un-formatted
+File:/home/runner/work/zephyr/zephyr/scripts/west_commands/runners/openfpgaloader.py
+Line:6
+Column:1
+EndLine:7
+EndColumn:16
+ Python format error:Run 'ruff format scripts/west_commands/runners/openfpgaloader.py'
+File:scripts/west_commands/runners/openfpgaloader.py
+```
+
+Not sure where the other compliance issues come from, maybe a rebase is needed too?
+
+*--- pdgendt (2026-09-15 09:05:28+00:00)
+Imports from stdlib need to be first.
+
+```suggestion
+import argparse
+
+from runners.core import RunnerCaps, ZephyrBinaryRunner
+```
+
+*--- pdgendt (2026-09-15 09:58:38+00:00)
+Compliance still not happy. You know the command to fix it is literally in the output, right?
+
+```shell
+ruff format scripts/west_commands/runners/openfpgaloader.py
+```
+
+*--- soburi (2026-09-15 10:02:53+00:00)
+> Compliance still not happy. You know the command to fix it is literally in the output, right?
+> 
+> ```shell
+> ruff format scripts/west_commands/runners/openfpgaloader.py
+> ```
+
+The parts I manually formatted were flagged.
+I'm not happy about it, but I'll follow Ruff's rules :-(

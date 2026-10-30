@@ -1,0 +1,39 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/110206
+TITLE: soc: st: stm32: common: gpioport_mgr: Exclude non-STM32 GPIOs
+
+*--- opening post by soburi (2026-05-31 23:06:09+00:00)
+Since it unconditionally targets labels in the gpio[a-z] range,
+
+If gpio-expander uses a label that matches this rule, it will behave incorrectly.
+For example, follows
+
+```
+gpioz: gpio {
+    compatible = "awinic,aw9523b-gpio";
+```
+
+We using instead of DT_NODE_HAS_STATUS_OKAY, limit it to nodes with st,stm32_gpio compatibility using DT_NODE_HAS_COMPAT_STATUS.
+
+*--- Copilot (2026-06-01 07:48:00+00:00)
+GET_GPIOPORT_DEVICE_OR_NULL() still only checks node status. If a non-STM32 GPIO controller (e.g., a GPIO expander) is labeled gpioa..gpioz and is status "okay", it can still be pulled into gpio_ports[] (and later treated as an STM32 port), even though GPIOPORT_DEVICE_IS_ACTIVE() now correctly excludes it. To fully prevent label collisions, gate the device lookup on GPIOPORT_DEVICE_IS_ACTIVE() as well.
+
+*--- soburi (2026-06-01 07:52:28+00:00)
+Fixed.
+
+*--- mathieuchopstm (2026-06-01 07:57:49+00:00)
+Off-topic: what a shame that MP2 GPIO ports don't have `st,stm32-gpio` as secondary compatible.
+
+*--- mathieuchopstm (2026-06-01 07:59:41+00:00)
+Nit: 
+```suggestion
+/*
+ * Check that the node is active AND has compatible handled by this driver.
+ * It is possible for DT nodes to use a `gpioX` nodelabel despite not being
+ * an in-SoC GPIO controller, in which case we would try to instantiate them
+ * even though this driver does not know how to handle them.
+ */ 
+#define GPIOPORT_DEVICE_IS_ACTIVE(port)					\
+```
+
+*--- soburi (2026-06-01 08:20:05+00:00)
+Thank you for suggestion. I applied it.

@@ -1,0 +1,107 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/109528
+TITLE: Bluetooth: Controller: nRF54L: Add dual-timer support
+
+*--- opening post by cvinayak (2026-05-20 19:19:24+00:00)
+Add support for using NRF_TIMER00 in the MCU power domain as the EVENT_TIMER for event timing, while keeping NRF_TIMER10 in the Radio power domain as the SW_SWITCH_TIMER for tIFS switch timings.
+
+This is enabled when CONFIG_BT_CTLR_SW_SWITCH_SINGLE_TIMER=n on SOC_COMPATIBLE_NRF54LX. The default remains single-timer (TIMER10 for both), preserving backward compatibility.
+
+Cross-domain DPPI connections use three PPIB bridges:
+  PPIB11/PPIB21: Radio <-> Peripheral (GRTC -> NRF_TIMER10, existing)
+  PPIB00/PPIB10: MCU <-> Radio (NRF_TIMER00 <-> Radio peripherals)
+  PPIB01/PPIB20: MCU <-> Peripheral (GRTC -> NRF_TIMER00, new)
+
+DPPIC00 channels 0-5 are assigned for the six EVENT_TIMER connections:
+  ch 0: GRTC -> NRF_TIMER00 START (via PPIB20/PPIB01)
+  ch 1: NRF_TIMER00 COMPARE -> Radio TXEN/RXEN (via PPIB00/PPIB10)
+  ch 2: Radio READY -> NRF_TIMER00 CAPTURE (via PPIB10/PPIB00)
+  ch 3: Radio ADDRESS -> NRF_TIMER00 CAPTURE (via PPIB10/PPIB00)
+  ch 4: NRF_TIMER00 COMPARE -> Radio DISABLE (via PPIB00/PPIB10)
+  ch 5: Radio END -> NRF_TIMER00 CAPTURE (via PPIB10/PPIB00)
+
+Timer prescaler values:
+  NRF_TIMER00 (HFPLL 128 MHz): prescaler 7 -> 1 MHz resolution
+  NRF_TIMER10 (HFXO 32 MHz):  prescaler 5 -> 1 MHz resolution
+
+DPPIC00 and PPIB bridge channel reservations are declared in bt_ctlr_used_resources.h and mapped to nrfx resource tracking in nrfx_reserved_resources.h.
+
+Requires CONFIG_BT_CTLR_NRF_GRTC (default y on nRF54L) since the PPIB01/PPIB20 bridge for GRTC -> NRF_TIMER00 is only configured in the GRTC event path.
+
+Assisted-by: GitHub Copilot:Opus-4.6
+
+Agent-Logs-Url: https://github.com/cvinayak/zephyr/sessions/56442577-4c4c-4a0f-8766-7dc65e5edc7e
+
+*--- cvinayak (2026-05-21 04:08:18+00:00)
+These new defines duplicate names similar to `HAL_EVENT_TIMER_START_PPI` , reuse the names.  When dual timer is used  the range of DPPI used now has to fall in the range of 0-7 between main domain and radio domain. Similarly, use correct DPPI range between radio and peripheral domain, between main and peripheral domain, etc,
+
+*--- cvinayak (2026-05-21 04:09:27+00:00)
+move this close to where EVENT_TIMER is defined?
+
+*--- cvinayak (2026-05-21 04:10:39+00:00)
+is this `if` clause required, can the channels be disabled without this check?
+
+*--- cvinayak (2026-05-21 04:11:12+00:00)
+is this even used? and correctly? and for what?
+
+*--- cvinayak (2026-05-21 04:15:11+00:00)
+Good, did not ask to support NRF_RTC and dual timer in nrf54L. Can be implemented in future if required. This PR proves that TIMER00 in main domain is usable, just need to take care if DPPIs are available and usable.
+
+*--- Copilot (2026-05-21 04:25:08+00:00)
+In dual-timer mode (EVENT_TIMER = NRF_TIMER00), the event-timer start path relies on the GRTC->TIMER00 cross-domain bridge configuration in hal_event_timer_start_ppi_config(). If CONFIG_BT_CTLR_NRF_GRTC is not enabled, the RTC-based path will be used and the required PPIB01/PPIB20 bridging to TIMER00 is not configured, which would make the timing wiring incorrect. Add the same compile-time guard/error used in radio_nrf54lx.h to prevent building dual-timer mode without CONFIG_BT_CTLR_NRF_GRTC.
+
+*--- Copilot (2026-05-21 04:25:09+00:00)
+`#define EVENT_TIMER_ID 00` introduces an octal literal (leading zero) and can be confusing in preprocessor numeric comparisons. Consider keeping EVENT_TIMER_ID as `0` and directly defining `EVENT_TIMER` as `NRF_TIMER00` (or introduce a separate token/macro for the `00` suffix used only for identifier concatenation).
+
+*--- Copilot (2026-05-21 04:25:09+00:00)
+`#define EVENT_TIMER_ID 00` is an octal literal due to the leading zero, and can behave unexpectedly if EVENT_TIMER_ID is ever used in numeric preprocessor expressions. Prefer keeping EVENT_TIMER_ID as `0` and defining `EVENT_TIMER` explicitly as `NRF_TIMER00` (or use a dedicated suffix macro for identifier concatenation).
+
+*--- jackjinxb (2026-05-22 02:48:26+00:00)
+Great work
+
+*--- Thalley (2026-05-22 05:40:01+00:00)
+It's unclear to me why these 4 specific platforms were added here, as the reasoning is not mentioned in the commit message
+
+*--- Thalley (2026-05-22 05:42:00+00:00)
+Should the defines here use the `U` suffix? I assume they are all intended to be unsigned values, right? (although 0U is never really required)
+
+*--- Thalley (2026-05-22 05:42:57+00:00)
+This seems like a dependency violation; can we handle that in Kconfig instead?
+
+*--- Thalley (2026-05-22 05:43:51+00:00)
+The result should be compared to `== 0` to following the coding guidelines about essential boolean types as well
+
+*--- Thalley (2026-05-22 05:44:05+00:00)
+Can this be IS_ENABLED?
+
+*--- Thalley (2026-05-22 05:44:17+00:00)
+```suggestion
+	if (trx != 0U) {
+```
+
+*--- Thalley (2026-05-22 05:44:28+00:00)
+IS_ENABLED?
+
+*--- Thalley (2026-05-22 05:45:29+00:00)
+What is the reasoning behind guarding these definitions with this `#if`?
+
+*--- Thalley (2026-05-22 05:45:46+00:00)
+Defines should consider suffixing with `U`
+
+*--- cvinayak (2026-05-22 15:01:21+00:00)
+bsim targets cover the babblesim models and nrf52/nrf54 cover the variation in the requirement of additional PPI/PPIB/DPPI use in dual and single timer implementation of the Controller.
+
+*--- cvinayak (2026-05-22 15:03:26+00:00)
+Some are used in concatenations to get string literals. Will leave the h/w related instance numbers without the `U`.
+
+*--- cvinayak (2026-05-22 15:06:07+00:00)
+prefer build error. Kconfig overrides will may it difficult to detect new porting to SoCs difficult to detect missing implementations.
+
+*--- Thalley (2026-05-23 15:40:52+00:00)
+> prefer build error. Kconfig overrides will may it difficult to detect new porting to SoCs difficult to detect missing implementations.
+
+Can you elaborate? 
+
+It's not a blocker, but I feel like your comment could be applied to any Kconfig option, and I don't think you mean that we should use `#error` instead `depends on` in Kconfig, so why is this one condition so special?
+
+*--- Thalley (2026-05-23 15:41:31+00:00)
+Please add that to the commit message if you haven't :)

@@ -1,0 +1,10 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/113999
+TITLE: drivers: rtc: rv8803: Fix weekday alarm readback
+
+*--- opening post by kartben (2026-07-19 19:45:07+00:00)
+The alarm getter open-coded find_lsb_set on the weekday bitmask
+without the -1 index correction, returning the weekday off by one.
+Use the rv8803_mask2weekday helper like get_time.
+
+*--- kartben (2026-08-08 19:35:06+00:00)
+Ping @bjarki-andreasen :)

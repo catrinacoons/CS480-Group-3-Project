@@ -1,0 +1,64 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/112783
+TITLE: drivers: pcie: host: add configuration space write utility to shell
+
+*--- opening post by khademullah (2026-07-06 09:18:19+00:00)
+## Subsystem: Drivers / PCIe Host
+
+### Problem Statement & Architectural Context
+The current PCIe host shell module implementation (`drivers/pcie/host/shell.c`) is entirely passive. While it permits early boot device discovery, configuration dump reading, and capability tree parsing via `pcie ls`, it lacks an interactive mechanism to perform real-time, runtime configuration updates or write instrumentations from the command canvas.
+
+This presents a development bottleneck during pre-silicon platform validation (e.g., when debugging complex ARM-FPGA SoC interconnects such as Intel/Altera or AMD/Xilinx AXI-to-PCIe bridges) where engineers need to rapidly toggle interface control registers, force-enable bus-master states, or dynamically alter memory maps without modifying code and repeatedly recompiling the firmware image target.
+
+### Proposed Feature Enhancements
+This patch introduces a runtime interactive sub-command wrapper: 
+`pcie write <bus:device.function> <register_word_offset> <32bit_hex_data>`
+
+**Underlying Execution Steps:**
+1. Intercepts terminal panel strings, isolating target registers and data components.
+2. Checks configuration space link responsiveness to prevent system lockups.
+3. Invokes the underlying hardware abstraction layer function `pcie_conf_write()` natively over the specified index.
+4. Executes an immediate configuration read-back loop pass to verify bit-latch and alignment stability.
+
+### Verification Matrix
+- **Compilation Toolsuite:** Zephyr SDK 1.0.1 (`aarch64-zephyr-elf-gcc`)
+- **Validation Architecture:** Out-of-tree workspace layout running on top of a 64-bit multi-core simulator (`qemu_cortex_a53`).
+- **Code Standards Compliance:** Evaluated cleanly via `checkpatch.pl` linting scripts, logging `0 errors, 0 warnings, 446 lines checked`.
+- **Live Functional Logs:** Successfully toggled the Bus Master Enable (BME) and Memory Space Enable (MSE) bits inside the Command/Status register from `0x00000000` to `0x00000006` dynamically with real-time verification feedback.
+
+*--- Copilot (2026-07-06 17:37:56+00:00)
+cmd_pcie_write() passes argv (char **) into get_bdf(), but get_bdf() expects a mutable string (char *). This will not compile cleanly and will also break parsing at runtime; pass the BDF argument string (argv[1]) instead.
+
+*--- Copilot (2026-07-06 17:37:56+00:00)
+strtoul() is called with argv (char **) instead of the actual parameter strings, which will trigger format/typing warnings or errors and parse garbage. Use argv[2] for the config-space word index and argv[3] for the data, and use base 0 so hex values with a 0x prefix work as expected.
+
+*--- Copilot (2026-07-06 17:37:57+00:00)
+The endpoint presence check uses the read value of the *target register* (0xFFFFFFFF) to decide whether the endpoint exists. This is unreliable because an existing device may legitimately return 0xFFFFFFFF for some registers (or out-of-range reads), which would incorrectly block valid writes. Probe the device ID register (PCIE_CONF_ID) instead, and use the documented 0xFFFFFFFFU sentinel.
+
+*--- Copilot (2026-07-06 17:37:57+00:00)
+shell_print() uses argv (char **) with a %s format specifier, which is a type mismatch and will print garbage or crash. Also, argv[1] is tokenized by get_bdf() (strtok_r), so it’s not safe to print it as the original BDF string after parsing. Print the parsed BDF components instead.
+
+*--- khademullah (2026-07-06 18:14:57+00:00)
+Hi @dcpleung,
+Thanks for the review! I have refactored the patch to address all points:
+
+- Fixed parameter indexing (argv[1], argv[2], argv[3]).
+-  Switched strtoul to base 0 to support both integer and hex literals.
+- Shifted the presence check to use PCIE_CONF_ID with the 0xFFFFFFFFU sentinel.
+- Used native BDF macros for printing to bypass tokenized string mutations.
+
+All local style, checkpatch, and gitlint checks are now 100% green. Force-pushed for your final approval!
+
+*--- Copilot (2026-07-21 17:00:00+00:00)
+Casting shell_strtoul() directly to unsigned int before validating the value can truncate/wrap large inputs on 64-bit builds, potentially writing to an unintended config word index.
+
+*--- Copilot (2026-07-21 17:00:01+00:00)
+Casting shell_strtoul() directly to uint32_t can silently truncate values > 0xFFFFFFFF on 64-bit builds; for a "32bit" argument it should be range-checked and rejected.
+
+*--- Copilot (2026-07-21 17:00:01+00:00)
+The PR description and the output text imply a verification step, but the implementation only prints the read-back value without checking for a failed read (0xFFFFFFFF) or reporting whether the read-back matches the requested write.
+
+*--- Copilot (2026-07-21 17:00:01+00:00)
+The help text says "<reg_offset>", but cmd_pcie_write interprets argv[2] as a configuration *word index* (per pcie_conf_read/write API and the range check). This is likely to confuse users expecting byte offsets.
+
+*--- khademullah (2026-08-24 04:56:28+00:00)
+Closing, to be merged in main PR https://github.com/zephyrproject-rtos/zephyr/pull/113194

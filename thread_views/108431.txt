@@ -1,0 +1,35 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/108431
+TITLE: net: quic: Add more statistics collection
+
+*--- opening post by jukkar (2026-05-04 15:02:45+00:00)
+Collect statistics in various stages of the Quic connection.
+
+*--- pdgendt (2026-05-06 06:25:00+00:00)
+TBH, I think it's odd to have these `NULL` checks in `static` functions that are called from the same object file. Heck even `quic_context_unref` does not check that `ctx != NULL` before calling this function.
+
+Replace with asserts?
+
+```suggestion
+	__ASSERT_NO_MSG(ctx != NULL);
+	__ASSERT_NO_MSG(stats != NULL);
+	
+	if (ctx->is_listening) {
+		return false;
+	}
+```
+
+*--- pdgendt (2026-05-06 06:30:26+00:00)
+It's more common to pass the "interface" pointer directly?
+
+```suggestion
+static bool quic_addr_is_unspecified(const struct net_sockaddr *addr)
+```
+
+*--- pdgendt (2026-05-06 06:33:45+00:00)
+We could use `net_port_get/net_port_set` utility functions.
+
+*--- jukkar (2026-05-06 08:08:54+00:00)
+Indeed, good point. I will fix these (might go to new PR)
+
+*--- jukkar (2026-05-06 08:10:11+00:00)
+Hmm, there is no practical difference but sure, we can do it like that too.

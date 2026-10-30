@@ -1,0 +1,59 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/104695
+TITLE: Bluetooth: Host: Make ACL/CIS disconnect order deterministic
+
+*--- opening post by Thalley (2026-02-27 21:19:14+00:00)
+Currently the other of the ACL and CIS disconnect callbacks depend on the order of the HCI events received. Since this order is not specified by the core spec, it means that any users/applications of ISO will need to wait for all CIS disconnects callbacks and the ACL disconnect callback before attempting to reuse any of them.
+
+From an API perspective this is not ideal, and the API will be much simpler if the order of ACL and ISO disconnect callbacks were deterministic, regardless of the controller.
+
+This change postpones the finalization of the ACL disconnect until all the CIS associated with it has been disconnected. This will also make the API more similar to e.g. the L2CAP disconnect order.
+
+No tests have been added since the Zephyr controller always sends the CIS disconnect events first, but other controllers, like the Nordic SDC, may not. See https://github.com/zephyrproject-rtos/zephyr/pull/34861 and https://github.com/zephyrproject-rtos/zephyr/pull/39514 for the Zephyr implementation. The PR has been manually tested with Nordic SDC to verify the correct behavior.
+
+There will be a follow up PR for LE Audio, as the BAP unicast client has attempted to handle the 2 types of disconnect callbacks in any other, but it is tricky when an ACL `bt_conn` can actually be reused for a new connection, for another device, before the CIS have been properly free'd, since they share some of the same resources in LE Audio.
+
+*--- Copilot (2026-02-27 21:46:00+00:00)
+`bt_iso_cleanup_acl()` dereferences `acl` after calling `bt_conn_unref(acl)`. `bt_conn_unref()` explicitly notes the object may be considered freed/re-allocated as soon as the refcount is decremented, so checking `acl->state` and scheduling `acl->deferred_work` after the unref is a use-after-unref risk. Fix by deciding whether to retrigger based on `acl->state` *before* unref, clear `iso->iso.acl` before retriggering to avoid `deferred_work` returning early again, then schedule the work while the ACL is still referenced, and finally drop the reference.
+
+*--- Copilot (2026-02-27 22:02:27+00:00)
+The new deferred disconnect behavior changes externally observable callback ordering (ACL disconnected callback is delayed until all associated CIS have disconnected). There doesn’t appear to be a regression test that asserts this ordering, so it’s easy for future refactors to reintroduce non-determinism. Consider adding/adjusting a bsim test (e.g. under tests/bsim/bluetooth/host/iso/cis) to force the controller event order where ACL disconnect completes before CIS disconnect(s), and assert that ISO disconnected callbacks occur before the ACL disconnected callback.
+
+*--- Thalley (2026-02-27 22:03:26+00:00)
+Unfortunately the only controller available is the Zephyr controller which always sends the ACL after the CIS disconnects, so it's untestable in BSIM. Will test manual with a different controller.
+
+*--- cvinayak (2026-02-28 14:39:56+00:00)
+Related https://github.com/zephyrproject-rtos/zephyr/pull/34861 and https://github.com/zephyrproject-rtos/zephyr/pull/39514
+
+*--- Copilot (2026-03-02 12:04:16+00:00)
+`bt_iso_cleanup_acl()` uses `k_work_schedule(&acl->deferred_work, K_NO_WAIT)` to retrigger the ACL disconnect work. `k_work_schedule()` is a no-op if the work item is already scheduled (possibly with a non-zero delay), which can delay the pending disconnect finalization. Use `k_work_reschedule(..., K_NO_WAIT)` (as is done when triggering disconnect work in `bt_conn_set_state()`) to ensure the work runs immediately even if it was already queued/delayed.
+```suggestion
+				k_work_reschedule(&acl->deferred_work, K_NO_WAIT);
+```
+
+*--- Copilot (2026-03-02 12:04:16+00:00)
+This release note is added under the "Deprecated APIs and options" section, but it describes a behavior change (deterministic callback ordering), not a deprecation. Please move this bullet to an appropriate section (e.g., "API Changes" / Bluetooth Host) so readers don’t misinterpret it as a deprecated API.
+
+*--- Thalley (2026-03-02 12:25:43+00:00)
+That is intended. If it is already scheduled, then that should be fine as well
+
+*--- Copilot (2026-03-02 12:37:19+00:00)
+`bt_iso_cleanup_acl()` intends to retrigger the ACL `deferred_work` once the *last* CIS has dropped its reference to the ACL (so the postponed ACL disconnect can be finalized). However, the condition is inverted: after `iso->iso.acl` is set to NULL, `bt_iso_acl_has_cis(acl)` will return false when this was the last CIS, so the deferred work will never be retriggered and the ACL disconnect finalization/callback may never run. Flip the condition to schedule the work when the ACL is disconnected and there are no remaining CIS associated with it (and adjust the comment accordingly).
+
+*--- Copilot (2026-03-02 12:37:19+00:00)
+Docstring grammar is a bit unclear: “the ACL connection it was connected for also has disconnected”. Consider rephrasing to something like “...before bt_conn_cb.disconnected when the associated ACL connection also disconnects” to avoid ambiguity for API users.
+```suggestion
+	 * before @ref bt_conn_cb.disconnected when the associated ACL connection also disconnects.
+	 *
+	 *
+```
+
+*--- Copilot (2026-03-02 13:07:07+00:00)
+`deferred_work()` unconditionally forces associated CIS channels into `BT_ISO_STATE_DISCONNECTING`. This is an invalid state transition if a CIS is already `BT_ISO_STATE_DISCONNECTED` or `BT_ISO_STATE_ENCRYPT_PENDING` (see `bt_iso_chan_set_state_debug()`), and can produce warnings / inconsistent state. Consider only setting `DISCONNECTING` when the channel is currently `CONNECTING` or `CONNECTED`, and otherwise leave the state unchanged (or handle those states explicitly).
+```suggestion
+				if (chan != NULL &&
+				    (chan->state == BT_ISO_STATE_CONNECTING ||
+				     chan->state == BT_ISO_STATE_CONNECTED)) {
+```
+
+*--- Thalley (2026-03-04 08:34:37+00:00)
+The `chan` will either be in a connected state or disconnecting if `iso->iso.acl != NULL`, so it will never be in a disconnected state.

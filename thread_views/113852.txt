@@ -1,0 +1,48 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/issues/113852
+TITLE: rp2040: counter_pit_channel clock divider reset when called twice
+
+*--- opening post by nono313 (2026-07-17 19:57:39+00:00)
+### Describe the bug
+
+On RP2040, `counter_rpi_pico_pit_channel` counter driver can be used to manage periodic timer using PWM slice.
+
+`counter_rpi_pico_pit_channel_set_top_value` clears the block divider to 1 (using `pwm_get_default_config` followed by `pwm_init`) before setting the correct value later when calling `pwm_set_clkdiv_int_frac`.
+
+If we call `set_top_value` while the PWM slice is already running, we get a short time where clock divider is set to 1 which is probably not a desirable behaviour.
+
+I noticed this while using the pit channel timer for audio playback with an external audio amplifier (through a low pass filter): when launching a second audio sample while a first was still playing I hear the second sample played much faster (expected clock divider 256 for the first sample).
+
+Workaround: stop timer right before launching it again.
+
+Disclosure: the source of this issue was found using Claude Sonnet 5.
+
+### Regression
+
+- [ ] This is a regression.
+
+### Steps to reproduce
+
+Steps to reproduce:
+- Configure a pit channel timer on rp2040 in devicetree
+- Call `counter_set_top_value` and `counter_start` once
+- Call `counter_set_top_value` again while the timer is still running
+
+### Relevant log output
+
+```shell
+
+```
+
+### Impact
+
+Annoyance – Minor irritation; no significant impact on usability or functionality.
+
+### Environment
+
+- OS: Linux
+- Zephyr SDK 1.0.1
+- Zephyr SHA b01be6b7b16eb12a8cd0275752d575aca489c430
+
+### Additional Context
+
+_No response_

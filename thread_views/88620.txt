@@ -1,0 +1,8 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/88620
+TITLE: drivers: bmp581: change pressure sensor units to match spec
+
+*--- opening post by maxmclau (2025-04-14 23:44:06+00:00)
+The bmp581 driver currently returns pressure in pascals, when the sensor_channel enum specifies kilopascals. This change modifies the math in bmp581_sample_fetch()
+
+*--- Copilot (2025-04-24 07:21:49+00:00)
+Verify that dividing the shifted raw pressure value by 1000 (and similarly extracting the remainder for the fractional part) yields the precise conversion to kPa as specified. Adding an inline comment detailing the conversion factor and assumptions may help future maintainers.

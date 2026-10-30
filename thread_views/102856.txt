@@ -1,0 +1,52 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/102856
+TITLE: doc: services: uuid: Add dedicated page for UUID API
+
+*--- opening post by kartben (2026-01-24 19:46:11+00:00)
+Add more complete/dedicated documentation page for UUID API
+
+https://builds.zephyrproject.io/zephyr/pr/102856/docs/services/uuid/
+
+*--- Copilot (2026-02-18 16:37:21+00:00)
+The function name `uuid_from_str` is incorrect. The actual API function is `uuid_from_string` as defined in the header file. This will cause a compilation error if the code example is used as-is.
+```suggestion
+   uuid_from_string("6ba7b811-9dad-11d1-80b4-00c04fd430c8", &ns_uuid);
+```
+
+*--- Copilot (2026-02-18 16:37:21+00:00)
+The variable `uuid_str` is used but not declared in this code example. It should be declared before use, similar to the first example where it's declared as `char uuid_str[UUID_STR_LEN];`
+
+*--- Copilot (2026-02-18 16:37:21+00:00)
+Grammar issue: should be "random numbers" (plural) rather than "random number" (singular) since UUIDv4 generation requires multiple random values to fill the 128-bit identifier.
+```suggestion
+UUIDv4 is based on random numbers (hence requires an entropy generator), and can be generated using
+```
+
+*--- Copilot (2026-02-18 16:37:22+00:00)
+The namespace UUID has an incorrect value. According to RFC 9562 Appendix A.4, the well-known namespace ID for URLs is `6ba7b810-9dad-11d1-80b4-00c04fd430c8` (note `10` not `11` after `b8`). This is confirmed by both the test code and sample code in the repository.
+```suggestion
+   uuid_from_str("6ba7b810-9dad-11d1-80b4-00c04fd430c8", &ns_uuid);
+```
+
+*--- Copilot (2026-02-18 16:49:40+00:00)
+The expected output UUID shown in the comment is incorrect because the namespace UUID used is wrong. With the correct namespace UUID "6ba7b810-9dad-11d1-80b4-00c04fd430c8" and the name "zephyrproject.org", the resulting UUIDv5 will be different. Consider removing this hardcoded output comment or recalculating it with the correct inputs.
+```suggestion
+   /* Initialize ns_uuid with a valid UUID, here the well-known namespace ID for DNS */
+   uuid_from_str("6ba7b810-9dad-11d1-80b4-00c04fd430c8", &ns_uuid);
+
+   int ret = uuid_generate_v5(&ns_uuid, name, strlen(name), &my_uuid);
+   if (ret == 0) {
+       uuid_to_string(&my_uuid, uuid_str);
+       printk("UUID: %s\n", uuid_str);
+```
+
+*--- kartben (2026-02-18 21:54:04+00:00)
+it's intentional
+
+*--- sorru94 (2026-02-23 11:42:07+00:00)
+```suggestion
+   /* Well-known namespace ID for URLs (RFC 9562) */
+```
+This can also be found in [RFC 9562](https://datatracker.ietf.org/doc/html/rfc9562#name-namespace-id-usage-and-allo). I would reference the more up-to-date 9562 since it also points to `RFC 1738` in its table.
+
+*--- kartben (2026-02-24 09:51:04+00:00)
+done - thanks! That's actually the same RFC referenced earlier in the intro of the page so yeah, makes sense :)

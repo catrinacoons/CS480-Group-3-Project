@@ -1,0 +1,570 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/85036
+TITLE: drivers: crypto: Add initial support for rpi_pico sha256 accelerator
+
+*--- opening post by soburi (2025-02-03 01:49:02+00:00)
+Add basic support for RaspberryPi Pico's SHA256 hardware accelerator.
+
+*--- soburi (2025-02-14 22:22:08+00:00)
+@ceolin @valeriosetti @ThreeEights 
+
+Could you take a look if you have a bit of a while?
+
+*--- valeriosetti (2025-02-17 15:05:45+00:00)
+I was wondering if here we could use `ROUND_UP()` instead of this (and similarly on line 99). Your solution seems to be more performant since it uses bit-masks, whereas the one in `zephyr/include/zephyr/sys/util.h` might rely on compiler to optimize that computation. OTOH it would be more readable. Wdyt?
+
+*--- ThreeEights (2025-02-17 16:40:23+00:00)
+Sorting - good idea!
+
+*--- soburi (2025-03-08 02:01:15+00:00)
+Thank you for your good pointing out.
+I got enough optimized code with ROUND_UP().
+I applied your suggestion.
+
+*--- valeriosetti (2025-03-10 11:24:12+00:00)
+```suggestion
+	/* Has to be a multiple of 64 bytes */
+	uint64_t size = ROUND_UP(state->total_data_size, SHA256_PADDING_DATA_BYTES);
+```
+
+I also have a question: the comment says that `size` must be multiple of 64 bytes, but `SHA256_PADDING_DATA_BYTES` is 9. Shouldn't we use `SHA256_BLOCK_SIZE_BYTES` instead here?
+
+*--- valeriosetti (2025-03-10 11:29:21+00:00)
+Here we always call `add_zero_bytes` passing the difference between 2 `size_t` values. When `SHA256_PADDING_DATA_BYTES > padding_size_bytes` this results in a very large `size_t` which is then cast to `int32_t` inside `add_zero_bytes`. This looks a bit tricky to me; I think that adding something like:
+
+```
+if (padding_size_bytes > SHA256_PADDING_DATA_BYTES) {
+    add_zero_bytes(state, padding_size_bytes - SHA256_PADDING_DATA_BYTES);
+}
+```
+
+would simply the read and also the implementation inside `add_zero_bytes` since you don't need the cast to `int32_t` there. Wdyt?
+
+*--- soburi (2025-03-11 00:16:57+00:00)
+This was a mistake when updating. Thanks for pointing that out.
+
+*--- soburi (2025-03-11 03:47:41+00:00)
+This code was originally from Pico-SDK, and is essentially for correctly counting updates every 4 bytes.
+
+https://github.com/zephyrproject-rtos/zephyr/pull/85036/files#diff-60d26a5d8987cae9b3bad47c682ee0a4fca9df04aa5b5c3da3f53929b132c747R91
+
+Here, a cast is performed so that the value is determined correctly even if it goes beyond 0 and becomes negative.
+
+It is also possible to change the count logic so that it does not go beyond 0, like this: 
+
+```
+data_size_bytes -= MIN(4, data_size_bytes);
+```
+
+But in this case, the original process seems to be a more smart decision.
+
+*--- valeriosetti (2025-03-11 14:42:35+00:00)
+I'm not against the cast here, I'm against calling `add_zero_bytes` in any case no matter what value `padding_size_bytes` has.
+Let me propose an example in order to clarify what I have in mind:
+
+- let's say that we have a case where `padding_size_bytes < SHA256_PADDING_DATA_BYTES` so that `(padding_size_bytes - SHA256_PADDING_DATA_BYTES) < 0`
+- in this case `write_padding` would call `add_zero_bytes` with `(int32_t) data_size_bytes < 0`
+- once in `add_zero_bytes` the `while` loop would be completely skipped.
+
+If instead we add:
+```
+if (padding_size_bytes > SHA256_PADDING_DATA_BYTES) {
+    add_zero_bytes(state, padding_size_bytes - SHA256_PADDING_DATA_BYTES);
+}
+```
+in `write_padding` as I proposed this problem would have been solved because `write_padding` would not have called `add_zero_bytes` at all.
+
+*--- soburi (2025-03-14 13:16:18+00:00)
+I've adapted your suggestions a little bit.
+
+*--- valeriosetti (2025-03-14 15:52:26+00:00)
+It's OK to me now. Thanks!!!
+
+*--- soburi (2025-03-17 20:04:28+00:00)
+@ceolin @ThreeEights @ajf58 
+
+Could you take a look at it?
+
+*--- ajf58 (2025-03-17 21:23:15+00:00)
+nit: I'd prefer it if the sorting is one commit, and the addition is a separate commit. The end result is the same, but it's easier to to see the two orthogonal things going on.
+
+*--- ajf58 (2025-03-17 21:53:37+00:00)
+Original code is a https://github.com/raspberrypi/pico-sdk/blob/2.1.0/src/rp2_common/pico_sha256/sha256.c , it's 3-Clause BSD (`BSD-3-Clause`).
+
+I feel like this file has lifted-and-shifted too much for someone to ignore (many lines of code are the same, just formatted to meet the Zephyr Project's coding style).
+
+I'd be happy if this file had a BSD-3-Clause on it. Zephyr must be compatible with this, we link against BSD-3-Clause all over the place. It's not easy t osee examples of that, however.
+
+Alternatively, we could modify the version of the source code in the `hal_rpi_pico`. This is something I prefer to avoid, but that feels better at ensuring the software licence is upheld.
+
+*--- soburi (2025-03-17 23:02:33+00:00)
+The codes derived from pico-sdk were separated into `crypto_rpi_pico_sha256.h`, and the license changed to BSD-3.
+
+*--- soburi (2025-03-17 23:03:16+00:00)
+> nit: I'd prefer it if the sorting is one commit, and the addition is a separate commit. The end result is the same, but it's easier to to see the two orthogonal things going on.
+
+Addressed.
+
+*--- soburi (2025-03-19 03:56:28+00:00)
+This PR contains BSD-3 derived code. (drivers/crypto/crypto_rpi_pico_sha256.h)
+I added the label because I wanted to get TSC approval.
+
+*--- ajf58 (2025-03-19 19:44:30+00:00)
+> This PR contains BSD-3 derived code. (drivers/crypto/crypto_rpi_pico_sha256.h) I added the label because I wanted to get TSC approval.
+
+I think, based on the conversation at https://github.com/zephyrproject-rtos/zephyr/pull/81183#discussion_r2002693559 that this won't be a viable solution.
+
+My suggestion is
+1.  Change (extend) https://github.com/zephyrproject-rtos/hal_rpi_pico/blob/zephyr/src/rp2_common/pico_sha256/sha256.c in a PR. This already is BSD-3-Clause, nothing would change there.
+2. Update the west manifest for Zephyr to bring in the new HAL.
+3. Make use of the new code from here.
+
+I know that this may feel contradictory to an earlier stance I have of "don't change the Pico SDK unless you have to." I feel like this is one of those times.
+
+That said, I also hope we can do this in a way that makes wiring up the DMA engine to the SHA256 accelerator easy: it's a prime example of where one wants to offload this whilst the CPUs do something more useful.
+
+*--- soburi (2025-03-20 01:48:06+00:00)
+@ajf58 
+
+> That said, I also hope we can do this in a way that makes wiring up the DMA engine to the SHA256 accelerator easy: it's a prime example of where one wants to offload this whilst the CPUs do something more useful.
+
+DMA processing must be based on Zephyr's API, and I have determined that this part cannot be used. This is the main reason why I forked this file.
+
+*--- ajf58 (2025-03-22 08:54:40+00:00)
+> @ajf58
+> 
+> > That said, I also hope we can do this in a way that makes wiring up the DMA engine to the SHA256 accelerator easy: it's a prime example of where one wants to offload this whilst the CPUs do something more useful.
+> 
+> DMA processing must be based on Zephyr's API, and I have determined that this part cannot be used. This is the main reason why I forked this file.
+
+Yes, I understand what problem you found. The approach you took was to breach the terms of the licence, which is not cool. "fork"ing a file is not a thing.
+
+My suggestion is written out above as 3 steps. If you don't understand the steps as written, please ask specific clarifying questions.
+
+*--- soburi (2025-03-22 11:15:03+00:00)
+@ajf58 
+
+> Yes, I understand what problem you found. The approach you took was to breach the terms of the licence, which is not cool. "fork"ing a file is not a thing.
+
+I've never heard of the BSD 3 clause license code can't forking.
+
+*--- ajf58 (2025-03-22 12:51:33+00:00)
+> @ajf58
+> 
+> > Yes, I understand what problem you found. The approach you took was to breach the terms of the licence, which is not cool. "fork"ing a file is not a thing.
+> 
+> I've never heard of the BSD 3 clause license code can't forking.
+
+Your original approach was to:
+1. Remove the original copyright notice. [Copyright (c) 2024 Raspberry Pi (Trading) Ltd.](https://github.com/raspberrypi/pico-sdk/blob/2.1.0/src/rp2_common/pico_sha256/sha256.c#L2)
+2. Add your own name as the Copyright holder
+3. Reissue the code under the Apache 2.0 license 
+
+This, to me, is a concerning behaviour. It should not require other people to check/monitor/flag that you are breaching other licence terms, you should do this yourself.
+
+After I flagged this you have subsequently corrected this by putting back the original copyright notice, and license. From a technical perspective I don't like how this has been achieved, but that is not the concern I am raising here.
+
+*--- soburi (2025-03-22 15:27:11+00:00)
+@ajf58 
+
+> Your original approach was to:
+> 
+>     1. Remove the original copyright notice. [Copyright (c) 2024 Raspberry Pi (Trading) Ltd.](https://github.com/raspberrypi/pico-sdk/blob/2.1.0/src/rp2_common/pico_sha256/sha256.c#L2)
+> 
+>     2. Add your own name as the Copyright holder
+> 
+>     3. Reissue the code under the Apache 2.0 license
+> 
+> 
+> This, to me, is a concerning behaviour. It should not require other people to check/monitor/flag that you are breaching other licence terms, you should do this yourself.
+> 
+> After I flagged this you have subsequently corrected this by putting back the original copyright notice, and license. From a technical perspective I don't like how this has been achieved, but that is not the concern I am raising here.
+
+This is exactly as you pointed out.
+I had mentioned that I was using it, but I had not properly addressed the license.
+Thank you for pointing that out.
+
+*--- d3zd3z (2025-05-20 22:38:23+00:00)
+To be clear here. Changing an existing license declaration on a file can _only_ be done by permission of all of the contributing authors. Changing license declarations is _much_ worse than bringing in the files with the licenses on them (and figuring out what needs to happen to use the code under the license the authors released the code under).
+
+The license lines in the file are an indication, from the author, of the terms that they allow their code to be used under them. Removing those declarations is in bad-faith, and is something we have to be very careful _never_ happens to code in this project.
+
+*--- nashif (2025-05-21 13:50:48+00:00)
+This was discussed in the TSC and it was agreed that we will not accept non original, Apache licensed code for this type of driver. Please use another method of integration.
+
+*--- soburi (2025-05-21 15:06:21+00:00)
+Thank you for your comment.
+
+@d3zd3z @nashif 
+
+I am aware that this is not a good situation, and I am very sorry.
+I also thank @ajf58  for pointing this out to me.
+
+I think there is another way to deal with this, so I will carefully reconsider it.
+
+*--- ajf58 (2025-05-22 20:42:07+00:00)
+> I think there is another way to deal with this, so I will carefully reconsider it.
+
+Agreed. There have been a few PRs recently where we need them to stay Apache 2.0. I think the best way to do this is in the HAL, which is where several of them originate from. I don't think there's much of a convention across the different vendor HALs here, but I'll take a look.
+
+*--- soburi (2025-06-15 23:25:22+00:00)
+Add a public interface to the hal side and change the policy to use it.
+
+*--- valeriosetti (2025-06-17 14:49:12+00:00)
+Isn't `assert()` a bit too strong here? I suggest adding a mutex in `struct rpi_pico_sha256_data` and use it here:
+- lock the mutex
+- check `data->state.locked` and return if already set (releasing the mutex, of course before returning)
+- set `data->state.locked` (not on line 79 as it is done now)
+- unlock the mutex
+- remember to unset `data->state.locked` in `rpi_pico_sha256_hash_session_free()`
+
+In this way you can have 2 threads willing to use the hash driver at the same time and then the one that comes later will just wait for the resource to be free.
+
+*--- soburi (2025-06-27 05:26:24+00:00)
+The response has become slower.
+
+It's true that assert is quite powerful, so I have modified it.
+Your suggestion was to use a mutex, but the exclusive section completes in an extremely short time, so I implemented it using a spinlock.
+
+*--- soburi (2025-07-22 04:51:42+00:00)
+@valeriosetti @ajf58 
+
+Now that the 4.2 release is finished, can we resume?
+
+*--- dsseng (2025-07-31 17:48:31+00:00)
+Should it be enabled by default? Maybe this should be enabled only when wanted by an application, as this is not a commonly used feature, while it required extra files to be built
+
+*--- soburi (2025-08-02 06:49:07+00:00)
+That's true. I moved it to the test overlay.
+
+*--- valeriosetti (2025-08-04 12:12:44+00:00)
+Is it OK to clear the `state` even if `finish == false` (multi step hash computation)?
+
+*--- soburi (2025-08-05 09:57:01+00:00)
+Nice catch.
+It seems like we should also consider modifying the tests.
+I'll look into it a bit.
+
+*--- valeriosetti (2025-08-05 10:04:31+00:00)
+> It seems like we should also consider modifying the tests.
+
+While doing [another review](https://github.com/zephyrproject-rtos/zephyr/pull/93923/files#diff-8c410cc52e11be3967d86cc390ba80936868f85d9997c1c1288aebb71b0dc16aR60) yesterday I realized that perhaps not all drivers support multipart hash computation. So in the end what you did might be already OK for the time being (you can extend that later if you prefer); please only add a check like the one done in that PR and I think it should be fine.
+
+*--- soburi (2025-09-21 08:55:09+00:00)
+Since there is an example of an implementation that is not supported, I will submit it using that implementation method for now.
+I will support it soon.
+
+*--- dsseng (2025-09-21 15:09:59+00:00)
+Despite all other entries being transitioned to uniform space indentation, this remains tabs
+
+*--- dsseng (2025-09-21 15:10:23+00:00)
+Could this also be converted to spaces for alignment?
+
+*--- dsseng (2025-09-21 15:12:14+00:00)
+```suggestion
+	bool "Raspberry Pi Pico SHA256 Accelerator driver"
+```
+
+or maybe even like this, as Pico is a board and the driver is for SoC. It's opinionated though, feel free to reject:
+
+```suggestion
+	bool "Raspberry Pi microcontrollers SHA256 Accelerator driver"
+```
+
+*--- dsseng (2025-09-21 15:12:38+00:00)
+```suggestion
+	  Raspberry Pi Pico SHA256 accelarator driver.
+```
+
+*--- dsseng (2025-09-21 15:15:42+00:00)
+personal opinion: readability would be better without parentheses:
+
+```suggestion
+	return CAP_SEPARATE_IO_BUFS | CAP_SYNC_OPS;
+```
+
+*--- soburi (2025-10-14 22:32:40+00:00)
+Fixed.
+
+*--- soburi (2025-10-14 22:32:45+00:00)
+Fixed.
+
+*--- soburi (2025-10-14 22:32:52+00:00)
+Fixed.
+
+*--- soburi (2025-10-14 22:32:58+00:00)
+Fixed.
+
+*--- soburi (2025-10-14 22:33:03+00:00)
+Fixed.
+
+*--- soburi (2025-10-14 23:24:38+00:00)
+@valeriosetti @dsseng @ajf58 
+
+Could you revisit? I would like to include this in v4.3.0 if we can meet the deadline.
+
+*--- dsseng (2025-10-15 06:10:42+00:00)
+Are there limits on the input size by the HAL? If so, please test for them to return EINVAL
+
+*--- dsseng (2025-10-15 06:14:50+00:00)
+Does this also work on Hazard3 as it's merged now? Cannot test right now, sorry, but interested whether or not bootrom call works fine, as those are somewhat interesting on RISC-V mode due to emulation being involved and may require application/RTOS to allocate a stack for BootROM emulator in some cases
+
+*--- ajf58 (2025-10-16 20:19:50+00:00)
+```suggestion
+description: Raspberry Pi Pico SHA256 accelerator
+```
+
+*--- ajf58 (2025-10-16 20:27:59+00:00)
+Nit: I'd prefer this in alphabetical order (MBED, raspberrypi, renesas, st). GitHub doesn't support multiline suggestions unfortunately.
+
+*--- kartben (2025-10-16 20:49:24+00:00)
+"SHA-256", even :)
+
+```suggestion
+description: Raspberry Pi Pico SHA-256 accelerator
+```
+
+*--- soburi (2025-10-23 23:52:26+00:00)
+Fixed.
+
+*--- soburi (2025-10-23 23:52:29+00:00)
+~Fixed.~
+
+ESP32 was added prior to this and is no longer alphabetical, so it is at the end.
+
+*--- soburi (2025-10-24 00:00:24+00:00)
+There are no particular restrictions, so it's not a problem.
+
+*--- soburi (2025-10-24 00:39:49+00:00)
+@ajf58 @valeriosetti 
+
+Please confirm the change request again.
+
+*--- soburi (2025-10-24 00:52:17+00:00)
+I haven't checked it yet, but if necessary I'll address it with an additional PR.
+
+*--- soburi (2025-10-24 21:44:26+00:00)
+@valeriosetti 
+I'm sorry again. Thank you.
+
+*--- ceolin (2025-10-24 22:02:45+00:00)
+you have a TOCTOU here and ended up releasing it more than once. I don't know how much of this is a problem because the important lock here seems to be `BOOTROM_LOCK_SHA_256`. Btw can't you simply inquire whether or not this lock is LOCKED instead of having the spin lock + `state.locked` ?
+
+*--- ceolin (2025-10-24 22:03:51+00:00)
+Same thing regarding TOCTOU commented in `crypto_rpi_pico_sha256_hash_session_free`
+
+*--- ceolin (2025-10-24 22:19:30+00:00)
+I am a little bit puzzled with this `state.lock` since the lock to the hw is done by the HAL. What would make sense to me here is something to tell when you are in the middle of an operation and you check here to not release the lock
+
+*--- ceolin (2025-10-24 22:21:35+00:00)
+and here you could possibly just `bootrom_try_acquire_lock(BOOTROM_LOCK_SHA_256);` and return `EBUSY` ...
+
+*--- soburi (2025-11-15 23:17:30+00:00)
+This has been corrected in conjunction with the above fix.
+
+> and here you could possibly just bootrom_try_acquire_lock(BOOTROM_LOCK_SHA_256); and return EBUSY ...
+
+Applied. Thank you.
+
+*--- Copilot (2025-12-03 14:47:29+00:00)
+Extra whitespace after CONFIG_CRYPTO_RPI_PICO_SHA256. The formatting should be consistent with other lines (single space between the config name and the source file). This line is also within a `zephyr-keep-sorted` block, so the extra spaces may interfere with automated sorting.
+```suggestion
+zephyr_library_sources_ifdef(CONFIG_CRYPTO_RPI_PICO_SHA256 crypto_rpi_pico_sha256.c)
+```
+
+*--- Copilot (2025-12-03 14:47:29+00:00)
+The `hash_handler` function accesses and modifies shared device state (`data->state`) without holding the mutex, creating a race condition. While `begin_session` acquires the bootrom lock and sets `state.locked`, the mutex is released before the actual hash operation occurs. If multiple contexts call `hash_compute()` concurrently, they could corrupt the shared state fields (cache_used, cache.word, total_data_size) and interfere with each other's hash computations.
+
+The mutex should be held for the entire duration of the hash operation, not just during session begin/free. Consider acquiring the mutex at the start of this function and releasing it before returning, or redesigning the locking strategy to protect the critical section properly.
+
+*--- soburi (2025-12-03 15:10:26+00:00)
+@copilot
+Fixed. please recheck.
+
+*--- Copilot (2025-12-03 21:02:07+00:00)
+Hardware initialization (`sha256_err_not_ready_clear()`, `sha256_set_bswap()`, `sha256_start()`) is performed on every hash operation call. This should be moved to `hash_begin_session` to initialize hardware once per session, not on every hash computation. This also prevents proper multipart hashing support in the future.
+
+*--- Copilot (2025-12-03 21:02:08+00:00)
+[nitpick] The explicit cast `(uint32_t)` before passing to `BSWAP_32` is redundant since `BSWAP_32` already operates on and returns `uint32_t`. The cast can be removed for cleaner code: `BSWAP_32(sha256_hw->sum[i])`
+```suggestion
+		((uint32_t *)pkt->out_buf)[i] = BSWAP_32(sha256_hw->sum[i]);
+```
+
+*--- Copilot (2025-12-03 21:02:08+00:00)
+The binding should specify that the `reg` property is required, as the device tree node uses it (at address 0x400f8000). Similar crypto bindings (e.g., espressif,esp32-sha, intel,adsp-sha, ite,it8xxx2-sha) mark this property as required. Add:
+
+```yaml
+properties:
+  reg:
+    required: true
+```
+```suggestion
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+```
+
+*--- Copilot (2025-12-03 21:02:08+00:00)
+State initialization should not be performed in the hash handler. These fields (`cache_used`, `cache.word`, `total_data_size`) should be initialized in `hash_begin_session` when the session starts, not at every hash operation. The current placement means multipart hashing can never work correctly even if implemented, as these fields would be reset on each call.
+```suggestion
+	/* State initialization moved to session start (hash_begin_session) */
+```
+
+*--- Copilot (2025-12-03 21:02:09+00:00)
+The loop variable `i` should be declared as `uint32_t` instead of `uint` for consistency with Zephyr coding standards and to avoid potential portability issues. The `uint` type is not a standard C type.
+```suggestion
+	for (uint32_t i = 0; i < 8; i++) {
+```
+
+*--- ajf58 (2025-12-06 14:50:37+00:00)
+I don't think this should be a blocker to this PR. If you haven't tested it, that's fine, and this comment in the PR is sufficient to document that. If you _have_ tested it and it doesn't work, that's fine too.
+
+*--- Copilot (2025-12-13 21:03:55+00:00)
+The error message indicates that multipart hashing is not supported, but the function proceeds to perform hashing operations before this check. The check for 'finish' should occur before calling 'pico_sha256_update' to avoid processing data that cannot be completed. Consider moving this check earlier in the function, before line 43.
+```suggestion
+	if (!finish) {
+		LOG_ERR("Multipart hashing not supported yet");
+		ret = -ENOTSUP;
+		goto end;
+	}
+
+	pico_sha256_update(&data->state, pkt->in_buf, pkt->in_len);
+```
+
+*--- Copilot (2025-12-13 21:03:56+00:00)
+Missing include for hardware SHA256 definitions. The driver uses hardware-level functions like sha256_wait_valid_blocking, sha256_hw, sha256_err_not_ready_clear, sha256_set_bswap, and sha256_start which are typically defined in hardware/sha256.h from the pico SDK. Add the include after the pico/sha256.h include.
+```suggestion
+#include <pico/sha256.h>
+#include <hardware/sha256.h>
+```
+
+*--- Copilot (2025-12-13 21:03:56+00:00)
+The error message "Multipart hashing not supported yet" is misleading because it's logged even when multipart hashing is legitimately requested by the caller. Since the driver doesn't support multipart hashing and this is a limitation, consider using LOG_DBG instead of LOG_ERR, or rephrase the message to be more informative, such as "Multipart hashing not supported".
+```suggestion
+		LOG_DBG("Multipart hashing not supported");
+```
+
+*--- Copilot (2025-12-13 21:03:56+00:00)
+The cache.word field is being set to 0, but cache is a union that may have other fields. Consider using memset to clear the entire cache structure to ensure all union members are properly initialized, e.g., memset(&data->state.cache, 0, sizeof(data->state.cache)).
+
+*--- Copilot (2025-12-13 21:50:43+00:00)
+The output buffer size is not validated before writing 32 bytes (8 uint32_t values) to it. This could lead to a buffer overflow if pkt->out_buf_max is less than 32 bytes. Add a check to validate that pkt->out_buf_max is at least 32 bytes before writing the hash result.
+```suggestion
+
+	if (pkt->out_buf_max < 32) {
+		LOG_ERR("Output buffer too small: %u bytes (need at least 32)", pkt->out_buf_max);
+		ret = -EINVAL;
+		goto end;
+	}
+```
+
+*--- Copilot (2025-12-13 21:50:44+00:00)
+Multipart hashing is logged with LOG_DBG but returns -ENOTSUP. Since this is a user-facing error condition that will cause the operation to fail, it should be logged at LOG_ERR level instead of LOG_DBG to make debugging easier for users.
+```suggestion
+		LOG_ERR("Multipart hashing not supported");
+```
+
+*--- Copilot (2025-12-13 21:50:44+00:00)
+Direct casting of pkt->out_buf to uint32_t* and accessing it as an array assumes the buffer is 4-byte aligned. While the ARM Cortex-M33 supports unaligned access, it's better practice to use sys_put_be32 or memcpy to avoid potential alignment issues and make the code more portable. Consider using sys_put_be32 or sys_put_le32 depending on the expected output byte order.
+```suggestion
+		sys_put_be32(BSWAP_32(sha256_hw->sum[i]), (uint8_t *)pkt->out_buf + i * 4);
+```
+
+*--- Copilot (2025-12-13 21:50:44+00:00)
+The ctx->device field must be set in the hash_begin_session function. The hash_handler function accesses ctx->device->data, but ctx->device is never initialized. Add the line `ctx->device = dev;` in the hash_begin_session function before returning success.
+```suggestion
+
+	ctx->device = (struct device *)dev;
+```
+
+*--- Copilot (2025-12-13 21:50:44+00:00)
+The variable `sha256_hw` is used but never included or declared. This will cause a compilation error. You need to include the appropriate header file that defines `sha256_hw`, likely `hardware/structs/sha256.h` from the pico-sdk.
+
+*--- soburi (2025-12-13 22:00:09+00:00)
+It's redundant because you're including it from a file that's already been included.
+
+*--- soburi (2025-12-13 22:20:09+00:00)
+no out_buf_max field in hash_pkt structure.
+
+*--- Copilot (2025-12-13 22:35:25+00:00)
+Inconsistent spelling of "Raspberry Pi". The proper spelling is "Raspberry Pi" (two words), not "RaspberryPi" (one word). This should be corrected to match the official branding and be consistent with other references in the codebase.
+```suggestion
+description: Raspberry Pi Pico SHA-256 accelerator
+```
+
+*--- Copilot (2025-12-13 22:35:25+00:00)
+The hardware lock is acquired in `hash_begin_session` but there's a potential resource leak. If a session is started but `hash_session_free` is never called (e.g., due to an error in the calling code), the bootrom lock will remain held indefinitely. Consider implementing a timeout or cleanup mechanism to handle abandoned sessions.
+
+*--- Copilot (2025-12-13 22:35:26+00:00)
+Missing documentation for the driver structure and key functions. The driver implementation lacks function-level documentation explaining the purpose, parameters, return values, and any important constraints or assumptions. This is particularly important for understanding the session lifecycle, mutex usage patterns, and bootrom lock interaction. Consider adding docstrings for public functions and the data structure.
+```suggestion
+
+/**
+ * @brief Driver context for Raspberry Pi Pico SHA256 hardware.
+ *
+ * This structure holds the state for a SHA256 hashing session,
+ * including the hardware state and a mutex for synchronizing access.
+ *
+ * Members:
+ *   state - Hardware SHA256 state, must be locked before use.
+ *   mutex - Mutex to protect access to the state and hardware.
+ *
+ * Constraints:
+ *   - The mutex must be held when accessing or modifying the state.
+ *   - The state.locked field should be true when the hardware lock is held.
+ */
+struct crypto_rpi_pico_sha256_data {
+	pico_sha256_state_t state;
+	struct k_mutex mutex;
+};
+
+/**
+ * @brief Handles a SHA256 hash operation for the Raspberry Pi Pico hardware.
+ *
+ * This function performs a one-shot SHA256 hash operation using the hardware.
+ * Multipart hashing is not supported.
+ *
+ * @param ctx    Pointer to the hash context (must be initialized).
+ * @param pkt    Pointer to the hash packet containing input and output buffers.
+ * @param finish Must be true; multipart hashing is not supported.
+ *
+ * @return 0 on success, negative error code on failure.
+ *
+ * Constraints:
+ *   - The function locks the driver's mutex for the duration of the operation.
+ *   - The hardware state must be locked (state.locked == true) before calling.
+ *   - Only one hash operation may be in progress at a time.
+ */
+```
+
+*--- Copilot (2025-12-13 22:35:26+00:00)
+The state initialization at lines 102-104 directly accesses internal fields of `pico_sha256_state_t` structure. This bypasses any initialization that might be provided by the pico-sdk library. Consider using an official initialization function from the pico-sdk if available (e.g., `pico_sha256_init` or similar) to ensure proper state initialization and maintain compatibility with future SDK versions.
+```suggestion
+	pico_sha256_init(&data->state);
+```
+
+*--- soburi (2025-12-13 22:40:06+00:00)
+No such implementations.
+
+*--- soburi (2025-12-13 22:40:34+00:00)
+redundant
+
+*--- soburi (2025-12-13 22:41:51+00:00)
+Excessive.
+
+*--- Copilot (2025-12-13 23:40:54+00:00)
+The format specifier for the flags should use "0x%x" instead of "%x" to make it clear that the value is hexadecimal. This improves readability when debugging.
+```suggestion
+		LOG_ERR("Unsupported flag 0x%x", ctx->flags);
+```
+
+*--- ajf58 (2025-12-27 16:57:34+00:00)
+nit (not a blocker): I'd prefer files like this are sorted alphabetically rather than appending each thing as they're added, but not something for this PR.
+
+*--- ajf58 (2025-12-27 17:00:29+00:00)
+nit: (not a blocker): I imagine this should just work with the Hazard3 cores as well, since there's nothing specific to the Cortex M33s in your driver.
+```suggestion
+      - rpi_pico2/rp2350a/hazard3
+      - rpi_pico2/rp2350a/m33
+```

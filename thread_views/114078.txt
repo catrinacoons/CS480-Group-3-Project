@@ -1,0 +1,112 @@
+URL:   https://github.com/zephyrproject-rtos/zephyr/pull/114078
+TITLE: scripts: ci: check_compliance: add option to run checks in parallel
+
+*--- opening post by kartben (2026-07-20 13:25:46+00:00)
+The compliance checks currently run strictly one after the other. Most of the total runtime is spent in the Kconfig-based checks, each of which parses a full Kconfig tree on its own.
+
+Add a -p/--parallel [N] option that runs the checks in a pool of N worker processes (one per CPU by default). Each check runs in its own process, which also isolates the environment variable mutations and module imports the Kconfig checks perform. The Kconfig-based checks are scheduled first so the slowest checks are not left running alone at the end.
+
+Enable the new option in the compliance workflow, where the runtime of the Kconfig checks now roughly amounts to the single slowest check instead of the sum of all of them.
+
+Full compliance check runs **2.5-3x faster** on my Mac (12 parallel processes) ; I think the performance improvement is less noticeable on Linux. **EDIT:**  just tested, on the same commit range, **Linux is roughly 5x faster** :) (16 parallel workers on this machine)
+
+*--- aescolar (2026-07-20 14:15:04+00:00)
+If you are changing this, could you also fix the Cltr+C/sigkill handling? (so it actually stops the whole thing and not just the currently running step)
+
+*--- kartben (2026-07-20 14:42:06+00:00)
+> If you are changing this, could you also fix the Cltr+C/sigkill handling? (so it actually stops the whole thing and not just the currently running step)
+
+Oh yeah, excellent idea!
+
+*--- sylvioalves (2026-07-21 15:20:14+00:00)
+`multiprocessing.Pool` hangs forever if a worker is OOM-killed mid-task. Could use `ProcessPoolExecutor` instead to catch this and avoid CI timeout.
+
+*--- sylvioalves (2026-07-21 15:23:25+00:00)
+any chances of duplicated name to happen? If yes, one will be dropped.
+
+*--- Copilot (2026-07-24 09:44:05+00:00)
+The PR description says each check runs in its own process to isolate environment-variable mutations and imports, but `multiprocessing.Pool` workers are reused by default, so a single worker process may execute multiple checks. That can still allow cross-check leakage (notably from Kconfig checks that mutate `os.environ`), and makes check behavior dependent on how tasks get scheduled to workers.
+
+*--- kartben (2026-07-24 10:18:38+00:00)
+i think there's other places that would not like multiple test cases to be named the same. We already make the assumption that there is no reason folks who make this programming mistake without noticing :)
+
+*--- ljd42 (2026-07-26 21:47:09+00:00)
+Hi @kartben ,
+
+I could achieve a nice speed-up here too with your PR...
+
+I started the review. At first glance, the way the signals are handled looks suspicious. I'm not sure you will get a clean "clean-up" when Ctrl-C is pressed, in particular on Windows (like, it can hang).
+
+Also, the Pool object has different start methods depending on the OS - from memory Mac/Windows uses "spawn", and "fork" (or "forkserver" since 3.14) for Linux. This has an impact how resources are tracked and cleaned-up.
+
+I need to understand more deeply the code and perform some investigations on Linux/Windows before coming back to you.
+
+*--- ljd42 (2026-07-27 21:21:54+00:00)
+should be the "first line" executed in _init_worker, shouldn't be?
+
+*--- ljd42 (2026-07-27 21:24:17+00:00)
+Is it really needed? From my understanding, you could pass directly the testcase to execute instead of:
+- build a mapping {tc.name -> tc} 
+- passing to `imap_unordered` the testcase name
+- in the worker, recover the testcase from the testcase name 
+
+That sounds inefficient.. But I might be missing some "bigger picture"...
+
+*--- ljd42 (2026-07-27 21:26:06+00:00)
+suggest to `return (testcase, {...dictionary...})`. 
+That way you can save your reverse mapping in `_run_tests_parallel`
+
+*--- ljd42 (2026-07-27 21:26:24+00:00)
+not needed?
+
+*--- ljd42 (2026-07-27 21:27:01+00:00)
+Not completely sure about this feedback...
+
+*--- ljd42 (2026-07-27 21:29:27+00:00)
+instead of passing [tc.name for tc in testcases] to `imap_unordered`, can't you just pass `testscases` instead?
+
+Assuming you applied the changes suggested in `_run_test_in_worker`, the for loop then becomes:
+```python
+for testcase, res in pool.imap_unordered(_run_test_in_worker, testcases):
+    ...
+```
+
+*--- ljd42 (2026-07-27 21:29:55+00:00)
+not need anymore if previous suggestion works
+
+*--- ljd42 (2026-07-27 21:33:43+00:00)
+suggest passing `testcase` object directly, instead of `name` (the testcase's name)
+
+*--- ljd42 (2026-07-27 21:36:40+00:00)
+I believed, this situation can be handled properly without resorting the `ProcessPoolExecutor`. But I need to check.
+
+*--- ljd42 (2026-07-27 21:40:10+00:00)
+TBD if we need to use 'spawn' method to increase portability across the Linux/Mac/Windows. This will come with a penalty performance on Linux when starting the pool, but will save us troubles if threads come into the mix.
+
+*--- ljd42 (2026-07-31 21:11:58+00:00)
+Hi @kartben,
+
+I think, I know why you are using this mapping and pass the `tc.name` to the worker instead the testcase object directly. We are crossing the process memory boundary, therefore the object needs to be serialized/de-serialized (pickle). As such, string is easier (and pickable!).
+
+If this understanding is correct, most of my previous comments can then be ignored (I'll mark them as resolved). 
+
+Thanks!
+
+*--- kartben (2026-07-31 21:14:16+00:00)
+Sorry, meant to comment earlier. Yes, exactly :)
+
+*--- ljd42 (2026-08-01 09:31:03+00:00)
+@sylvioalves : I checked this particular point, you are right!
+
+*--- nashif (2026-08-02 12:28:09+00:00)
+> Full compliance check runs **2.5-3x faster** on my Mac (12 parallel processes) ; I think the performance improvement is less noticeable on Linux. **EDIT:** just tested, on the same commit range, **Linux is roughly 5x faster** :) (16 parallel workers on this machine)
+
+was wondering why are we hiding this behind an option, just make it the default....
+
+*--- kartben (2026-08-02 16:06:57+00:00)
+> was wondering why are we hiding this behind an option, just make it the default....
+
+yeah will probably follow up with a change doing that, I was just concerned that defaulting to "run in parallel on every core available" might get us in a situation where this will OOM for folks since typically the Kconfig checks are very RAM hungry
+
+*--- ljd42 (2026-08-02 17:25:44+00:00)
+And if OOM kills one process in the pool, then the `compliance.py` script will hang forever. Might be possibly detected elsewhere though (like timeout on github action for instance)
