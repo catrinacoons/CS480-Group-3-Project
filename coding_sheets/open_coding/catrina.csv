@@ -1,26 +1,26 @@
 thread_number,primary_category,secondary_category,notes,not_genai_flag
-79642,,,,
-87595,,,,
-103255,,,,
-105420,,,,
-105778,,,,
-110787,,,,
-111235,,,,
-111295,,,,
-111719,,,,
-111986,,,,
-112837,,,,
-113138,,,,
-113239,,,,
-113261,,,,
-114006,,,,
-114096,,,,
-114433,,,,
-114736,,,,
-115689,,,,
-115952,,,,
-117149,,,,
-117914,,,,
-118476,,,,
-118653,,,,
-119073,,,,
+79642,No visible response (define: no human comment refers to or engages with the ai output),,copilot review,genAI
+87595,Engaged without attribution (define: a human replies to the AI's point without naming the AI),,copilot review,genAI
+103255,No visible response,,copilot review,genAI
+105420,Acknowledged and applied (define: a human says they accepted or addressed the ai's suggestions),decline or rebutted (define: human rejects the suggestion and gives reason),copilot review,genAI
+105778,"No response observable (define: the ai output is the last item before the window wnded, so silence means nothing yet)","disclosure and scrutiny (define: the author discloses ai use, and others react (testing, questions, policy))",assisted by tag disclosed by author,genAI
+110787,Disclosure and scrutiny,,assisted by tag disclosed by author,genAI
+111235,No visible response,,"ai disclosed in comit message, but not pr thread",genAI
+111295,No visible response,,copilot review,genAI
+111719,No visible response,no response observed,"copilot review, last addition to the thread",genAI
+111986,no visible response,,"ai disclosed in comit message, but not pr thread",genAI
+112837,acknowledged and applied,decline or rebutted ,"copilot reviewed, majority suggestions are accepted by author",genAI
+113138,acknowledged and applied,,copilot reviewed,genAI
+113239,no visible response,,copilot review,genAI
+113261,no visible response,,"ai disclosed in comit message, but not pr thread",genAI
+114006,disclosure and scrutiny,,"after prompting from reviwer, ai (claude code fable) is disclosed as used to find issue pr addresses",genAI
+114096,disclosure and scrutiny,,"assisted by tag disclosed by author, mentioned that theyleaned heavily on ai (claude)",genAI
+114433,acknowledged and applied,decline or rebutted,"copilot review, majority suggestions accepted, some rebutted with explanation",genAI
+114736,no visible response,,copilot review,genAI
+115689,no visible response,,"ai disclosed in comit message, but not pr thread",genAI
+115952,no visible response,,"ai disclosed in comit message, but not pr thread",genAI
+117149,no visible response,,"ai disclosed in comit message, but not pr thread",genAI
+117914,no visible response,,"ai disclosed in comit message, but not pr thread",genAI
+118476,decline or rebutted,,copilot review,genAI
+118653,disclosure and scrutiny,,assisted by tag disclosed by author,genAI
+119073,acknowledged and applied,,copilot review,genAI
