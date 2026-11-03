@@ -1,26 +1,26 @@
 thread_number,primary_category,secondary_category,notes,not_genai_flag
-79642,,,,
-87595,,,,
-103255,,,,
-105420,,,,
-105778,,,,
-110787,,,,
-111235,,,,
-111295,,,,
-111719,,,,
-111986,,,,
-112837,,,,
-113138,,,,
-113239,,,,
-113261,,,,
-114006,,,,
-114096,,,,
-114433,,,,
-114736,,,,
-115689,,,,
-115952,,,,
-117149,,,,
-117914,,,,
-118476,,,,
-118653,,,,
-119073,,,,
+79642,ignored,unclear if applied,Copilot left 11 recommendations but none were responded to so it's unclear if any were applied - it was approved without comment on them,no
+87595,ignored,unclear if applied and rejected,11 out of the 12 recommendations that Copilot were not answered in any regard - one was rejected because the case could not have happened,no
+103255,ignored,unclear if applied,Copilot only sent one message regarding a recommenation but it was not responses to and Copilot itself admitted that the current code was acceptable - all other discussion was regarding other issues,no
+105420,accepted,implemented and rejected,Copilot gave three recommendations - all of which were addressed with two explicitly accepted and the last one was rejected due to prior completion (already implemented) - commented all comments were addressed and asked for review,no
+105778,tested,outcome unclear,Contributor disclosed created fixes for a driver and writing a module with Claude-opus-5 BUT was tested on hardware and verified to work before implementation - clarified that their own work would have 'Signed-off-by' - no following response from anyone else,no
+110787,tested,disclosure requested,Author disclosed creating code using Claude Open 4.7 and tested it on 6 boards prior to submission - maintainer asked for the commit message to be updated in accordance to Zephyr AI guidelines - author did - code was corrected after a design review,no
+111235,,,no AI output was found in this conversation - all comments appear to be human - AI may be apparent in other commits,yes
+111295,rejected,requested human review,Copilot gave 1 recommendation which gave contary advise to a reviewer's message regarding suggestions 6 minutes earlier - next day reviewer replied to Copilot stating that its advice was unnecessary as it worked as is - author then asked reviewer to confirm if they understood the reviewer's proposal,no
+111719,ignored,unclear if applied,Copilot gave 6 recommendations - author replied "will do. thanks for the review" after the first message but did not respond to any other messages - it's unclear if that was in response to Copilot's first message or a human message prior to copilot's - also unclear if any changed were applied,no
+111986,,,no AI output was found in this conversation - all comments appear to be human - AI may be apparent in other commits,yes
+112837,accepted,implemented and rejected,Copilot gave 6 recommendations and author replied to them all with 5 marked as: 'added' or 'done' and then 1 marked as: 'ignored' but provides no other information - all else is human conversations regarding other issues,no
+113138,tested,unclear if applied,Copilot gave 4 recommendations and reviewer stated that they thought one of the recommendations was correct and author replied with "Fixed with:" NEW PR# ...but it's unclear what was fixed and if any of the recommendations were implemented,no
+113239,ignored,unclear if applied,Copilot gave 2 recommendations about the release notes and no one responded BUT 4 minutes earlier the maintainer had dropped the CVE listing (it was promised prior but none were listed and 'issues fixed' was empty) ...Copilot still gave the recommendation even though humans made that choice on purpose,no
+113261,,,no AI output was found in this conversation - all comments appear to be human - AI may be apparent in other commits,yes
+114006,accepted,disclosure requested,Author fixed a bug and the reviewer praised the catch and asked how it was found - author disclosed then that they passed the codebase through Claude Code Fable and it identified it - no response to that message and no 'Assisted-by' tag was attached to the commit message,no
+114096,accepted,tested,Author disclosed heavy use of Claude Sonnet 5 for fixes - tested it and ensured that it did correct the bug - maintainer explicitly welcomed the fix and thanked the author (did not mention the use of AI),no
+114433,accepted,implemented and rejected,Copilot gave 6 recommendations with 4 being explicitly accepted/fixed and 2 rejected due to a lack of necessity (there would be no overlap) and testing wouldn't be possible (code is static and didn't want to restructure it),no
+114736,ignored,unclear if applied,Copilot gave one recommendation (advises changing the docstring 'git revert' to 'git apply --reverse' to follow schema defaults) - no one responses to it - rest of conversation is human chatter regarding other things but the command is later changed with no mention to Copilot's comment,no
+115689,,,no AI output was found in this conversation - all comments appear to be human - AI may be apparent in other commits,yes
+115952,,,no AI output was found in this conversation - all comments appear to be human - AI may be apparent in other commits,yes
+117149,,,no AI output was found in this conversation - all comments appear to be human - AI may be apparent in other commits,yes
+117914,,,no AI output was found in this conversation - all comments appear to be human - AI may be apparent in other commits,yes
+118476,rejected,unclear if applied,Copilot gave two recommendations - one of which author rejected due to it already existing + linked to the tests.yaml file - other one is unclear if it was applied - pr marked as a hotfix since the build error was blocking LE audio development,no
+118653,nitpicked,outcome unclear,author disclosed assistance from Codex:GPT-5 and reported two improved benchmark but it's unclear how it was tested - reviewer stated change was direct and explanations were unnecessary - thread ends so unclear if explanations were trimmed,no
+119073,rejected,questioned suggestion, reviewer asked author about Copilot's truncation messages - offered 'long long' instead for truncation - author rejected due to the cost increase and settled on using 'long' instead,no
