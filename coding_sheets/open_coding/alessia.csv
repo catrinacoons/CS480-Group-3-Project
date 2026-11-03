@@ -2,12 +2,12 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 79642,ignored,code implementation/design discussion,"Copilot flagged index validation bug and doc errors. Humans mostly ignored Copilot suggestions and discussed design decisions amongst themselves.",False
 87595,ignored,grammar fixes,"Copilot flagged a lot of grammar issues with some code logic discussion. Humans mostly ignored Copilot suggestions and discussed design decisions amongst themselves.",False
 103255,ignored,implementation fixes,"Copilot makes one suggestion and it is ignored; humans discussed implementation fixes among themselves.",False
-105420,addressed,documentation/implementation fixes,"Copilot suggested documentation and code fixes, humans addressed 2 and rejected one.",
+105420,addressed,documentation/implementation fixes,"Copilot suggested documentation and code fixes, humans addressed 2 and rejected one.",False
 105778,no response,ai disclosure,"Contributor discloses AI use via Assisted-by tag; no human response to the AI-assisted fixes as thread ends shortly after.",False
 110787,no response,ai disclosure,"Contributor discloses AI use via Assisted-by tag; other contributor points to AI disclosure guidelines, which is fixed immediately. They then move on to design discussions unrelated to AI assistance.",False
 111235,false positive,n/a,"No GenAI involvement found",True
 111295,ignored,code implementation,"Copilot makes a suggestion; contributor only responds to code changes themselves (not Copilot directly); thread moves on without further acknowleging Copilot's comment.",False
-111719,addressed,documentation fixes,"Copilot makes suggestions about documentation; contributor directly responds to one of them.",
+111719,addressed,documentation fixes,"Copilot makes suggestions about documentation; contributor directly responds to one of them.",False
 111986,false positive,n/a,"Opening post with no discussion.",True
 112837,addressed,documentation/implementation fixes,"Contributor addresses and directly responds to Copilot's suggestions about documentation and code implementation.",False
 113138,ignored,formatting/documentation fixes,"Contributor ignores Copilot's suggestions but fixes something unrelated.",False
