@@ -1,26 +1,26 @@
 thread_number,primary_category,secondary_category,notes,not_genai_flag
-79642,,,,
-87595,,,,
-103255,,,,
-105420,,,,
-105778,,,,
-110787,,,,
-111235,,,,
-111295,,,,
-111719,,,,
-111986,,,,
-112837,,,,
-113138,,,,
-113239,,,,
-113261,,,,
-114006,,,,
-114096,,,,
-114433,,,,
-114736,,,,
-115689,,,,
-115952,,,,
-117149,,,,
-117914,,,,
-118476,,,,
-118653,,,,
-119073,,,,
+79642,ignored,code implementation/design discussion,"Copilot flagged index validation bug and doc errors. Humans mostly ignored Copilot suggestions and discussed design decisions amongst themselves.",False
+87595,ignored,grammar fixes,"Copilot flagged a lot of grammar issues with some code logic discussion. Humans mostly ignored Copilot suggestions and discussed design decisions amongst themselves.",False
+103255,ignored,implementation fixes,"Copilot makes one suggestion and it is ignored; humans discussed implementation fixes among themselves.",False
+105420,addressed,documentation/implementation fixes,"Copilot suggested documentation and code fixes, humans addressed 2 and rejected one.",False
+105778,no response,ai disclosure,"Contributor discloses AI use via Assisted-by tag; no human response to the AI-assisted fixes as thread ends shortly after.",False
+110787,no response,ai disclosure,"Contributor discloses AI use via Assisted-by tag; other contributor points to AI disclosure guidelines, which is fixed immediately. They then move on to design discussions unrelated to AI assistance.",False
+111235,false positive,n/a,"No GenAI involvement found",True
+111295,ignored,code implementation,"Copilot makes a suggestion; contributor only responds to code changes themselves (not Copilot directly); thread moves on without further acknowleging Copilot's comment.",False
+111719,addressed,documentation fixes,"Copilot makes suggestions about documentation; contributor directly responds to one of them.",False
+111986,false positive,n/a,"Opening post with no discussion.",True
+112837,addressed,documentation/implementation fixes,"Contributor addresses and directly responds to Copilot's suggestions about documentation and code implementation.",False
+113138,ignored,formatting/documentation fixes,"Contributor ignores Copilot's suggestions but fixes something unrelated.",False
+113239,ignored,documentation fixes,"Copilot suggests documentation fixes; no response from contributors.",False
+113261,false positive,n/a,"No GenAI involvement found.",True
+114006,addressed,ai disclosure,"Contributor discloses AI use via comment in thread.",False
+114096,addressed,ai disclosure,"Contributor discloses AI via Assisted-by tag; other contributor thanks him and moves on.",False
+114433,addressed,implementation fixes,"Copilot makes implementation fixes; contributor directly responds to those.",False
+114736,ignored,documentation fixes,"One copilot comment about documentation, ignored. ",False
+115689,false positive,n/a,"No GenAI involvement found. ",True
+115952,false positive,n/a,"No GenAI involvement found. ",True
+117149,false positive,n/a,"Opening post with no discussion.",True
+117914,false positive,n/a,"No GenAI involvement found.",True
+118476,addressed,code/testing implementation fixes,"One suggestion's ignored, one is rejected with reasoning.",False
+118653,no response,ai disclosure,"No response to Codex disclosure.",False
+119073,addressed,implementation fixes,"All Copilot suggestions are rejected with reasoning.",False 
