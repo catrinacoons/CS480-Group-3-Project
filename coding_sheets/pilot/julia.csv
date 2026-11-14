@@ -4,15 +4,15 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 93278,No Engagement,AI Reviewer,,
 93946,No Engagement,AI Reviewer,,
 95213,Accepted and Applied,AI Reviewer,,
-105635,,,"Assisted-by: Claude:claude-opus-4.6, the Codebook treats all commit-only AI as a False Positive, unsure if this falls into the rule.",yes
-106091,,,"Assisted-by: ChatGPT:gpt-5.4 evidence found in the linked commit, but this thread never mentions AI.",yes
-107439,,,"Assited-by: Claude:opus-4.7 evidence found in the linked commit, but this thread never mentions AI.",yes
+105635,,,"Assisted-by: Claude:claude-opus-4.6 found, but the Codebook treats all commit-only AI as a False Positive, unsure if this falls into the rule.",yes
+106091,,,"Assisted-by: ChatGPT:gpt-5.4 found in the linked commit, but this thread never mentions AI.",yes
+107439,,,"Assisted-by: Claude:opus-4.7 found in the linked commit, but this thread never mentions AI.",yes
 107638,Rejected or Rebutted,"AI Assisted, Disclosed",,
 108385,Rejected or Rebutted,AI Reviewer,,
 109230,Questioned or Discussed,AI Reviewer,,
 109578,Accepted and Applied,AI Reviewer,,
 109600,Accepted and Applied,AI Reviewer,,
-109903,,,"Assisted-by: GitHub Copilot:GPT-5.4 and GPT-5.3-Codex found in the linked commits, thread includes no mentions of AI.",yes
+109903,,,"Assisted-by: GitHub Copilot:GPT-5.4 and GPT-5.3-Codex found in the linked commits, but this thread never mentions AI.",yes
 109914,No Engagement,AI Reviewer,,
 110621,Questioned or Discussed,"AI Assisted, Disclosed",,
 111395,No Engagement,AI Reviewer,,
@@ -23,7 +23,7 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 113923,,,"Assisted-by: Claude:fable-5 found in the linked commits.",yes
 113982,,,"Assisted-by: Claude:fable-5 found in the linked commit.",yes
 114861,Accepted and Applied,AI Reviewer,,
-115260,No Engagemenet,AI Reviewer,,
+115260,No Engagement,AI Reviewer,,
 116652,Accepted and Applied,AI Reviewer,,
 117053,No Engagement,AI Reviewer,,
 117151,,,"Assisted-by: Claude:fable-5 in the linked commit.",yes
