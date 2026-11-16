@@ -1,0 +1,12 @@
+thread_number,field,coder_a,coder_b
+89293,Primary category,Accepted and Applied,No Engagement
+109230,Primary category,Questioned or Discussed,False Positive
+109600,Primary category,Accepted and Applied,No Engagement
+109903,Primary category,False Positive,No Engagement
+110621,Primary category,Questioned or Discussed,No Engagement
+112411,Primary category,Rejected or Rebutted,No Engagement
+112681,Primary category,Questioned or Discussed,No Engagement
+109230,Secondary category,AI reviewer,False Positive
+109903,Secondary category,False Positive,AI reviewer
+109230,not_genai_flag,no,yes
+109903,not_genai_flag,yes,no
