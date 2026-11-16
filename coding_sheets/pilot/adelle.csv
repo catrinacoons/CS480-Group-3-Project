@@ -1,31 +1,30 @@
 thread_number,primary_category,secondary_category,notes,not_genai_flag
-80643,,,,
-89293,,,,
-93278,,,,
-93946,,,,
-95213,,,,
-105635,,,,
-106091,,,,
-107439,,,,
-107638,,,,
-108385,,,,
-109230,,,,
-109578,,,,
-109600,,,,
-109903,,,,
-109914,,,,
-110621,,,,
-111395,,,,
-111551,,,,
-112411,,,,
-112681,,,,
-113852,,,,
-113923,,,,
-113982,,,,
-114861,,,,
-115260,,,,
-116652,,,,
-117053,,,,
-117151,,,,
-118215,,,,
-119206,,,,
+80643,Rejected or Rebutted,"AI Assisted, disclosed later",author  admitted to using AI after reviewer questioned how much they wrote themselves and the accuracy - maintainer rejected due to lack of detail and asked to write a code sample instead - author said they don't know how to contribute,no
+93278,No Engagement,AI Reviewer,Copilot left 2 suggestions - neither got a direct reply and last Copilot comment ended the thread,no
+93946,No Engagement,AI Reviewer,Copilot left 2 suggestions - no one replied or mentioned either - PR later closed for a different reason,no
+95213,Accepted and Applied,AI Reviewer,Copilot gave a recommendation - maintainer denied it - author argued it - maintainer agreed after reading it was misread,no
+105635,,,no AI output in this conversation - no replies - check PR commits for AI involvement,yes
+106091,,,no AI output in the conversation - author posts only - no reviewer replies - check PR commits for AI,yes
+107439,,,no AI output in the conversation - human review - check the PR commit for AI involvement,yes
+107638,Rejected or Rebutted,"AI Assisted, disclosed",author disclosed Claude Opus 4.7 - reviewer rejected parts of changes and reverted them and fixed them - no one mentioned AI,no
+108385,Rejected or Rebutted,"AI Reviewer,Copilot left 12 suggestions - author replied "Outside of this PR" to 2 of them - rest got no reply,no
+109230,Questioned or Discussed,AI Reviewer,reviewer quoted a Copilot comment from another PR - no replu in thread,no
+109578,Accepted and Applied,AI Reviewer,Copilot reviewed 5 rounds of corrections - author fixed most but rejected some - maintainer rebutted 2 recommendations - last Copilot recommendation recieved no reply,no
+109600,Accepted and Applied,AI Reviewer,Copilot gave 1 recommendation - author provided no reply,no
+109903,,,no AI output in this conversation - check PR commits for AI involvement,yes
+109914,No Engagement,AI Reviewer,Copilot left 4 recommendations between 2 rounds - noone replied - author rebased and asked for review,no
+110621,Questioned or Discussed,"AI Assisted, disclosed",author disclosed Cursor:Auto via an Assisted-by: tag - review suggested using a different thing - no reply or other mention of AI,no
+111395,No Engagement,AI Reviewer,Copilot gave 5 recommendations - no replies - author only addresed a human comment,no
+111551,,,no AI output in this conversation - onlu the opening post - no replies - check PR commits for AI invovlement,yes
+112411,Rejected or Rebutted,"AI Assisted, disclosed",author disclosed GitHub Copilot and Claude Sonnet - reviewers questioned test and author agreed to drop the commit - no mention of AI,no
+112681,Accepted and Applies,AI Reviewer,Copilot left 5 recommendations - no one replied to Copilot - reviewer gave same recommendation and author agreed to the fixes,no
+113852,No Engagement,"AI Assisted, disclosed",bug report where the author disclosed it being identified from Claude Sonnet 5 - no replies to the issue,no
+113923,,,no AI output - no replies - check the PR commits for an AI trailer,yes
+113982,,,no AI output - no replies - check the PR commits for an AI trailer,yes
+114861,Accepted and Applied,AI Reviewer,Copilot gave 2 recommendations - author explicitly applied both,no
+115260,No Engagement,AI Reviewer,Copilot provided a warning and no one replied - only item in thread,no
+116652,Accepted and Applied,AI Reviewer,Copilot identified 2 bugs - author replied "fixed" to one and stated that the other would be fixed seperately - outside of this PR,no
+117053,No Engagement,AI Reviewer,Copilot suggested 1 thing - no reply - last message in thread,no
+117151,,,no AI output - no replies - check the PR commits for an AI trailer,yes
+118215,Accepted and Applied,AI Reviewer,Copilot left 6 suggestions - reviewer asked author to fix one - rest got no reply,no
+119206,Accepted and Applied,AI Reviewer,author quoted the comment and replied "Done",no
