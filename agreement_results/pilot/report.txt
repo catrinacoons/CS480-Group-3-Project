@@ -1,0 +1,48 @@
+Agreement report: pilot set, julia vs catrina
+
+Field                 Threads   Raw agreement    Kappa  Strength
+Primary category           30           76.7%    0.693  substantial
+Secondary category         30           93.3%    0.887  almost perfect
+not_genai_flag             30           93.3%    0.830  almost perfect
+
+== Primary category ==
+Agreed on 23 of 30 threads.
+
+julia \ catrina         | No Engagemen | Accepted and | Questioned o | Rejected or  | False Positi
+--------------------------------------------------------------------------------------------------
+No Engagement           |            7 |            0 |            0 |            0 |            0
+Accepted and Applied    |            2 |            6 |            0 |            0 |            0
+Questioned or Discussed |            2 |            0 |            0 |            0 |            1
+Rejected or Rebutted    |            1 |            0 |            0 |            3 |            0
+False Positive          |            1 |            0 |            0 |            0 |            7
+
+Where disagreements cluster:
+  2 x  Accepted and Applied  <->  No Engagement
+  2 x  No Engagement  <->  Questioned or Discussed
+  1 x  False Positive  <->  Questioned or Discussed
+  1 x  False Positive  <->  No Engagement
+  1 x  No Engagement  <->  Rejected or Rebutted
+
+== Secondary category ==
+Agreed on 28 of 30 threads.
+
+julia \ catrina              |  AI reviewer | AI Assisted, | AI Assisted, | False Positi
+----------------------------------------------------------------------------------------
+AI reviewer                  |           16 |            0 |            0 |            1
+AI Assisted, disclosed       |            0 |            4 |            0 |            0
+AI Assisted, disclosed later |            0 |            0 |            1 |            0
+False Positive               |            1 |            0 |            0 |            7
+
+Where disagreements cluster:
+  2 x  AI reviewer  <->  False Positive
+
+== not_genai_flag ==
+Agreed on 28 of 30 threads.
+
+julia \ catrina  |          yes |           no
+----------------------------------------------
+yes              |            7 |            1
+no               |            1 |           21
+
+Where disagreements cluster:
+  2 x  no  <->  yes

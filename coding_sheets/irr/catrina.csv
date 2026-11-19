@@ -44,7 +44,7 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 114216,,,Assisted-by: Claude:opus-4.8 in linked commit,yes
 114271,Accepted and Applied,AI reviewer,,
 114677,No Engagement,AI reviewer,,
-114719,,"AI Assisted, disclosed",,
+114719,No Engagement,"AI Assisted, disclosed",,
 114961,,,Assisted-by: Claude:claude-sonnet-5 in linked commit,yes
 115604,,,Assisted-by: Claude:fable-5 in linked commit,yes
 115763,No Engagement,AI reviewer,,
