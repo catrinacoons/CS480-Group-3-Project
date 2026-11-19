@@ -1,0 +1,56 @@
+Agreement report: irr set, alessia vs catrina
+
+Field                 Threads   Raw agreement    Kappa  Strength
+Primary category           60           73.3%    0.651  substantial
+Secondary category         60           91.7%    0.860  almost perfect
+not_genai_flag             60           96.7%    0.918  almost perfect
+
+== Primary category ==
+Agreed on 44 of 60 threads.
+
+alessia \ catrina       | No Engagemen | Accepted and | Questioned o | Rejected or  | Disclosure R | Tested or Ve | False Positi
+--------------------------------------------------------------------------------------------------------------------------------
+No Engagement           |           16 |            0 |            4 |            0 |            0 |            1 |            1
+Accepted and Applied    |            1 |            6 |            0 |            3 |            0 |            1 |            0
+Questioned or Discussed |            0 |            0 |            1 |            0 |            0 |            0 |            0
+Rejected or Rebutted    |            1 |            0 |            2 |            5 |            1 |            0 |            0
+Disclosure Requested    |            0 |            0 |            0 |            0 |            0 |            0 |            0
+Tested or Verified      |            0 |            0 |            0 |            0 |            0 |            0 |            0
+False Positive          |            1 |            0 |            0 |            0 |            0 |            0 |           16
+
+Where disagreements cluster:
+  4 x  No Engagement  <->  Questioned or Discussed
+  3 x  Accepted and Applied  <->  Rejected or Rebutted
+  2 x  Questioned or Discussed  <->  Rejected or Rebutted
+  2 x  False Positive  <->  No Engagement
+  1 x  Disclosure Requested  <->  Rejected or Rebutted
+  1 x  No Engagement  <->  Tested or Verified
+  1 x  No Engagement  <->  Rejected or Rebutted
+  1 x  Accepted and Applied  <->  No Engagement
+  1 x  Accepted and Applied  <->  Tested or Verified
+
+== Secondary category ==
+Agreed on 55 of 60 threads.
+
+alessia \ catrina            |  AI reviewer | AI Assisted, | AI Assisted, | False Positi
+----------------------------------------------------------------------------------------
+AI reviewer                  |           31 |            2 |            0 |            0
+AI Assisted, disclosed       |            1 |            7 |            0 |            1
+AI Assisted, disclosed later |            0 |            0 |            1 |            0
+False Positive               |            1 |            0 |            0 |           16
+
+Where disagreements cluster:
+  3 x  AI Assisted, disclosed  <->  AI reviewer
+  1 x  AI Assisted, disclosed  <->  False Positive
+  1 x  AI reviewer  <->  False Positive
+
+== not_genai_flag ==
+Agreed on 58 of 60 threads.
+
+alessia \ catrina  |          yes |           no
+------------------------------------------------
+yes                |           16 |            1
+no                 |            1 |           42
+
+Where disagreements cluster:
+  2 x  no  <->  yes

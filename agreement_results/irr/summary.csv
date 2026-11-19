@@ -1,0 +1,4 @@
+field,threads,agreed,raw_agreement,cohens_kappa,strength
+Primary category,60,44,0.7333,0.6507,substantial
+Secondary category,60,55,0.9167,0.8598,almost perfect
+not_genai_flag,60,58,0.9667,0.9179,almost perfect
