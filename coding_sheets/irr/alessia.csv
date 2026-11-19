@@ -52,6 +52,7 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 116317,Accepted and Applied,"AI Assisted - Disclosed","one reviewer suggestion accepted (Done), one rejected with explanation",
 116799,,,"No AI involvement seen in thread",Yes
 116804,Accepted and Applied,AI Reviewer,"SPDX header suggestion accepted, ADC1/ADC2 concern rejected with hardware testing evidence",
+116838,,,"No AI involvement seen in thread",Yes
 117174,Accepted and Applied,AI Reviewer,,
 117323,,,"No AI involvement seen in thread",Yes
 117429,,,"No AI involvement seen in thread",Yes
