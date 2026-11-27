@@ -1,24 +1,24 @@
-thread_number,field,coder_a,coder_b
-88267,Primary category,Accepted and Applied,Rejected or Rebutted
-90965,Primary category,No Engagement,Questioned or Discussed
-96243,Primary category,Rejected or Rebutted,Questioned or Discussed
-96269,Primary category,Rejected or Rebutted,Disclosure Requested
-105397,Primary category,No Engagement,Tested or Verified
-108315,Primary category,Rejected or Rebutted,No Engagement
-111071,Primary category,No Engagement,Questioned or Discussed
-112057,Primary category,No Engagement,Questioned or Discussed
-112503,Primary category,Rejected or Rebutted,Questioned or Discussed
-114078,Primary category,No Engagement,Questioned or Discussed
-114961,Primary category,No Engagement,False Positive
-116317,Primary category,Accepted and Applied,No Engagement
-116804,Primary category,Accepted and Applied,Rejected or Rebutted
-117174,Primary category,Accepted and Applied,Rejected or Rebutted
-117462,Primary category,False Positive,No Engagement
-118544,Primary category,Accepted and Applied,Tested or Verified
-105397,Secondary category,AI reviewer,"AI Assisted, disclosed"
-108315,Secondary category,AI reviewer,"AI Assisted, disclosed"
-109953,Secondary category,"AI Assisted, disclosed",AI reviewer
-114961,Secondary category,"AI Assisted, disclosed",False Positive
-117462,Secondary category,False Positive,AI reviewer
-114961,not_genai_flag,no,yes
-117462,not_genai_flag,yes,no
+thread_number,field,coder_a,coder_b,adjudicator
+88267,Primary category,Accepted and Applied,Rejected or Rebutted,Accepted and Applied
+90965,Primary category,No Engagement,Questioned or Discussed,No Engagement
+96243,Primary category,Rejected or Rebutted,Questioned or Discussed,Rejected or Rebutted
+96269,Primary category,Rejected or Rebutted,Disclosure Requested,Rejected or Rebutted
+105397,Primary category,No Engagement,Tested or Verified,No Engagement
+108315,Primary category,Rejected or Rebutted,No Engagement,Rejected or Rebutted
+111071,Primary category,No Engagement,Questioned or Discussed,Questioned or Discussed
+112057,Primary category,No Engagement,Questioned or Discussed,Questioned or Discussed
+112503,Primary category,Rejected or Rebutted,Questioned or Discussed,Rejected or Rebutted
+114078,Primary category,No Engagement,Questioned or Discussed,No Engagement
+114961,Primary category,No Engagement,False Positive,No Engagement
+116317,Primary category,Accepted and Applied,No Engagement,Accepted and Applied
+116804,Primary category,Accepted and Applied,Rejected or Rebutted,Rejected or Rebutted
+117174,Primary category,Accepted and Applied,Rejected or Rebutted,Accepted and Applied
+117462,Primary category,False Positive,No Engagement,
+118544,Primary category,Accepted and Applied,Tested or Verified,Tested or Verified
+105397,Secondary category,AI reviewer,"AI Assisted, disclosed",AI Reviewer
+108315,Secondary category,AI reviewer,"AI Assisted, disclosed",AI Reviewer
+109953,Secondary category,"AI Assisted, disclosed",AI reviewer,AI Reviewer
+114961,Secondary category,"AI Assisted, disclosed",False Positive, AI Assisted - Disclosed
+117462,Secondary category,False Positive,AI reviewer,
+114961,not_genai_flag,no,yes,
+117462,not_genai_flag,yes,no,Yes
