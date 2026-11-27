@@ -3,7 +3,7 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 80799,No Engagement,AI reviewer,,
 86815,No Engagement,AI reviewer,,
 89410,Accepted and Applied,AI reviewer,,
-90787,,,possible false positive from the term generated being used in regards to a table,yes
+90787,,,possible false positive from the term generated being used in regards to a table,Yes
 95329,No Engagement,AI reviewer,,
 97316,No Engagement,AI reviewer,,
 100030,Rejected or Rebutted,AI reviewer,"Multiple responses to AI reviewer, one accept, one question,four rebuttals/dismissals",
@@ -11,10 +11,10 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 101756,No Engagement,AI reviewer,,
 102856,Rejected or Rebutted,AI reviewer,,
 104627,Rejected or Rebutted,AI reviewer,,
-105801,,,Assisted-by: Claude:claude-sonnet-4-6 in linked commit,yes
+105801,,,Assisted-by: Claude:claude-sonnet-4-6 in linked commit,Yes
 106952,Accepted and Applied,AI reviewer,,
 107500,No Engagement,"AI Assisted, disclosed",contributor mentions ai use to generate a script to find more bugs similar to the one in the thread,
-108705,,,Assisted-by: Claude:claude-opus-4.7 in linked commit,yes
+108705,,,Assisted-by: Claude:claude-opus-4.7 in linked commit,Yes
 109213,No Engagement,"AI Assisted, disclosed",,
 109528,Questioned or Discussed,"AI Assisted, disclosed","the author appears to question their own commits, I assume they're responding to the ai output",
 110206,Accepted and Applied,AI reviewer,,
@@ -22,25 +22,25 @@ thread_number,primary_category,secondary_category,notes,not_genai_flag
 111574,No Engagement,AI reviewer,,
 112093,Questioned or Discussed,AI reviewer,,
 112306,No Engagement,AI reviewer,,
-112720,,,Assisted-by: Claude:claude-opus-4-8 in linked commit,yes
+112720,,,Assisted-by: Claude:claude-opus-4-8 in linked commit,Yes
 112893,Rejected or Rebutted,AI reviewer,,
 113264,Rejected or Rebutted,"AI Assisted, disclosed",,
-113481,,,Assisted-by: Claude:claude-opus-4-8 in linked commit,yes
+113481,,,Assisted-by: Claude:claude-opus-4-8 in linked commit,Yes
 113797,Rejected or Rebutted,AI reviewer,"multiple responses, two accepted, three rejected",
 113952,Accepted and Applied,AI reviewer,,
-114056,,,Assisted-by: Claude:opus-4.8 in linked commit,yes
+114056,,,Assisted-by: Claude:opus-4.8 in linked commit,Yes
 114450,No Engagement,AI reviewer,,
 114785,No Engagement,"AI Assisted, disclosed",,
-115174,,,Assisted-by: Claude:claude-fable-5 in linked commit,yes
+115174,,,Assisted-by: Claude:claude-fable-5 in linked commit,Yes
 115395,No Engagement,"AI Assisted, disclosed",,
-115668,,,Assisted-by: Claude:claude-opus-4-8 in linked commit,
+115668,,,Assisted-by: Claude:claude-opus-4-8 in linked commit,Yes
 115808,Accepted and Applied,AI reviewer,,
 116211,Accepted and Applied,AI reviewer,,
-116393,,,Assisted-by: OpenAI Codex in linked commit,yes
-116714,,,Assisted-by: Claude:opus-5 in linked commit,yes
+116393,,,Assisted-by: OpenAI Codex in linked commit,Yes
+116714,,,Assisted-by: Claude:opus-5 in linked commit,Yes
 116849,No Engagement,"AI Assisted, disclosed",,
 117110,Rejected or Rebutted,AI reviewer,,
-117155,,,Assisted-by: Claude:fable-5 in linked commit,yes
+117155,,,Assisted-by: Claude:fable-5 in linked commit,Yes
 117456,No Engagement,"AI Assisted, disclosed",,
 118045,Rejected or Rebutted,AI reviewer,"multiple responses, one to accept and two to rebut",
 118388,No Engagement,"AI Assisted, disclosed",,
